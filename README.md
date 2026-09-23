@@ -24,6 +24,7 @@ py -3.14 -m venv .venv
 .venv\Scripts\python.exe run.py --bars              # daily bars (resumable)
 .venv\Scripts\python.exe run.py --scan              # indicators + patterns
 .venv\Scripts\python.exe run.py --serve             # the website, http://127.0.0.1:8050/
+.venv\Scripts\python.exe run.py --live              # live prices during the session, daily update after
 ```
 
 ## Status
@@ -34,9 +35,12 @@ Built:
 - the stock universe, with daily bars;
 - the scan: indicators, candlesticks and chart patterns;
 - the local website: screener, chart per stock with the pattern drawn and its rule
-  checklist, pattern glossary, and data status.
+  checklist, pattern glossary, and data status;
+- live prices every few minutes during the session (delayed), with patterns still
+  forming whose breakout level the price is crossing. Such a crossing is not final
+  until the close.
 
-Still to come: more Claude Code skills and agents, and scheduling.
+Still to come: more Claude Code skills and agents.
 
 ## Not financial advice
 

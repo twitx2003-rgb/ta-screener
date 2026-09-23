@@ -88,6 +88,9 @@
           {% endfor %}
         </div>
         {{ number("within", "פריצה או אות בימי המסחר האחרונים (מספר ימים)", step="1", placeholder="5") }}
+        <div class="checks" style="margin-bottom: 8px">
+          <label title="לפי המחירים החיים; פריצה נקבעת רק בסגירה"><input type="checkbox" name="live" value="cross" {% if query.live == "cross" %}checked{% endif %}> רק מניות שחוצות עכשיו קו פריצה</label>
+        </div>
         <details class="group" {% if query.patterns|select("in", rules.chart)|list %}open{% endif %}>
           <summary>תבניות גרף</summary>
           <div class="checks">{{ pattern_boxes(rules.chart) }}</div>
@@ -134,6 +137,7 @@
 
   <section aria-label="תוצאות">
     <div class="presets" aria-label="סינונים מהירים">
+      {% if live and live.active %}<a href="/?live=cross">⚡ חוצות עכשיו קו פריצה</a>{% endif %}
       <a href="/?family=chart&amp;status=breakout&amp;within=5&amp;sort=age">פריצות מתבניות גרף, 5 ימים אחרונים</a>
       <a href="/?family=chart&amp;status=forming">תבניות גרף בבנייה</a>
       <a href="/?family=candle&amp;direction=bullish&amp;within=1">נרות שוריים ביום האחרון</a>
@@ -186,6 +190,10 @@
             <td><a class="tick" href="{{ row.symbol|symbol_url }}">{{ row.ticker }}</a><span class="co" title="{{ row.description or '' }}">{{ row.description or row.exchange }}</span></td>
             <td>
               <div class="matches">
+              {% for c in row.crossings %}
+                <a class="chip cross {{ 'up' if c.direction == 'bullish' else 'down' }}" href="{{ row.symbol|symbol_url }}#p-{{ c.pattern }}"
+                   title="המחיר החי {{ c.price|price }} עבר את קו הפריצה {{ c.level|price }}. זו עדיין לא פריצה: היא נקבעת רק בסגירה">⚡ {{ c.name_he }} · חוצה עכשיו</a>
+              {% endfor %}
               {% for m in row.matches %}
                 <a class="chip {{ 'up' if m.direction == 'bullish' else ('down' if m.direction == 'bearish' else '') }}"
                    href="{{ row.symbol|symbol_url }}#p-{{ m.pattern }}"
@@ -194,7 +202,7 @@
               </div>
             </td>
             <td class="n"><span class="num">{{ row.market_cap|money }}</span></td>
-            <td class="n"><span class="num">{{ row.close|price }}</span></td>
+            <td class="n"><span class="num">{{ row.close|price }}</span>{% if row.live %}<span class="live-dot" title="מחיר חי (באיחור)"></span>{% endif %}</td>
             <td class="n"><span class="num {{ row.change_1d_pct|sign }}">{{ row.change_1d_pct|pct }}</span></td>
             <td class="n"><span class="num {{ row.change_20d_pct|sign }}">{{ row.change_20d_pct|pct }}</span></td>
             <td class="n"><span class="num">{{ row.rsi14|num(1) }}</span></td>
@@ -221,7 +229,7 @@
     </nav>
     {% endif %}
     {% else %}
-    <div class="table-wrap"><p class="empty">אין מניות שעונות על כל הסינונים.</p></div>
+    <div class="table-wrap"><p class="empty">{% if query.live and not (live and live.active) %}אין כרגע מחירים חיים (השוק סגור, או שהעדכון לא רץ), ולכן אין חציות לסנן.{% else %}אין מניות שעונות על כל הסינונים.{% endif %}</p></div>
     {% endif %}
   </section>
 </div>

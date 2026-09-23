@@ -6,6 +6,8 @@
     data/bars/status.json                last outcome per symbol
     data/scans/<YYYY-MM-DD>/             one scan per last completed session:
         indicators.parquet (INDICATORS), patterns.parquet (PATTERNS), scan.json
+    data/quotes/latest.parquet           the newest live quotes (QUOTES), latest.json
+    data/quotes/live_state.json          what the live loop last did (the daily update)
 
 Writes go to a temporary file first and replace the target, so an interrupted
 run never leaves half a file behind.
@@ -21,7 +23,7 @@ from typing import Any
 
 import pandas as pd
 
-from .contracts import BARS, INDICATORS, PATTERNS, UNIVERSE, canonical_timestamps
+from .contracts import BARS, INDICATORS, PATTERNS, QUOTES, UNIVERSE, canonical_timestamps
 
 
 def _atomic_write_bytes(path: Path, write) -> None:
@@ -47,6 +49,7 @@ class Store:
         self.universe_dir = self.root / "universe"
         self.bars_dir = self.root / "bars"
         self.scans_dir = self.root / "scans"
+        self.quotes_dir = self.root / "quotes"
 
     # ------------------------------------------------------------- universe
     def write_universe(self, day: date, frame: pd.DataFrame, summary: dict[str, Any]) -> Path:
@@ -132,3 +135,24 @@ class Store:
         patterns = PATTERNS.validate(pd.read_parquet(folder / "patterns.parquet"))
         summary = json.loads((folder / "scan.json").read_text(encoding="utf-8"))
         return indicators, patterns, summary
+
+    # --------------------------------------------------------------- quotes
+    def write_quotes(self, frame: pd.DataFrame, summary: dict[str, Any]) -> None:
+        QUOTES.validate(frame)
+        _atomic_write_bytes(self.quotes_dir / "latest.parquet",
+                            lambda tmp: frame.to_parquet(tmp, index=False))
+        _write_json(self.quotes_dir / "latest.json", summary)     # last: marks them complete
+
+    def read_quotes(self) -> tuple[pd.DataFrame, dict[str, Any]] | None:
+        meta = self.quotes_dir / "latest.json"
+        if not meta.exists():
+            return None
+        frame = QUOTES.validate(pd.read_parquet(self.quotes_dir / "latest.parquet"))
+        return frame, json.loads(meta.read_text(encoding="utf-8"))
+
+    def read_live_state(self) -> dict[str, Any]:
+        path = self.quotes_dir / "live_state.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    def write_live_state(self, state: dict[str, Any]) -> None:
+        _write_json(self.quotes_dir / "live_state.json", state)

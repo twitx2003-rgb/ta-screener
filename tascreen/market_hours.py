@@ -181,3 +181,37 @@ def next_sessions(after: date, count: int) -> list[date]:
         if is_trading_day(day):
             out.append(day)
     return out
+
+
+SESSION_OPEN = time(9, 30)
+SESSION_CLOSE = time(16, 0)
+
+
+def session_bounds(day: date, market_tz: str) -> tuple[datetime, datetime]:
+    """Open and close of a trading day's regular session, as aware datetimes."""
+    tz = ZoneInfo(market_tz)
+    close = us_early_close(day) or SESSION_CLOSE
+    return datetime.combine(day, SESSION_OPEN, tzinfo=tz), datetime.combine(day, close, tzinfo=tz)
+
+
+def live_session(now: datetime, *, market_tz: str, after_close_minutes: float) -> date | None:
+    """The trading day whose session is running at `now`, or None.
+
+    The window runs `after_close_minutes` past the close: quotes are delayed
+    (TradingView: 15 minutes or more), so the day's last prices arrive late."""
+    day = now.astimezone(ZoneInfo(market_tz)).date()
+    if not is_trading_day(day):
+        return None
+    start, end = session_bounds(day, market_tz)
+    return day if start <= now < end + timedelta(minutes=after_close_minutes) else None
+
+
+def next_open(now: datetime, *, market_tz: str) -> datetime:
+    """The next regular-session open after `now`."""
+    day = now.astimezone(ZoneInfo(market_tz)).date()
+    while True:
+        if is_trading_day(day):
+            start, _ = session_bounds(day, market_tz)
+            if start > now:
+                return start
+        day += timedelta(days=1)

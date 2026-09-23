@@ -70,7 +70,7 @@ def merge_bars(stored: pd.DataFrame, fresh: pd.DataFrame,
 @dataclass
 class SymbolResult:
     symbol: str
-    status: str                  # new | updated | refetched | up_to_date | stale | failed
+    status: str                  # new | updated | refetched | up_to_date | stale | failed | deferred
     last_date: str | None = None
     rows: int = 0
     calls: int = 0
@@ -88,6 +88,9 @@ class BarsJob:
     market: MarketSettings
     delays: tuple[float, ...]
     now: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # No new fetch starts after this moment (the live loop's nightly update stops
+    # before the next open); the rest are reported as "deferred".
+    stop_at: datetime | None = None
 
     @property
     def target(self) -> date:
@@ -147,6 +150,8 @@ class BarsJob:
 
         async def one(symbol: str) -> SymbolResult:
             async with gate:
+                if self.stop_at is not None and datetime.now(timezone.utc) >= self.stop_at:
+                    return SymbolResult(symbol, "deferred", note="stopped at the deadline")
                 result = await self.update_symbol(session, symbol)
                 if result.calls and self.bars.min_interval_s:
                     await asyncio.sleep(self.bars.min_interval_s)
@@ -172,7 +177,9 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
                 done.append(SymbolResult(symbol, "up_to_date", last, rows))
             else:
                 need.append(symbol)
-        if need:
+        if need and job.stop_at is not None and datetime.now(timezone.utc) >= job.stop_at:
+            done += [SymbolResult(s, "deferred", note="stopped at the deadline") for s in need]
+        elif need:
             done += client.with_session(lambda session, need=need: job.run_batch(session, need))
         checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         for r in done:
@@ -201,6 +208,7 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
         "failed": {r.symbol: r.note for r in results if r.status == "failed"},
         "stale": {r.symbol: r.note for r in results if r.status == "stale"},
         "refetched": {r.symbol: r.note for r in results if r.status == "refetched"},
+        "deferred": sum(r.status == "deferred" for r in results),
     }
 
 

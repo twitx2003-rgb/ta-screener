@@ -27,6 +27,7 @@ DIRECTIONS = ("bullish", "bearish")
 STATUSES = ("forming", "breakout", "busted", "signal")
 SIDES = ("above", "below")
 CROSSES = ("golden", "death")
+LIVE = ("cross",)
 
 # sort key -> (column, default order, Hebrew label)
 SORTS = {
@@ -80,6 +81,7 @@ class Query:
     atr_max: float | None = None
     dollar_vol_min: float | None = None
     cross: str = ""
+    live: str = ""                 # "cross": only stocks crossing a breakout level now
     sort: str = DEFAULT_SORT
     order: str = ""
     page: int = 1
@@ -151,6 +153,8 @@ class Query:
                             self.url(**{name: ""})))
         if self.cross:
             out.append(("חציית זהב" if self.cross == "golden" else "חציית מוות", self.url(cross="")))
+        if self.live:
+            out.append(("חוצות עכשיו קו פריצה", self.url(live="")))
         for name, (label, *_rest) in NUMBERS.items():
             value = getattr(self, name)
             if value is not None:
@@ -217,6 +221,7 @@ def parse_query(params: Mapping, rules: Rules) -> Query:
         sma50=choice("sma50", SIDES, "SMA50"),
         sma200=choice("sma200", SIDES, "SMA200"),
         cross=choice("cross", CROSSES, "חצייה"),
+        live=choice("live", LIVE, "מחירים חיים"),
         sort=sort, order=order, page=page,
         errors=tuple(errors),
         **numbers,
@@ -298,8 +303,14 @@ MATCH_FIELDS = ("pattern", "name_he", "family", "direction", "status", "age", "e
                 "breakout_price", "target")
 
 
-def apply(view: ScanView, q: Query, per_page: int) -> Result:
+def apply(view: ScanView, q: Query, per_page: int,
+          crossings: dict[str, list[dict]] | None = None) -> Result:
+    """`crossings`: symbol -> live crossings (see web.data.live_for); with
+    `live=cross` only those stocks pass, and every row carries its own."""
+    crossings = crossings or {}
     stocks = view.stocks.loc[_stock_mask(view.stocks, q)]
+    if q.live == "cross":
+        stocks = stocks.loc[stocks["symbol"].isin(list(crossings))]
     det = view.detections
     matched = det.loc[_detection_mask(det, q)] if q.pattern_filter else det
     matched = matched.loc[matched["symbol"].isin(stocks["symbol"])]
@@ -322,5 +333,6 @@ def apply(view: ScanView, q: Query, per_page: int) -> Result:
     rows = []
     for row in shown.drop(columns="_age").to_dict("records"):
         row["matches"] = by_symbol.get(row["symbol"], [])
+        row["crossings"] = crossings.get(row["symbol"], [])
         rows.append(row)
     return Result(rows=rows, total=total, detections=int(len(matched)), page=page, pages=pages)

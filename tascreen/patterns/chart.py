@@ -89,7 +89,11 @@ def _status(s: Series, end_i: int, breakout_i: int | None, busted_i: int | None)
 
 def _new(s: Series, spec: PatternRules, direction: str, status: str, start_i: int, end_i: int,
          checks: Checks, pivots: list[Pivot], labels: list[str], breakout_i: int | None,
-         breakout_price: float, height: float, target: float, lines: list[dict]) -> Detection:
+         breakout_price: float, height: float, target: float, lines: list[dict],
+         triggers: tuple[float, float] = (math.nan, math.nan)) -> Detection:
+    """`triggers` = (up, down): the levels a close must cross in the session after the
+    last bar; kept only while the pattern is still forming."""
+    up, down = triggers if status == "forming" else (math.nan, math.nan)
     return Detection(
         symbol=s.symbol, family="chart", pattern=spec.key, direction=direction, status=status,
         start=s.dates.iloc[start_i], end=s.dates.iloc[end_i],
@@ -97,7 +101,8 @@ def _new(s: Series, spec: PatternRules, direction: str, status: str, start_i: in
         breakout_price=breakout_price, height=height, target=target,
         volume_trend=volume_trend(s.v.iloc[start_i:end_i + 1]),
         points=[{"date": s.date(p.i), "price": p.price, "label": lab} for p, lab in zip(pivots, labels)],
-        lines=lines, checks=checks.items)
+        lines=lines, checks=checks.items,
+        trigger_up=float(up), trigger_down=float(down))
 
 
 def _line(s: Series, i1: int, y1: float, i2: int, y2: float, label: str) -> dict:
@@ -155,7 +160,8 @@ def _double(s: Series, bottom: bool) -> list[tuple[Detection, frozenset]]:
         det = _new(s, spec, spec.direction, status, a.i, b.i, ck, [a, m, b],
                    ["שפל 1", "שיא ביניים", "שפל 2"] if bottom else ["פסגה 1", "שפל ביניים", "פסגה 2"],
                    brk, m.price, height, m.price + height if bottom else m.price - height,
-                   [_line(s, m.i, m.price, end_line, m.price, "קו אישור")])
+                   [_line(s, m.i, m.price, end_line, m.price, "קו אישור")],
+                   (m.price, math.nan) if bottom else (math.nan, m.price))
         out.append((det, frozenset((a.i, m.i, b.i))))
     return out
 
@@ -209,7 +215,8 @@ def _triple(s: Series, bottom: bool) -> list[tuple[Detection, frozenset]]:
                  ["פסגה 1", "שפל", "פסגה 2", "שפל", "פסגה 3"]
         det = _new(s, spec, spec.direction, status, seq[0].i, seq[4].i, ck, seq, labels, brk, level,
                    height, level + height if bottom else level - height,
-                   [_line(s, seq[1].i, level, brk if brk is not None else s.last, level, "קו אישור")])
+                   [_line(s, seq[1].i, level, brk if brk is not None else s.last, level, "קו אישור")],
+                   (level, math.nan) if bottom else (math.nan, level))
         out.append((det, frozenset(p.i for p in seq)))
     return out
 
@@ -279,7 +286,8 @@ def _head_shoulders(s: Series, top: bool) -> list[tuple[Detection, frozenset]]:
         labels = ["כתף שמאל", "בית שחי", "ראש", "בית שחי", "כתף ימין"]
         det = _new(s, spec, spec.direction, status, ls.i, rs.i, ck, [ls, a1, head, a2, rs], labels,
                    brk, brk_price, height, brk_price - height if top else brk_price + height,
-                   [_line(s, a1.i, a1.price, stop, neck(stop), "קו צוואר")])
+                   [_line(s, a1.i, a1.price, stop, neck(stop), "קו צוואר")],
+                   (math.nan, level(s.last + 1)) if top else (level(s.last + 1), math.nan))
         out.append((det, frozenset(p.i for p in (ls, a1, head, a2, rs))))
     return out
 
@@ -399,7 +407,8 @@ def _trendline_candidate(s: Series, seq: list[Pivot]) -> tuple[Detection, frozen
     labels = ["" for _ in seq]
     det = _new(s, spec, direction, status, i0, i1, ck, seq, labels, brk, breakout_price, height,
                target, [_line(s, i0, top(i0), end_x, top(end_x), "קו עליון"),
-                        _line(s, i0, bot(i0), end_x, bot(end_x), "קו תחתון")])
+                        _line(s, i0, bot(i0), end_x, bot(end_x), "קו תחתון")],
+               (top(s.last + 1), bot(s.last + 1)) if apex is None or s.last + 1 <= apex else (math.nan, math.nan))
     return det, frozenset(p.i for p in seq)
 
 
@@ -519,7 +528,8 @@ def _flags(s: Series) -> list[tuple[Detection, frozenset]]:
                     det = _new(s, spec, direction, status, ps, e, ck, pts, ["תחילת התורן", "ראש התורן"],
                                brk, bp, pole_height, target,
                                [_line(s, p + 1, upper(p + 1), end_x, upper(end_x), "קו עליון"),
-                                _line(s, p + 1, lower(p + 1), end_x, lower(end_x), "קו תחתון")])
+                                _line(s, p + 1, lower(p + 1), end_x, lower(end_x), "קו תחתון")],
+                               (upper(s.last + 1), lower(s.last + 1)))
                     out.append((det, frozenset({ps, p})))
                     break
     return out
@@ -566,7 +576,8 @@ def _high_tight_flag(s: Series) -> list[tuple[Detection, frozenset]]:
         det = _new(s, spec, "bullish", status, lo_i, cons_end, ck,
                    [Pivot(lo_i, float(s.l[lo_i]), "L"), Pivot(p, float(s.h[p]), "H")],
                    ["תחילת העלייה", "שיא"], brk, float(s.h[p]), height, math.nan,
-                   [_line(s, p, s.h[p], brk if brk is not None else s.last, s.h[p], "קו אישור")])
+                   [_line(s, p, s.h[p], brk if brk is not None else s.last, s.h[p], "קו אישור")],
+                   (float(s.h[p]), math.nan))
         out.append((det, frozenset({lo_i, p})))
     return out
 
@@ -638,7 +649,8 @@ def _cup(s: Series) -> list[tuple[Detection, frozenset]]:
         det = _new(s, spec, "bullish", status, left.i, handle_end, ck,
                    [left, Pivot(bottom_i, bottom, "L"), right], ["שפה שמאלית", "תחתית הספל", "שפה ימנית"],
                    brk, right.price, height, right.price + height,
-                   [_line(s, right.i, right.price, brk if brk is not None else s.last, right.price, "קו אישור")])
+                   [_line(s, right.i, right.price, brk if brk is not None else s.last, right.price, "קו אישור")],
+                   (right.price, math.nan))
         out.append((det, frozenset({left.i, bottom_i, right.i})))
     return out
 

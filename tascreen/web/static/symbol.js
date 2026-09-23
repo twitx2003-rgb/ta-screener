@@ -106,10 +106,18 @@
     }
     marks.sort((x, y) => (x.time < y.time ? -1 : x.time > y.time ? 1 : 0));
     markers.setMarkers(marks);
-    if (det.breakout_price != null && det.family === "chart") {
+    if (det.breakout_price != null && det.family === "chart" && det.status !== "forming") {
       overlay.priceLines.push(candles.createPriceLine({
         price: det.breakout_price, color: c.accent, lineWidth: 1, lineStyle: LC.LineStyle.Dashed,
         axisLabelVisible: true, title: "פריצה" }));
+    }
+    if (det.status === "forming") {        // the level a close must cross next session
+      if (det.trigger_up != null) overlay.priceLines.push(candles.createPriceLine({
+        price: det.trigger_up, color: c.up, lineWidth: 1, lineStyle: LC.LineStyle.Dashed,
+        axisLabelVisible: true, title: "פריצה מעל" }));
+      if (det.trigger_down != null) overlay.priceLines.push(candles.createPriceLine({
+        price: det.trigger_down, color: c.down, lineWidth: 1, lineStyle: LC.LineStyle.Dashed,
+        axisLabelVisible: true, title: "פריצה מתחת" }));
     }
     if (det.target != null) {
       overlay.priceLines.push(candles.createPriceLine({

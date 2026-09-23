@@ -33,6 +33,17 @@
     {% if nobars %}<span class="muted">ל-<span class="num">{{ "{:,}".format(nobars) }}</span> מניות עדיין אין נרות (<a href="/status">פרטים</a>)</span>{% endif %}
   </div>
   {% endif %}
+  {% if live and live.active %}
+  <div class="banner live">
+    <span><span class="live-dot" aria-hidden="true"></span> מחירים חיים: עודכנו ב-<strong class="num">{{ live.quotes.fetched_at|clock }}</strong> שעון ישראל, באיחור של 15 דקות לפחות</span>
+    {% set n = live.crossings|length %}
+    {% if n == 1 %}<a href="/?live=cross">מניה אחת חוצה עכשיו קו פריצה</a>
+    {% elif n %}<a href="/?live=cross"><span class="num">{{ n }}</span> מניות חוצות עכשיו קו פריצה</a>{% endif %}
+    <span class="muted">חציית קו במהלך היום היא עדיין לא פריצה: פריצה נקבעת רק בסגירה</span>
+  </div>
+  {% elif live and live.stale %}
+  <div class="banner warn">המחירים החיים לא התעדכנו מאז <span class="num">{{ live.quotes.fetched_at|clock }}</span>, ולכן המחירים בטבלה הם של הסגירה האחרונה.{% if not public %} לעדכון: <span class="mono">run.py --live</span>{% endif %}</div>
+  {% endif %}
   {% if stale_rules %}
   <div class="banner warn">הקובץ rules.yaml השתנה מאז הסריקה, ולכן התוצאות לפי הכללים הקודמים. להרצה מחדש: <span class="mono">run.py --scan</span></div>
   {% endif %}
@@ -52,6 +63,33 @@
     document.dispatchEvent(new Event("themechange"));
   });
 </script>
+<script>
+  // Keep the reading position across the automatic refresh below.
+  try {
+    const key = "scrollY:" + location.href, y = sessionStorage.getItem(key);
+    if (y !== null) { sessionStorage.removeItem(key); addEventListener("load", () => scrollTo(0, +y)); }
+  } catch (e) {}
+</script>
+{% if live %}
+<script>
+  // New live prices: reload the page (not while the visitor is typing in a filter).
+  (function () {
+    const shown = {{ (live.quotes.summary.fetched_at or "")|tojson }};
+    setInterval(async () => {
+      const el = document.activeElement;
+      if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
+      try {
+        const r = await fetch("/api/live", { cache: "no-store" });
+        const d = await r.json();
+        if (d.fetched_at && d.fetched_at !== shown) {
+          try { sessionStorage.setItem("scrollY:" + location.href, String(scrollY)); } catch (e) {}
+          location.reload();
+        }
+      } catch (e) {}
+    }, 60000);
+  })();
+</script>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

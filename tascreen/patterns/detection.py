@@ -51,6 +51,11 @@ class Detection:
     height: float = math.nan
     target: float = math.nan      # classic full-height measure rule — not a forecast
     volume_trend: str = ""        # down | up | "" — informational, not a rule
+    # Still forming only: the price a close must go above (up) or below (down) in
+    # the next session to be a breakout. The website compares live prices with
+    # these; a crossing during the session is not a breakout until the close.
+    trigger_up: float = math.nan
+    trigger_down: float = math.nan
     points: list[dict] = field(default_factory=list)    # {date, price, label}
     lines: list[dict] = field(default_factory=list)     # {x1, y1, x2, y2, label}
     checks: list[Check] = field(default_factory=list)
@@ -63,6 +68,7 @@ class Detection:
             "breakout_date": self.breakout_date,
             "breakout_price": self.breakout_price, "height": self.height,
             "target": self.target, "volume_trend": self.volume_trend,
+            "trigger_up": self.trigger_up, "trigger_down": self.trigger_down,
             "points_json": json.dumps(self.points, default=str),
             "lines_json": json.dumps(self.lines, default=str),
             "checks_json": json.dumps([c.as_dict() for c in self.checks], ensure_ascii=False,

@@ -63,6 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scan-symbol", metavar="SYMBOL",
                         help="Scan one symbol from stored bars and print every detection with "
                              "its rule checklist (e.g. NASDAQ:NVDA)")
+    parser.add_argument("--quotes", action="store_true",
+                        help="Fetch every stock's last price once from TradingView's screener "
+                             "-> data/quotes/ (the website shows them and live pattern crossings)")
+    parser.add_argument("--live", action="store_true",
+                        help="Keep running: quotes every live.interval_minutes during the US "
+                             "session, then the daily update (universe, bars, scan) after the close")
     parser.add_argument("--serve", action="store_true",
                         help="Open the website on http://127.0.0.1:<web.port>/ (this computer only; "
                              "reads the newest scan, never calls TradingView)")
@@ -206,7 +212,7 @@ def usable_universe(settings, *, max_age_days: float | None = None):
     return day, frame
 
 
-def bars(settings, limit: int | None) -> int:
+def bars(settings, limit: int | None, stop_at=None) -> int:
     from tascreen.bars import BarsJob, update_all
     from tascreen.store import Store
 
@@ -216,7 +222,7 @@ def bars(settings, limit: int | None) -> int:
     day, frame = found
     symbols = frame["symbol"].tolist()[:limit] if limit else frame["symbol"].tolist()
     job = BarsJob(Store(settings.data_dir), settings.bars, settings.market,
-                  settings.tradingview.rate_limit_delays)
+                  settings.tradingview.rate_limit_delays, stop_at=stop_at)
     print(f"\nBars for {len(symbols)} symbols (universe of {day}); "
           f"last completed session: {job.target}\n")
     report = update_all(make_tradingview(settings), job, symbols)
@@ -224,6 +230,8 @@ def bars(settings, limit: int | None) -> int:
         json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nDone in {report['seconds']:.0f} s, {report['calls']} calls "
           f"({report['seconds_per_call']} s/call): {report['counts']}")
+    if report["deferred"]:
+        print(f"  deferred to the next run (deadline {stop_at}): {report['deferred']}")
     for kind in ("failed", "stale", "refetched"):
         if report[kind]:
             print(f"  {kind} ({len(report[kind])}):")
@@ -346,7 +354,84 @@ def serve(settings) -> int:
     return 0
 
 
-def update(settings, limit: int | None) -> int:
+def refresh_quotes(settings, client=None) -> dict:
+    from datetime import datetime, timezone
+
+    from tascreen.market_hours import live_session
+    from tascreen.quotes import fetch_quotes
+    from tascreen.store import Store
+
+    client = client or make_tradingview(settings)
+    frame, summary = client.with_session(lambda session: fetch_quotes(
+        session, settings.universe, delays=settings.tradingview.rate_limit_delays))
+    session = live_session(datetime.now(timezone.utc), market_tz=settings.market.timezone,
+                           after_close_minutes=settings.live.after_close_minutes)
+    summary["session"] = session.isoformat() if session else None
+    Store(settings.data_dir).write_quotes(frame, summary)
+    return summary
+
+
+def quotes(settings) -> int:
+    summary = refresh_quotes(settings)
+    print(f"\nQuotes: {summary['rows']} stocks in {summary['seconds']:.0f} s "
+          f"({summary['calls']} calls)"
+          + ("" if summary["complete"] else f", {summary['missing']} missed (moved across a band edge)"))
+    print(f"  session: {summary['session'] or 'none - the market is closed; prices are the last close'}\n")
+    return 0
+
+
+def live(settings) -> int:
+    import time as clock
+    from datetime import datetime, timedelta, timezone
+
+    from tascreen.market_hours import live_session, next_open
+    from tascreen.store import Store
+    from tascreen.tv.data import RateLimited
+
+    store, cfg, tz = Store(settings.data_dir), settings.live, settings.market.timezone
+    client = make_tradingview(settings)
+    print(f"\nLive: every stock's price every {cfg.interval_minutes:g} min during the US session"
+          + (", then the daily update after the close" if cfg.update_after_close else "")
+          + ". Ctrl+C stops.\n")
+    try:
+        while True:
+            now = datetime.now(timezone.utc)
+            if live_session(now, market_tz=tz, after_close_minutes=cfg.after_close_minutes):
+                started = clock.monotonic()
+                try:
+                    s = refresh_quotes(settings, client)
+                    log.info("quotes: %d stocks, %d calls, %.0f s%s", s["rows"], s["calls"],
+                             s["seconds"], "" if s["complete"] else f", {s['missing']} missed")
+                except RateLimited as exc:
+                    log.warning("screener rate limited (%s); next try in %g min", exc,
+                                cfg.interval_minutes)
+                except ScreenerError as exc:
+                    log.error("quotes failed: %s", exc)
+                clock.sleep(max(5.0, cfg.interval_minutes * 60 - (clock.monotonic() - started)))
+                continue
+            target = _target(settings)
+            done_for = store.read_live_state().get("daily_update_for")
+            if cfg.update_after_close and done_for != target.isoformat():
+                deadline = next_open(now, market_tz=tz) - timedelta(minutes=10)
+                log.info("daily update for %s (bars stop by %s)", target, deadline)
+                try:
+                    code = update(settings, None, stop_at=deadline)
+                except ScreenerError as exc:
+                    log.error("daily update failed: %s", exc)
+                    code = 1
+                store.write_live_state({"daily_update_for": target.isoformat(), "exit_code": code,
+                                        "finished_at": datetime.now(timezone.utc).isoformat(
+                                            timespec="seconds")})
+                continue
+            wake = next_open(now, market_tz=tz)
+            log.info("market closed; next open %s", wake.isoformat(timespec="minutes"))
+            clock.sleep(min(1800.0, max(30.0, (wake - datetime.now(timezone.utc)).total_seconds())))
+    except KeyboardInterrupt:
+        print("\nLive stopped.\n")
+        return 0
+
+
+def update(settings, limit: int | None, stop_at=None) -> int:
     from tascreen.tv.data import RateLimited
 
     try:
@@ -355,7 +440,7 @@ def update(settings, limit: int | None) -> int:
         log.warning("screener rate limited (%s); trying the newest saved universe", exc)
         if usable_universe(settings, max_age_days=settings.universe.max_age_days) is None:
             return 1
-    bars_code = bars(settings, limit)        # a few failed symbols do not stop the scan
+    bars_code = bars(settings, limit, stop_at)   # a few failed symbols do not stop the scan
     return max(bars_code, scan(settings))
 
 
@@ -378,6 +463,8 @@ def main(argv: list[str] | None = None) -> int:
         (args.check_bars, lambda: check_bars(settings)),
         (args.scan, lambda: scan(settings)),
         (args.scan_symbol, lambda: scan_symbol(settings, args.scan_symbol.strip().upper())),
+        (args.quotes, lambda: quotes(settings)),
+        (args.live, lambda: live(settings)),
         (args.serve, lambda: serve(settings)),
     )
     for requested, command in commands:

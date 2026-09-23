@@ -112,12 +112,26 @@ PATTERNS = Contract(
         "symbol": STRING, "family": STRING, "pattern": STRING, "direction": STRING,
         "status": STRING, "start": DATETIME, "end": DATETIME, "breakout_date": ANY,
         "breakout_price": NUMERIC, "height": NUMERIC, "target": NUMERIC,
-        "volume_trend": STRING, "points_json": STRING, "lines_json": STRING,
-        "checks_json": STRING,
+        "volume_trend": STRING, "trigger_up": NUMERIC, "trigger_down": NUMERIC,
+        "points_json": STRING, "lines_json": STRING, "checks_json": STRING,
     },
     required_non_null=("symbol", "family", "pattern", "direction", "status", "start", "end",
                        "checks_json"),
     allow_empty=True,             # a quiet day can have no pattern anywhere
+)
+
+QUOTES = Contract(
+    name="quotes",
+    columns={
+        "symbol": STRING,
+        "price": NUMERIC,          # the screener's `close`: the last price (delayed)
+        "change_pct": NUMERIC,     # vs the previous close, percent
+        "change_abs": NUMERIC,
+        "volume": NUMERIC,
+        "rel_volume": NUMERIC,     # TradingView's relative_volume_10d_calc
+        "market_cap": NUMERIC,
+    },
+    required_non_null=("symbol",),
 )
 
 INDICATORS = Contract(

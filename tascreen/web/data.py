@@ -1,15 +1,16 @@
-"""The newest scan, loaded once and reloaded when a newer one is written.
+"""The newest scan and the newest live quotes, reloaded when newer ones are written.
 
-`run.py --scan` writes scan.json last, so its presence and modification time
-say which complete scan is current; a scan finishing while the site is open is
-picked up on the next request.
+`run.py --scan` writes scan.json last, and `--quotes`/`--live` write latest.json
+last, so each file's presence and modification time say which complete set is
+current; a scan or a quote refresh finishing while the site is open is picked up
+on the next request.
 """
 from __future__ import annotations
 
 import json
 import threading
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -17,6 +18,7 @@ import pandas as pd
 
 from ..market_hours import sessions_between
 from ..patterns.rules import Rules
+from ..quotes import crossings
 from ..store import Store
 from . import labels
 
@@ -69,6 +71,88 @@ def _prepare(indicators: pd.DataFrame, patterns: pd.DataFrame, rules: Rules,
     det = det.sort_values(["symbol", "_family", "_status", "age"], kind="stable")
     det = det.drop(columns=["_family", "_status"])
     return stocks.reset_index(drop=True), det.reset_index(drop=True)
+
+
+@dataclass(frozen=True)
+class LiveQuotes:
+    """The newest quotes file, as the site uses it."""
+    summary: dict[str, Any]
+    prices: dict[str, float]
+    changes: dict[str, float]
+    fetched_at: datetime
+    session: date | None           # the trading day they belong to; None = market closed
+
+
+@dataclass(frozen=True)
+class Live:
+    """Quotes that apply to a scan: from the session after it, and fresh."""
+    quotes: LiveQuotes
+    active: bool                   # fresh, and newer than the scan's session
+    stale: bool                    # from a later session, but no longer refreshing
+    crossings: dict[str, list[dict[str, Any]]]   # symbol -> crossings (active only)
+
+    @property
+    def crossing_symbols(self) -> set[str]:
+        return set(self.crossings)
+
+
+def live_for(view: ScanView | None, quotes: LiveQuotes | None, now: datetime,
+             max_age: timedelta) -> Live | None:
+    if view is None or quotes is None or quotes.session is None or quotes.session <= view.day:
+        return None                # no session running, or the scan already has its close
+    fresh = now - quotes.fetched_at <= max_age
+    found: dict[str, list[dict[str, Any]]] = {}
+    if fresh:
+        names = dict(zip(view.detections["pattern"], view.detections["name_he"]))
+        table = crossings(view.stocks, view.detections, quotes.prices, quotes.session)
+        for row in table.to_dict("records"):
+            found.setdefault(row["symbol"], []).append({**row, "name_he": names.get(row["pattern"], row["pattern"])})
+    return Live(quotes, active=fresh, stale=not fresh, crossings=found)
+
+
+def with_live_prices(view: ScanView, live: Live | None) -> ScanView:
+    """The scan with today's live price and change in place of the last close's,
+    so the table, the filters and the sort all use them (`live` marks the rows)."""
+    if live is None or not live.active:
+        return view
+    stocks = view.stocks.copy()
+    price = stocks["symbol"].map(live.quotes.prices)
+    change = stocks["symbol"].map(live.quotes.changes)
+    has = price.notna()
+    stocks["last_close"] = stocks["close"]
+    stocks.loc[has, "close"] = price[has]
+    stocks.loc[has, "change_1d_pct"] = change[has]
+    stocks["live"] = has
+    return ScanView(view.day, view.summary, stocks, view.detections)
+
+
+class QuotesRepository:
+    def __init__(self, store: Store):
+        self.store = store
+        self._lock = threading.Lock()
+        self._key: int | None = None
+        self._quotes: LiveQuotes | None = None
+
+    def current(self) -> LiveQuotes | None:
+        meta = self.store.quotes_dir / "latest.json"
+        if not meta.exists():
+            return None
+        stamp = meta.stat().st_mtime_ns
+        with self._lock:
+            if self._key != stamp:
+                found = self.store.read_quotes()
+                if found is None:
+                    return None
+                frame, summary = found
+                session = summary.get("session")
+                self._quotes = LiveQuotes(
+                    summary=summary,
+                    prices={s: float(p) for s, p in zip(frame["symbol"], frame["price"]) if p == p},
+                    changes={s: float(c) for s, c in zip(frame["symbol"], frame["change_pct"]) if c == c},
+                    fetched_at=datetime.fromisoformat(summary["fetched_at"]),
+                    session=date.fromisoformat(session) if session else None)
+                self._key = stamp
+            return self._quotes
 
 
 class ScanRepository:

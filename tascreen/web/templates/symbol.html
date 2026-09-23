@@ -17,7 +17,11 @@
   </div>
   <div>
     <div class="px">{{ stock.close|price }}</div>
+    {% if stock.live %}
+    <p class="meta"><span class="live-dot" aria-hidden="true"></span> מחיר חי ב-<span class="num">{{ live.quotes.fetched_at|clock }}</span> (באיחור) · <span class="num {{ stock.change_1d_pct|sign }}">{{ stock.change_1d_pct|pct }}</span> היום · סגירה קודמת <span class="num">{{ stock.last_close|price }}</span></p>
+    {% else %}
     <p class="meta">סגירה ב-<span class="num">{{ stock.last_date|day }}</span> · <span class="num {{ stock.change_1d_pct|sign }}">{{ stock.change_1d_pct|pct }}</span> ביום · שווי שוק <span class="num">{{ stock.market_cap|money }}</span></p>
+    {% endif %}
   </div>
 </div>
 
@@ -84,7 +88,14 @@
     {% if ok(d.height) %}<div><span class="k">גובה התבנית</span><span class="num">{{ d.height|price }}</span></div>{% endif %}
     {% if ok(d.target) %}<div><span class="k">יעד לפי כלל המדידה</span><span class="num">{{ d.target|price }}</span><span class="muted small"> · כלל המדידה של הספר, לא תחזית</span></div>{% endif %}
     {% if d.volume_trend %}<div><span class="k">מגמת נפח בתבנית</span>{{ labels.VOLUME_TREND[d.volume_trend] }}</div>{% endif %}
+    {% if d.status == "forming" and (ok(d.trigger_up) or ok(d.trigger_down)) %}
+    <div><span class="k">קו הפריצה ליום המסחר הבא</span>{% if ok(d.trigger_up) %}סגירה מעל <span class="num">{{ d.trigger_up|price }}</span>{% endif %}{% if ok(d.trigger_up) and ok(d.trigger_down) %} או {% endif %}{% if ok(d.trigger_down) %}סגירה מתחת ל-<span class="num">{{ d.trigger_down|price }}</span>{% endif %}</div>
+    {% endif %}
   </div>
+  {% set cx = crossing.get(d.pattern) if crossing else none %}
+  {% if cx and d.status == "forming" %}
+  <p class="caution">⚡ המחיר החי (<span class="num">{{ cx.price|price }}</span>) חוצה עכשיו את קו הפריצה (<span class="num">{{ cx.level|price }}</span>) כלפי {{ "מעלה" if cx.direction == "bullish" else "מטה" }}. זו עדיין לא פריצה: היא נקבעת רק בסגירת יום המסחר.</p>
+  {% endif %}
   <table class="checklist">
     <thead><tr><th scope="col">כלל</th><th scope="col">נמדד</th><th scope="col">סף</th><th scope="col">תוצאה</th><th scope="col">מקור הסף</th></tr></thead>
     <tbody>

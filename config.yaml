@@ -63,3 +63,12 @@ web:
   # forwarding (Ports view, visibility Public), knowing that TradingView's terms
   # limit its data to the account holder. Set to [] to go back to this computer only.
   public_hosts: ["*.devtunnels.ms"]
+  display_timezone: "Asia/Jerusalem"
+
+live:
+  # run.py --live: every stock's last price from TradingView's screener this often
+  # during the US session (one pass is ~15 calls; prices are delayed 15 min or more).
+  interval_minutes: 5
+  after_close_minutes: 20    # keep refreshing this long after the close (delayed quotes)
+  update_after_close: true   # then run the daily update (universe, bars, scan) once
+  stale_after_intervals: 3   # an older quote is shown as not live

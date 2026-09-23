@@ -39,7 +39,8 @@ def stock_row(i: int, market_cap: float, exchange: str = "NASDAQ", **extra) -> d
         "industry": "Testing", "market_cap_basic": market_cap, "close": 10.0 + i,
         "volume": 1000 + i, "average_volume_10d_calc": 900.0 + i, "RSI": 50.0,
         "EMA50": 10.0, "EMA200": 9.0, "Recommend.All": 0.1, "earnings_release_next_date": None,
-        "BB.lower": 1.0, "BB.upper": 2.0, "Perf.W": None, **extra,
+        "BB.lower": 1.0, "BB.upper": 2.0, "Perf.W": None,
+        "change": 1.5, "change_abs": 0.15, "relative_volume_10d_calc": 1.2, **extra,
     }
 
 

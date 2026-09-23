@@ -5,19 +5,24 @@ host names are listed in `web.public_hosts`, which also turns on public mode:
 no local details (error texts, file paths) are shown.
 
 Pages:  /  (screener)   /symbol/{EXCHANGE:TICKER}   /patterns   /status
-API:    /api/scan (same filters as /)   /api/symbol/{EXCHANGE:TICKER}
+API:    /api/scan (same filters as /)   /api/symbol/{EXCHANGE:TICKER}   /api/live
 
-Everything is read from data/ (the newest scan, the stored bars) and logs/;
-nothing here calls TradingView.
+Everything is read from data/ (the newest scan, the stored bars, the newest live
+quotes) and logs/; nothing here calls TradingView. During the session, fresh
+quotes replace the last close in the price columns, and chart patterns still
+forming whose breakout level the live price has passed are shown as crossings,
+not final until the close (see tascreen/quotes.py).
 """
 from __future__ import annotations
 
 import json
 import re
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import FastAPI, Request
@@ -31,7 +36,7 @@ from ..indicators import sma
 from ..patterns.rules import Rules, load_rules
 from ..store import Store
 from . import fmt, labels
-from .data import ScanRepository, ScanView
+from .data import Live, QuotesRepository, ScanRepository, ScanView, live_for, with_live_prices
 from .filters import SORTS, STATUSES, Query, apply, parse_query
 
 HOST = "127.0.0.1"          # the bind address is never configurable; tunnels connect here
@@ -101,22 +106,44 @@ def chart_payload(bars: pd.DataFrame, detections: list[dict[str, Any]]) -> dict[
             "start": _iso(d["start"]), "end": _iso(d["end"]),
             "breakout_date": _iso(d["breakout_date"]),
             "breakout_price": d["breakout_price"], "target": d["target"],
+            "trigger_up": d.get("trigger_up"), "trigger_down": d.get("trigger_down"),
             "points": d["points"], "lines": d["lines"],
         } for i, d in enumerate(detections)],
     }
+
+
+def live_summary(live: Live | None) -> dict[str, Any]:
+    if live is None:
+        return {"active": False, "stale": False, "session": None, "crossings": 0}
+    return {"active": live.active, "stale": live.stale, "session": live.quotes.session,
+            "fetched_at": live.quotes.fetched_at,
+            "crossings": sum(len(v) for v in live.crossings.values()),
+            "note": "Quotes are delayed; a crossing is not a breakout until the session's close."}
 
 
 def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
     store = Store(settings.data_dir)
     rules = rules or load_rules()
     repo = ScanRepository(store, rules)
+    quotes_repo = QuotesRepository(store)
     specs = {**rules.chart, **rules.candle}
+    display_tz = ZoneInfo(settings.web.display_timezone)
+    max_age = timedelta(minutes=settings.live.interval_minutes * settings.live.stale_after_intervals)
+
+    def current() -> tuple[ScanView | None, Live | None]:
+        view = repo.current()
+        return view, live_for(view, quotes_repo.current(), datetime.now(timezone.utc), max_age)
+
+    def clock(when) -> str:
+        if isinstance(when, str):
+            when = datetime.fromisoformat(when)
+        return when.astimezone(display_tz).strftime("%H:%M") if when else fmt.MISSING
 
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
     templates.env.filters.update(
         num=fmt.num, price=fmt.price, pct=fmt.pct, money=fmt.money, day=fmt.day,
         sign=fmt.sign_class, check_text=labels.check_text, sector=labels.sector,
-        symbol_url=symbol_url, tradingview_url=tradingview_url)
+        symbol_url=symbol_url, tradingview_url=tradingview_url, clock=clock)
     public = settings.web.public
     templates.env.globals.update(labels=labels, rules=rules, specs=specs, SORTS=SORTS,
                                  STATUSES=STATUSES, ok=fmt.ok, public=public)
@@ -139,22 +166,23 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
     def render(request: Request, name: str, view: ScanView | None, status_code: int = 200,
-               **context: Any) -> HTMLResponse:
+               live: Live | None = None, **context: Any) -> HTMLResponse:
         stale_rules = bool(view and view.summary.get("rules_digest") != rules.digest)
         return templates.TemplateResponse(
             request, name, {"view": view, "stale_rules": stale_rules, "path": request.url.path,
-                            **context}, status_code=status_code)
+                            "live": live, **context}, status_code=status_code)
 
     def not_found(request: Request, view: ScanView | None, what: str) -> HTMLResponse:
         return render(request, "notfound.html", view, status_code=404, what=what)
 
     @app.get("/", response_class=HTMLResponse)
     def screener(request: Request):
-        view = repo.current()
+        view, live = current()
         if view is None:
             return render(request, "empty.html", None)
         query = parse_query(request.query_params, rules)
-        result = apply(view, query, settings.web.rows_per_page)
+        result = apply(with_live_prices(view, live), query, settings.web.rows_per_page,
+                       crossings=live.crossings if live else None)
         stocks = view.stocks
         facets = {
             "sectors": sorted(((labels.sector(s), s) for s in stocks["sector"].dropna().unique()
@@ -162,20 +190,23 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
             "exchanges": sorted(stocks["exchange"].dropna().unique()),
             "counts": view.detections["pattern"].value_counts().to_dict(),
         }
-        return render(request, "screener.html", view, query=query, result=result, facets=facets)
+        return render(request, "screener.html", view, live=live, query=query, result=result,
+                      facets=facets)
 
     @app.get("/symbol/{symbol}", response_class=HTMLResponse)
     def symbol_page(request: Request, symbol: str):
-        view = repo.current()
+        view, live = current()
         symbol = symbol.strip().upper()
-        stock = view.stock(symbol) if view is not None and SYMBOL.match(symbol) else None
+        stock = (with_live_prices(view, live).stock(symbol)
+                 if view is not None and SYMBOL.match(symbol) else None)
         if stock is None:
             return not_found(request, view, symbol)
         detections = view.detections_of(symbol)
         bars = store.read_bars(symbol)
         chart = fmt.script_json(chart_payload(bars, detections)) if bars is not None else None
-        return render(request, "symbol.html", view, stock=stock, detections=detections,
-                      chart=chart, back=back_link(request))
+        crossing = {c["pattern"]: c for c in live.crossings.get(symbol, [])} if live else {}
+        return render(request, "symbol.html", view, live=live, stock=stock, detections=detections,
+                      chart=chart, back=back_link(request), crossing=crossing)
 
     @app.get("/patterns", response_class=HTMLResponse)
     def patterns_page(request: Request):
@@ -185,13 +216,14 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
 
     @app.get("/status", response_class=HTMLResponse)
     def status_page(request: Request):
-        view = repo.current()
+        view, live = current()
         bar_status = store.read_status()
         universe_days = store.universe_days()
         universe = (_read_json(store.universe_dir / f"{universe_days[-1].isoformat()}.json")
                     if universe_days else None)
         return render(
-            request, "status.html", view,
+            request, "status.html", view, live=live, quotes=quotes_repo.current(),
+            live_state=store.read_live_state(),
             universe_day=universe_days[-1] if universe_days else None, universe=universe,
             bar_counts=Counter(v.get("status", "?") for v in bar_status.values()),
             bar_symbols=len(bar_status),
@@ -201,22 +233,34 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
 
     @app.get("/api/scan")
     def api_scan(request: Request, limit: int = 100):
-        view = repo.current()
+        view, live = current()
         if view is None:
             return JSONResponse({"error": "no scan yet; run: run.py --scan"}, status_code=503)
         query = parse_query(request.query_params, rules)
-        result = apply(view, query, per_page=max(1, min(limit, 5000)))
+        result = apply(with_live_prices(view, live), query, per_page=max(1, min(limit, 5000)),
+                       crossings=live.crossings if live else None)
         return JSONResponse(fmt.clean({
             "scan_session": view.day, "universe_day": view.summary.get("universe_day"),
             "rules_digest": view.summary.get("rules_digest"),
             "rules_changed_since_scan": view.summary.get("rules_digest") != rules.digest,
             "note": NOT_ADVICE,
+            "live": live_summary(live),
             "filters": query.params(), "errors": list(query.errors),
             "total": result.total, "page": result.page, "pages": result.pages,
             "results": [{**{k: row.get(k) for k in API_COLUMNS},
-                         "url": symbol_url(row["symbol"]), "detections": row["matches"]}
+                         "live": bool(row.get("live", False)), "last_close": row.get("last_close"),
+                         "url": symbol_url(row["symbol"]), "detections": row["matches"],
+                         "crossings": row["crossings"]}
                         for row in result.rows],
         }))
+
+    @app.get("/api/live")
+    def api_live():
+        view, live = current()
+        quotes = quotes_repo.current()
+        return JSONResponse(fmt.clean({
+            **live_summary(live),
+            "fetched_at": quotes.summary.get("fetched_at") if quotes else None}))
 
     @app.get("/api/symbol/{symbol}")
     def api_symbol(symbol: str):

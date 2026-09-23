@@ -118,8 +118,11 @@ def _label(lo: float, hi: float | None) -> str:
     return f"[{lo / 1e9:g}B, {hi / 1e9:g}B]" if hi is not None else f"[{lo / 1e9:g}B, open]"
 
 
-async def _fetch_once(session, cfg: UniverseSettings, delays) -> tuple[list[dict], dict]:
-    context = f"{SCREENER_TOOL} universe"
+async def _fetch_once(session, cfg: UniverseSettings, delays, row=None,
+                      context: str = f"{SCREENER_TOOL} universe") -> tuple[list[dict], dict]:
+    """Every row above the floor, band by band. `row` maps one screener row to a
+    record carrying at least symbol and market_cap (default: universe_row)."""
+    row = row or universe_row
     payload = await fetch_in_session(session, SCREENER_TOOL,
                                      screener_arguments(cfg, cfg.min_market_cap, None, 1),
                                      delays=delays)
@@ -130,9 +133,11 @@ async def _fetch_once(session, cfg: UniverseSettings, delays) -> tuple[list[dict
         (lo, hi, 0) for lo, hi in zip(edges, edges[1:] + [None])]
     records: dict[str, dict] = {}
     bands = []
+    calls = 1
     while queue:
         lo, hi, depth = queue.pop(0)
         where = f"{context} band {_label(lo, hi)}"
+        calls += 1
         try:
             payload = await fetch_in_session(session, SCREENER_TOOL,
                                              screener_arguments(cfg, lo, hi, cfg.row_cap),
@@ -162,8 +167,8 @@ async def _fetch_once(session, cfg: UniverseSettings, delays) -> tuple[list[dict
             continue
         if band_total != len(rows):
             raise ProviderError(f"{where}: totalCount {band_total} but {len(rows)} rows")
-        for row in rows:
-            record = universe_row(row, where)
+        for raw in rows:
+            record = row(raw, where)
             cap = record["market_cap"]
             if cap < lo or (hi is not None and cap > hi):
                 raise ProviderError(f"{where}: {record['symbol']} has market cap {cap:.4g}, "
@@ -172,7 +177,7 @@ async def _fetch_once(session, cfg: UniverseSettings, delays) -> tuple[list[dict
             records[record["symbol"]] = record
         bands.append({"low": lo, "high": hi, "rows": len(rows)})
 
-    return list(records.values()), {"total": total, "bands": bands}
+    return list(records.values()), {"total": total, "bands": bands, "calls": calls}
 
 
 async def fetch_universe(session, cfg: UniverseSettings, *, delays,

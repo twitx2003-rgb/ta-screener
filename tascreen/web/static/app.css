@@ -58,6 +58,12 @@ p { margin: 0; }
   border: 1px solid var(--line); font-size: 0.9rem; display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .banner.warn { background: var(--warn-soft); border-color: transparent; color: var(--ink); }
 .banner strong { font-weight: 600; }
+.banner.live { border-color: var(--up); }
+.live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--up);
+  margin-inline: 4px; vertical-align: middle; animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+.chip.cross { outline: 1.5px solid currentColor; outline-offset: -1.5px; }
 
 /* chips */
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.74rem; font-weight: 600;

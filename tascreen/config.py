@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -142,6 +143,8 @@ class WebSettings:
     # of a tunnel such as VS Code port forwarding ("*.devtunnels.ms"). Empty means
     # this computer only. Non-empty turns on public mode (no local details shown).
     public_hosts: tuple[str, ...] = ()
+    # Times on the site (the live-quote time) are shown in this zone.
+    display_timezone: str = "Asia/Jerusalem"
 
     def __post_init__(self):
         object.__setattr__(self, "port", int(self.port))
@@ -151,6 +154,10 @@ class WebSettings:
             raise ConfigError("web.port must be 1024..65535")
         if not 10 <= self.rows_per_page <= 1000:
             raise ConfigError("web.rows_per_page must be 10..1000")
+        try:
+            ZoneInfo(self.display_timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ConfigError(f"web.display_timezone: unknown zone '{self.display_timezone}'") from None
         for host in self.public_hosts:
             if not _HOST_NAME.match(host) or host.rsplit(".", 1)[-1].isdigit():   # no IPs
                 raise ConfigError(f"web.public_hosts: '{host}' is not a host name "
@@ -161,6 +168,30 @@ class WebSettings:
         return bool(self.public_hosts)
 
 
+@dataclass(frozen=True)
+class LiveSettings:
+    # `run.py --live`: refresh every stock's last price this often during the US
+    # session (one screener pass, ~15 calls), and keep going this long after the
+    # close because quotes are delayed.
+    interval_minutes: float = 5.0
+    after_close_minutes: float = 20.0
+    # After the close, run the daily update (universe, bars, scan) once. The bars
+    # part stops before the next open, so the next day's quotes are not blocked.
+    update_after_close: bool = True
+    # A quote older than this many refresh intervals is shown as not live.
+    stale_after_intervals: float = 3.0
+
+    def __post_init__(self):
+        for name in ("interval_minutes", "after_close_minutes", "stale_after_intervals"):
+            object.__setattr__(self, name, float(getattr(self, name)))
+        if self.interval_minutes < 1:
+            raise ConfigError("live.interval_minutes must be at least 1 (each pass is ~15 calls)")
+        if not 0 <= self.after_close_minutes <= 120:
+            raise ConfigError("live.after_close_minutes must be 0..120")
+        if self.stale_after_intervals < 1:
+            raise ConfigError("live.stale_after_intervals must be at least 1")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
@@ -168,6 +199,7 @@ _SECTIONS = {
     "universe": UniverseSettings,
     "bars": BarsSettings,
     "web": WebSettings,
+    "live": LiveSettings,
 }
 
 
@@ -180,6 +212,7 @@ class Settings:
     universe: UniverseSettings = field(default_factory=UniverseSettings)
     bars: BarsSettings = field(default_factory=BarsSettings)
     web: WebSettings = field(default_factory=WebSettings)
+    live: LiveSettings = field(default_factory=LiveSettings)
 
     @property
     def data_dir(self) -> Path:

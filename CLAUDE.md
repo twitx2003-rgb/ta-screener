@@ -53,6 +53,8 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --scan                # indicators + patterns -> data/scans/<session>/ (~3 min)
 .venv\Scripts\python.exe run.py --scan-symbol NASDAQ:NVDA   # one symbol's detections with checklists
 .venv\Scripts\python.exe run.py --serve               # website on http://127.0.0.1:8050/ (opens the browser)
+.venv\Scripts\python.exe run.py --quotes              # every stock's last price once -> data/quotes/
+.venv\Scripts\python.exe run.py --live                # quotes every 5 min in session, daily update after close
 ```
 
 For a long run from a Claude Code session, start a detached process: the tool kills
@@ -129,6 +131,38 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     with its LICENSE/NOTICE. The API was read from its typings, v5 style:
     `addSeries(LC.CandlestickSeries, ...)`, `createSeriesMarkers`. The footer
     NOTICE line and `attributionLogo` are licence requirements.
+- **Live quotes (`tascreen/quotes.py`, user request 2026-09-23: "updates every few
+  minutes").**
+  - `--live` refreshes every stock's last price every `live.interval_minutes` (5)
+    during the US session, plus `after_close_minutes` (20), since quotes are delayed.
+    One pass is the universe's band fetch with a quote row mapper (~15 screener calls).
+  - After the close it runs `--update` once per session (`data/quotes/live_state.json`).
+    The bars part stops at `next_open - 10 min` (`BarsJob.stop_at`); unfetched symbols
+    are "deferred" and come first the next night.
+  - Row fields: `close` is the last price. `change` is percent, verified live against
+    `change_abs`. `relative_volume_10d_calc` is also read.
+  - **A quote is not a close.** Patterns stay close-based (Bulkowski).
+    - The scan stores, for every chart pattern still forming, `trigger_up` /
+      `trigger_down`: the level a close must cross in the next session.
+    - Each detector computes it from its own confirmation rule: the middle peak or
+      trough, the neckline at `last+1`, the trendlines at `last+1`, the flag lines,
+      the HTF high, the cup's right lip.
+    - The site shows a "crossing now, not final until the close" chip when the live
+      price is past it.
+    - Only for stocks whose last bar is the session right before the quotes'
+      session, since the trigger was computed for exactly that session.
+  - Web: `QuotesRepository` reloads on `latest.json` mtime.
+    - `live_for()` applies quotes only when their session is later than the scan's
+      and they are fresher than `interval x stale_after_intervals`; stale quotes get a
+      warning banner and are not used.
+    - `with_live_prices()` swaps `close`/`change_1d_pct` so filters and sorts use them.
+    - `live=cross` is a filter.
+    - Pages poll `/api/live` every 60 s and reload on new quotes, keeping the scroll
+      position and never reloading while a filter field is focused.
+  - First live try (2026-09-23, 16:48 New York, after the close): the screener
+    answered 429 on every retry. The live loop logs it and tries again next round.
+    The live UI was checked on synthetic data (screenshots): banner, dots, crossing
+    chip, trigger line.
 - Tests are offline:
   - an in-process MCP server;
   - a local OAuth server for the sign-in flow (`tests/test_mcp_client.py`).

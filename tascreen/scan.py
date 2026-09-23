@@ -78,7 +78,7 @@ def run_scan(store: Store, universe: pd.DataFrame, universe_day: date, rules: Ru
     patterns = pd.DataFrame([d.row() for d in detections], columns=list(PATTERNS.columns))
     for column in ("start", "end"):
         patterns[column] = pd.to_datetime(patterns[column], utc=True)
-    for column in ("breakout_price", "height", "target"):
+    for column in ("breakout_price", "height", "target", "trigger_up", "trigger_down"):
         patterns[column] = pd.to_numeric(patterns[column])
 
     counts: dict[str, dict[str, int]] = {}

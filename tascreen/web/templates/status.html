@@ -2,7 +2,8 @@
 {% block title %}מצב הנתונים · סורק טכני{% endblock %}
 
 {% set BAR_STATUS = {"new": "הורדה ראשונה", "updated": "עודכן", "refetched": "הורד מחדש (כנראה פיצול)",
-                     "up_to_date": "כבר מעודכן", "stale": "לא התעדכן", "failed": "נכשל"} %}
+                     "up_to_date": "כבר מעודכן", "stale": "לא התעדכן", "failed": "נכשל",
+                     "deferred": "נדחה (נעצר לפני פתיחת המסחר)"} %}
 
 {% macro symbols(items, limit=40) -%}
   {% if items %}<p class="list mono">{{ items[:limit]|join(", ") }}{% if items|length > limit %} … ועוד {{ items|length - limit }}{% endif %}</p>{% endif %}
@@ -112,6 +113,23 @@
     <p class="muted small" style="margin-top: 10px">עדכון הנרות: <span class="mono">run.py --bars</span> (ממשיך מאיפה שנעצר). TradingView מאט את הקריאות אחרי כאלף קריאות רצופות.</p>
   </section>
 </div>
+
+<section class="panel">
+  <h2>מחירים חיים</h2>
+  {% if quotes %}
+  <dl class="kv">
+    <dt>עדכון אחרון</dt><dd><span class="num">{{ quotes.fetched_at|clock }}</span> שעון ישראל{% if live and live.active %} <span class="chip up">מתעדכן</span>{% elif live and live.stale %} <span class="chip warn">לא מתעדכן</span>{% endif %}</dd>
+    <dt>יום מסחר</dt><dd>{% if quotes.session %}<span class="num">{{ quotes.session|day }}</span>{% else %}השוק היה סגור (מחירי הסגירה האחרונה){% endif %}</dd>
+    <dt>מניות</dt><dd class="num">{{ "{:,}".format(quotes.summary.rows) }}</dd>
+    <dt>קריאות ל-TradingView</dt><dd><span class="num">{{ quotes.summary.calls }}</span>, <span class="num">{{ quotes.summary.seconds|round|int }}</span> שניות</dd>
+    {% if not quotes.summary.complete %}<dt>חסרות בעדכון</dt><dd class="num">{{ quotes.summary.missing }}</dd>{% endif %}
+    <dt>חוצות עכשיו קו פריצה</dt><dd class="num">{{ live.crossings|length if live else 0 }}</dd>
+  </dl>
+  {% else %}
+  <p class="muted">עדיין לא נמשכו מחירים חיים.{% if not public %} להפעלה: <span class="mono">run.py --live</span>{% endif %}</p>
+  {% endif %}
+  {% if live_state.daily_update_for %}<p class="muted small" style="margin-top: 8px">העדכון היומי האחרון אחרי הסגירה: יום המסחר <span class="num">{{ live_state.daily_update_for|day }}</span></p>{% endif %}
+</section>
 
 {% if view %}
 <section class="panel">
