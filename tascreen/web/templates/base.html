@@ -6,10 +6,11 @@
 <title>{% block title %}סורק טכני{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Frank+Ruhl+Libre:wght@500;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Hebrew:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="/static/app.css">
 <script>
-  try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  // Dark unless the visitor chose light (the toggle remembers it).
+  try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
 </script>
 </head>
 <body>
@@ -57,9 +58,7 @@
 <script>
   document.getElementById("theme-toggle").addEventListener("click", () => {
     const root = document.documentElement;
-    const dark = root.dataset.theme ? root.dataset.theme === "dark"
-      : matchMedia("(prefers-color-scheme: dark)").matches;
-    root.dataset.theme = dark ? "light" : "dark";
+    root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
     try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
     document.dispatchEvent(new Event("themechange"));
   });

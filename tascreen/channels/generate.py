@@ -53,6 +53,7 @@ class Persona:
     color: str
     focus: str
     style: str
+    icon: str = "chat"
 
 
 def load_personas(path: Path = PERSONAS_PATH) -> dict[str, Persona]:
@@ -65,7 +66,7 @@ def load_personas(path: Path = PERSONAS_PATH) -> dict[str, Persona]:
         if not re.fullmatch(r"#[0-9A-Fa-f]{6}", str(spec["color"])):
             raise ConfigError(f"personas.yaml: {key}.color must be #RRGGBB")
         out[key] = Persona(key, str(spec["name"]), str(spec["initials"]), str(spec["color"]),
-                           str(spec["focus"]), str(spec["style"]))
+                           str(spec["focus"]), str(spec["style"]), str(spec.get("icon", "chat")))
     if len(out) < 3:
         raise ConfigError("personas.yaml: a channel needs at least 3 personas")
     return out
@@ -434,3 +435,29 @@ def _detection(row: dict[str, Any]) -> dict[str, Any]:
         raw = row.get(f"{key}_json")
         out[key] = json.loads(raw) if isinstance(raw, str) and raw else row.get(key) or []
     return out
+
+
+def redraw_charts(store: Store, view) -> dict[str, int]:
+    """Draw every stored chart post again with the current renderer (after a change of
+    chart style). No model call: the drawings and captions are the ones posted. A
+    thread whose detection is no longer in the newest scan keeps its old image."""
+    counts = {"redrawn": 0, "kept": 0}
+    by_key = {(r["symbol"], r["pattern"]): r for r in view.detections.to_dict("records")}
+    for day in store.channel_days():
+        folder = store.channels_dir / day.isoformat()
+        for path in folder.glob("*.json"):
+            doc = store.read_channel_doc(day, path.stem) or {}
+            for thread in doc.get("threads", []):
+                lead = thread["posts"][0] if thread.get("posts") else None
+                if not lead or not lead.get("chart"):
+                    continue
+                row = by_key.get((thread.get("symbol"), thread.get("pattern")))
+                bars = store.read_bars(thread["symbol"]) if row else None
+                if row is None or bars is None:
+                    counts["kept"] += 1
+                    continue
+                svg = render(bars, _detection(row), lead.get("drawings", []), lead.get("note", ""),
+                             seed=thread["id"], title=thread["symbol"])
+                store.write_channel_chart(day, thread["id"], svg)
+                counts["redrawn"] += 1
+    return counts

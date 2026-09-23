@@ -107,8 +107,8 @@ def script_json(obj: Any) -> str:
                       separators=(",", ":")).replace("</", "<\\/")
 
 
-# A number with its unit: "$29.38", "12.6%", "1.11x", "25.3B" (the unit letter stays
-# with the number, or RTL layout moves it to the other side: "x1.11").
+# A number with its unit: "$41.20", "12.6%", "1.37x", "25.3B" (the unit letter stays
+# with the number, or RTL layout moves it to the other side: "x1.37").
 _POST_NUMBER = re.compile(r"(?<![\w.])\$?\d[\d,]*(?:\.\d+)?(?:%|[xXBMK](?![A-Za-z]))?")
 
 

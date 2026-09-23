@@ -57,6 +57,7 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --live                # quotes every 5 min in session, daily update after close
 .venv\Scripts\python.exe run.py --channels            # agents write today's channels (normal terminal only)
 .venv\Scripts\python.exe run.py --channels --force    # write them again
+.venv\Scripts\python.exe run.py --redraw-charts      # redraw stored chart posts after a chart_svg change
 ```
 
 For a long run from a Claude Code session, start a detached process: the tool kills
@@ -208,11 +209,13 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
       before matching.
   - "כלל המדידה" and "לא סופי עד הסגירה" are appended when a post leaves them out.
   - Charts are `channels/chart_svg.py`: a server-side SVG "screenshot" (fixed dark
-    look) with a highlighter drawing layer.
+    look) with a clean annotation layer (lines, markers, arrows, pill tags; all
+    `class="ann"`).
     - The agent chooses from `DRAWINGS`; the geometry comes from the detection.
-    - The shake is seeded by the thread id, so a chart never changes between loads.
+    - Tags never cover each other (`_Annotations._free_y` moves a tag up or down).
     - The caption goes in the emptiest corner.
-    - It is inlined in the page, so the Amatic SC handwriting font applies.
+    - Stored SVGs keep the look they were drawn with: after changing `chart_svg`, run
+      `--redraw-charts` (no model call; a pattern gone from the newest scan is kept).
   - Storage: `data/channels/<day>/<channel>.json`, `live.json`, `charts/*.svg`. Pages
     poll `/api/stamp` and reload on new posts or quotes.
   - Post numbers are wrapped in `<bdi>` (`fmt.post_text`), so "ב-85.0" is not
@@ -233,6 +236,16 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
       this one was right.
     - A unit letter after a number ("1.11x") was reordered by RTL; `post_text` now
       isolates it with the number.
+- **Design (owner's answers, 2026-09-24):** a social-community look.
+  - Purple accent (`--accent #A78BFA`); always dark unless the visitor picks light (only
+    "light" is stored); Heebo for text, IBM Plex Mono for numbers.
+  - Channel posts are Telegram-style bubbles: the avatar sits at the start side (right,
+    RTL), and replies show a quote of the post they answer.
+  - Each persona has a line-icon avatar (`personas.yaml` `icon`; drawn by the
+    `_icons.html` macro) and its own color.
+  - The chart fills the bubble (medium); a click opens it large in a `<dialog>`.
+  - Screener: below 1700 px the sidebar leaves no room for all columns, so the columns
+    52-week high, ATR% and sector (`.opt`) are hidden there.
 - **The long average is SMA150, not SMA200 (owner's decision, 2026-09-23).**
   - Golden and death crosses are 50/150.
   - EMA200 stays only for the TradingView cross-check.

@@ -12,7 +12,7 @@ code only: no market data, and no text from the books it follows.
 | **Code taken from market-research-pipeline** (TradingView client, contracts, market calendar) | Same author | Copied, not a dependency. |
 | **FastAPI**, **Starlette**, **uvicorn**, **Jinja2** / **MarkupSafe**, **httpx** (tests) | MIT / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause | The website. |
 | **TradingView Lightweight Charts™** 5.2.1 | Apache-2.0 | Vendored unchanged in `tascreen/web/static/vendor/`, with its `LICENSE` and `NOTICE`. The licence requires the NOTICE line and a link to https://www.tradingview.com/ on the page: every page footer carries both, and the chart keeps its TradingView logo (`attributionLogo`). |
-| **Fonts**: Frank Ruhl Libre, IBM Plex Sans Hebrew, IBM Plex Mono, Amatic SC (the handwriting on channel charts) | SIL Open Font License 1.1 | Loaded from Google Fonts by the browser, not stored in the repo. |
+| **Fonts**: Heebo, IBM Plex Mono | SIL Open Font License 1.1 | Loaded from Google Fonts by the browser, not stored in the repo. |
 
 
 ## Bulkowski's books

@@ -14,7 +14,8 @@ from fastapi.testclient import TestClient
 from tascreen.channels.brief import topic_brief
 from tascreen.channels.chart_svg import render
 from tascreen.channels.generate import (ChannelWriter, _detection, banned, check_thread,
-                                        load_personas, response_schema, unmatched_numbers)
+                                        load_personas, redraw_charts, response_schema,
+                                        unmatched_numbers)
 from tascreen.channels.select import GENERAL, channels, pick_topics
 from tascreen.config import ChannelsSettings
 from tascreen.errors import ConfigError, ProviderError
@@ -259,8 +260,20 @@ def test_chart_svg_is_valid_and_draws_what_was_asked(tmp_path):
     for svg in (plain, drawn):
         xml.dom.minidom.parseString(svg)
         assert not re.search(r"(?<![a-z])nan(?![a-z])", svg.lower()) and "None" not in svg
-    assert drawn.count("<path") > plain.count("<path") and "קו הצוואר" in drawn and "יעד" in drawn
+    assert plain.count('class="ann') == 0 and drawn.count('class="ann') > 10
+    assert "קו הצוואר" in drawn and "כלל המדידה" in drawn
     assert render(bars, det, ["pivots"], seed="a", title="t") == render(bars, det, ["pivots"], seed="a", title="t")
+
+
+def test_chart_tags_never_cover_each_other():
+    from tascreen.channels.chart_svg import _Annotations
+    ann = _Annotations()
+    for text in ("קו צוואר", "בית שני", "ראש", "פריצה"):
+        ann.tag(300, 200, text, "#fff")
+    boxes = ann.boxes
+    for i, a in enumerate(boxes):
+        for b in boxes[i + 1:]:
+            assert a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1], (a, b)
 
 
 # ---------------------------------------------------------------------- pages
@@ -333,7 +346,18 @@ def test_live_posts_pause_for_an_hour_after_the_usage_limit(tmp_path):
 
 
 def test_numbers_keep_their_units_in_right_to_left_text():
-    html = str(post_text("נפח יחסי 1.11x, עלייה 12.6%, שווי 25.3B, מחיר $29.38, S0001"))
-    for token in ("1.11x", "12.6%", "25.3B", "$29.38"):
+    html = str(post_text("נפח יחסי 1.37x, עלייה 12.6%, שווי 25.3B, מחיר $41.20, S0001"))
+    for token in ("1.37x", "12.6%", "25.3B", "$41.20"):
         assert f'<bdi class="num">{token}</bdi>' in html
     assert "S0001" in html and '<bdi class="num">0001' not in html
+
+
+def test_redraw_replaces_stored_charts_without_a_model(tmp_path):
+    _, store, view = _view(tmp_path)
+    _writer(store).daily(view, only={"head_shoulders_top"}, progress=lambda m: None)
+    doc = store.read_channel_doc(view.day, "head_shoulders_top")
+    name = doc["threads"][0]["posts"][0]["chart"]
+    path = store.channels_dir / view.day.isoformat() / "charts" / name
+    path.write_text("<svg>old</svg>", encoding="utf-8")
+    counts = redraw_charts(store, view)
+    assert counts["redrawn"] >= 1 and "class=\"ann" in path.read_text(encoding="utf-8")

@@ -127,7 +127,7 @@ def test_a_foreign_host_name_is_refused(client):
 def test_no_scan_yet(tmp_path):
     client = TestClient(create_app(Settings(root=tmp_path), rules=RULES), base_url=f"http://{HOST}")
     assert "אין עדיין סריקה" in _html_ok(client.get("/screener"))
-    assert "עוד אין פוסטים" in _html_ok(client.get("/"))
+    assert "עוד אין הודעות" in _html_ok(client.get("/"))
     _html_ok(client.get("/status"))
     _html_ok(client.get("/patterns"))
     assert client.get("/api/scan").status_code == 503

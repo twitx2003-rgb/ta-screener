@@ -167,8 +167,8 @@
       <table>
         <thead>
           <tr>
-            {% macro head(key, text) -%}
-              <th scope="col"><a href="{{ query.sort_url(key) }}" {% if query.sort == key %}aria-sort="{{ 'ascending' if query.sort_order == 'asc' else 'descending' }}"{% endif %}>{{ text }}{% if query.sort == key %} {{ '▲' if query.sort_order == 'asc' else '▼' }}{% endif %}</a></th>
+            {% macro head(key, text, cls="") -%}
+              <th scope="col"{% if cls %} class="{{ cls }}"{% endif %}><a href="{{ query.sort_url(key) }}" {% if query.sort == key %}aria-sort="{{ 'ascending' if query.sort_order == 'asc' else 'descending' }}"{% endif %}>{{ text }}{% if query.sort == key %} {{ '▲' if query.sort_order == 'asc' else '▼' }}{% endif %}</a></th>
             {%- endmacro %}
             {{ head("symbol", "מניה") }}
             {{ head("age", "תבניות") }}
@@ -179,9 +179,9 @@
             {{ head("rsi14", "RSI") }}
             <th scope="col" title="המחיר מעל (↑) או מתחת (↓) לממוצע 50 ו-150 יום">ממוצעים</th>
             {{ head("rel_volume", "נפח יחסי") }}
-            {{ head("pct_from_52w_high", "מהשיא השנתי") }}
-            {{ head("atr_pct", "ATR%") }}
-            <th scope="col">סקטור</th>
+            {{ head("pct_from_52w_high", "מהשיא השנתי", "opt") }}
+            {{ head("atr_pct", "ATR%", "opt") }}
+            <th scope="col" class="opt">סקטור</th>
           </tr>
         </thead>
         <tbody>
@@ -213,9 +213,9 @@
               {% endfor %}
             </span></td>
             <td class="n"><span class="num">{{ row.rel_volume|num(2) }}</span></td>
-            <td class="n"><span class="num">{{ row.pct_from_52w_high|pct }}</span></td>
-            <td class="n"><span class="num">{{ row.atr_pct|num(1) }}</span></td>
-            <td class="small">{{ row.sector|sector }}</td>
+            <td class="n opt"><span class="num">{{ row.pct_from_52w_high|pct }}</span></td>
+            <td class="n opt"><span class="num">{{ row.atr_pct|num(1) }}</span></td>
+            <td class="small opt">{{ row.sector|sector }}</td>
           </tr>
         {% endfor %}
         </tbody>

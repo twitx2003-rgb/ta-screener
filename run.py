@@ -72,6 +72,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--channels", action="store_true",
                         help="Write today's discussion channels: simulated members (AI agents) discuss "
                              "the most common patterns, through Claude Code (run from a normal terminal)")
+    parser.add_argument("--redraw-charts", action="store_true",
+                        help="Draw the channel chart images again with the current chart style "
+                             "(no model calls)")
     parser.add_argument("--force", action="store_true",
                         help="With --channels: write channels again even if already written today")
     parser.add_argument("--serve", action="store_true",
@@ -498,6 +501,23 @@ def channels(settings, force: bool = False, writer=None) -> int:
     return 1 if failed else 0
 
 
+def redraw_charts(settings) -> int:
+    from tascreen.channels.generate import redraw_charts as redraw
+    from tascreen.patterns.rules import load_rules
+    from tascreen.store import Store
+    from tascreen.web.data import ScanRepository
+
+    store = Store(settings.data_dir)
+    view = ScanRepository(store, load_rules()).current()
+    if view is None:
+        log.error("no scan yet")
+        return 1
+    counts = redraw(store, view)
+    print(f"\nCharts: {counts['redrawn']} redrawn, {counts['kept']} kept (their pattern is no longer "
+          "in the newest scan)\n")
+    return 0
+
+
 def live_channel_posts(settings, writer) -> None:
     """Threads about the crossings in the newest quotes (deduplicated, hourly cap)."""
     from datetime import datetime, timedelta, timezone
@@ -550,6 +570,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),
+        (args.redraw_charts, lambda: redraw_charts(settings)),
         (args.serve, lambda: serve(settings)),
     )
     for requested, command in commands:

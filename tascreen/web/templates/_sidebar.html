@@ -1,5 +1,6 @@
 {# The app's side column: channels first, then the tools. #}
-<a class="side-brand" href="/">סורק טכני<span>מניות ארה״ב מעל מיליארד דולר · לפי Bulkowski</span></a>
+{% from "_icons.html" import icon %}
+<a class="side-brand" href="/"><span class="logo">{{ icon("logo") }}</span>סורק טכני<span>מניות ארה״ב מעל מיליארד דולר<br>לפי Bulkowski</span></a>
 <nav class="side-section" aria-label="ערוצים">
   <h2 class="side-title">ערוצים</h2>
   <ul class="channel-list">

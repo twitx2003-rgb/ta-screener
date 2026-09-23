@@ -207,7 +207,7 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
             count = int((view.detections["pattern"] == channel_id).sum()) if view else 0
             channel = Channel(channel_id, channel_name(spec.name_he), spec.name_he, count, spec.family)
         return render(request, "channel.html", view, live=live, channel=channel, spec=spec,
-                      threads=channel_repo.threads(channel_id))
+                      threads=channel_repo.threads(channel_id), members=len(channel_repo.personas))
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request):
