@@ -32,7 +32,7 @@ import yaml
 
 from ..config import ChannelsSettings
 from ..errors import ConfigError, ProviderError
-from ..llm import LLM
+from ..llm import LLM, UsageLimit
 from ..patterns.rules import Rules
 from ..store import Store, symbol_file_stem
 from .brief import recap_brief, topic_brief
@@ -278,6 +278,8 @@ class ChannelWriter:
     llm: LLM
     personas: dict[str, Persona] = field(default_factory=load_personas)
     now: Callable[[], datetime] = field(default=lambda: datetime.now(timezone.utc))
+    # After the subscription's usage limit, no call until then (live mode waits an hour).
+    paused_until: datetime | None = None
 
     def _write_threads(self, day: date, channel: Channel, briefs: list[dict],
                        topics: dict[str, dict], live: dict | None) -> dict[str, Any]:
@@ -331,8 +333,12 @@ class ChannelWriter:
         that session is skipped unless `force`."""
         chans = channels(view.detections, self.rules, self.cfg.count)
         report: dict[str, Any] = {"day": view.day.isoformat(), "channels": {}}
+        limited = None
         for ch in chans:
             if only and ch.id not in only:
+                continue
+            if limited:
+                report["channels"][ch.id] = f"skipped: {limited}"
                 continue
             if not force and self.store.read_channel_doc(view.day, ch.id) is not None:
                 report["channels"][ch.id] = "already written"
@@ -351,6 +357,13 @@ class ChannelWriter:
             progress(f"  {ch.name}: {len(picked)} topic(s)")
             try:
                 doc = self._write_threads(view.day, ch, briefs, topics, None)
+            except UsageLimit as exc:
+                # Every further call would fail the same way; the channels left are
+                # written by the next run (it skips the ones already written).
+                log.error("%s: %s", ch.name, exc)
+                report["channels"][ch.id] = f"failed: {exc}"
+                limited = "Claude usage limit; run --channels again after it resets"
+                continue
             except ProviderError as exc:
                 log.error("%s: %s", ch.name, exc)
                 report["channels"][ch.id] = f"failed: {exc}"
@@ -365,6 +378,9 @@ class ChannelWriter:
              crossings: dict[str, list[dict]], *, progress: Callable[[str], None] = print) -> dict[str, Any]:
         """A thread for each new crossing (symbol, pattern, session), at most
         `live_max_per_hour` per hour, in the pattern's channel or #כללי."""
+        if self.paused_until is not None and self.now() < self.paused_until:
+            return {"session": session.isoformat(), "written": 0, "budget_left": 0,
+                    "paused_until": self.paused_until.isoformat(timespec="minutes")}
         doc = self.store.read_channel_doc(session, "live") or {"day": session.isoformat(),
                                                                "threads": [], "posted": [], "dropped": []}
         posted = set(doc["posted"])
@@ -392,6 +408,11 @@ class ChannelWriter:
                 progress(f"  live: {symbol} {cross['pattern']} -> {channel.name}")
                 try:
                     one = self._write_threads(session, channel, [brief], {"t1": record}, live)
+                except UsageLimit as exc:
+                    log.error("live %s: %s; no live posts for an hour", key, exc)
+                    self.paused_until = self.now() + timedelta(hours=1)
+                    budget = 0
+                    continue
                 except ProviderError as exc:
                     log.error("live %s: %s", key, exc)
                     continue                     # not marked: tried again next round

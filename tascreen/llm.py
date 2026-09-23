@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +35,15 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from .errors import ConfigError, ProviderError
+
+
+# Live (2026-09-23): {"subtype": "success", "is_error": true, "result": "You've hit your
+# session limit · resets 11:50pm (Asia/Jerusalem)"}.
+LIMIT_TEXT = re.compile(r"hit your (session|usage|weekly|daily) limit|usage limit|rate limit", re.I)
+
+
+class UsageLimit(ProviderError):
+    """The subscription's usage limit: further calls fail until it resets."""
 
 
 class LLM(Protocol):
@@ -100,8 +110,10 @@ class ClaudeCodeLLM:
         if not isinstance(result, dict) or result.get("type") != "result":
             raise ProviderError(f"Claude Code returned an unexpected message: {str(result)[:300]}")
         if result.get("is_error") or result.get("subtype") != "success":
-            detail = result.get("errors") or result.get("result") or err
-            raise ProviderError(f"Claude Code failed ({result.get('subtype')}): {str(detail)[:500]}")
+            detail = str(result.get("errors") or result.get("result") or err)[:500]
+            if LIMIT_TEXT.search(detail):
+                raise UsageLimit(f"Claude usage limit reached: {detail}")
+            raise ProviderError(f"Claude Code returned an error ({result.get('subtype')}): {detail}")
         parsed = result.get("structured_output")
         if not isinstance(parsed, dict):
             raise ProviderError(f"Claude Code answered without structured output (keys: {sorted(result)})")

@@ -217,6 +217,22 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     poll `/api/stamp` and reload on new posts or quotes.
   - Post numbers are wrapped in `<bdi>` (`fmt.post_text`), so "ב-85.0" is not
     reordered by RTL.
+  - **First real run (owner's terminal, 2026-09-23, model alias `sonnet`):**
+    - 8 of 9 channels written: 24 threads, 97 posts, 0 dropped by the checks,
+      33-55 s per channel.
+    - API-equivalent about $0.06-0.13 per channel; not billed on the subscription.
+    - The 9th failed on the subscription's **session limit**. The CLI returns
+      `{"subtype": "success", "is_error": true, "result": "You've hit your session
+      limit · resets ..."}`.
+    - Now `llm.UsageLimit`: the daily run stops trying the remaining channels (a rerun
+      of `--channels` writes only the missing ones), and live posts pause for an hour.
+    - Sample checked against the scan: the NWSA head-and-shoulders thread's breakout,
+      target, close, relative volume, volume trend and neckline slope all matched,
+      and the #כללי recap counts matched exactly.
+    - Qualitative claims (e.g. "the neckline is rising") are not machine-checked;
+      this one was right.
+    - A unit letter after a number ("1.11x") was reordered by RTL; `post_text` now
+      isolates it with the number.
 - **The long average is SMA150, not SMA200 (owner's decision, 2026-09-23).**
   - Golden and death crosses are 50/150.
   - EMA200 stays only for the TradingView cross-check.

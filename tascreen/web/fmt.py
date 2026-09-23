@@ -107,7 +107,9 @@ def script_json(obj: Any) -> str:
                       separators=(",", ":")).replace("</", "<\\/")
 
 
-_POST_NUMBER = re.compile(r"(?<![\w.])\$?\d[\d,]*(?:\.\d+)?%?")
+# A number with its unit: "$29.38", "12.6%", "1.11x", "25.3B" (the unit letter stays
+# with the number, or RTL layout moves it to the other side: "x1.11").
+_POST_NUMBER = re.compile(r"(?<![\w.])\$?\d[\d,]*(?:\.\d+)?(?:%|[xXBMK](?![A-Za-z]))?")
 
 
 def post_text(text: Any) -> Markup:

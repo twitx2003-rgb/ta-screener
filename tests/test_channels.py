@@ -18,9 +18,10 @@ from tascreen.channels.generate import (ChannelWriter, _detection, banned, check
 from tascreen.channels.select import GENERAL, channels, pick_topics
 from tascreen.config import ChannelsSettings
 from tascreen.errors import ConfigError, ProviderError
-from tascreen.llm import ClaudeCodeLLM, SyntheticLLM
+from tascreen.llm import ClaudeCodeLLM, SyntheticLLM, UsageLimit
 from tascreen.market_hours import next_sessions
 from tascreen.web import fmt
+from tascreen.web.fmt import post_text
 from tascreen.web.app import HOST, create_app
 from tascreen.web.data import ScanRepository
 from test_web_live import RULES, _setup
@@ -288,3 +289,51 @@ def test_new_posts_change_the_page_stamp(tmp_path):
     before = client.get("/api/stamp").json()["stamp"]
     _writer(store).daily(view, only={GENERAL}, progress=lambda m: None)
     assert client.get("/api/stamp").json()["stamp"] != before
+
+
+LIMIT_RESULT = {"type": "result", "subtype": "success", "is_error": True,
+                "result": "You've hit your session limit · resets 11:50pm (Asia/Jerusalem)"}
+
+
+def test_the_usage_limit_is_its_own_error():
+    def limited(args, **kw):
+        return SimpleNamespace(stdout=json.dumps(LIMIT_RESULT).encode(), stderr=b"", returncode=1)
+
+    llm = ClaudeCodeLLM(model="sonnet", effort="medium", command=["c"], run=limited, environ={})
+    with pytest.raises(UsageLimit, match="session limit"):
+        llm.complete(system="s", user="u", schema={})
+
+
+def test_after_the_usage_limit_the_other_channels_wait_for_the_next_run(tmp_path):
+    _, store, view = _view(tmp_path)
+
+    def limited(system, user, schema):
+        raise UsageLimit("Claude usage limit reached")
+
+    llm = SyntheticLLM(limited)
+    report = _writer(store, llm).daily(view, progress=lambda m: None)
+    results = list(report["channels"].values())
+    assert results[0].startswith("failed") and all(r.startswith("skipped") for r in results[1:])
+    assert len(llm.calls) == 1
+
+
+def test_live_posts_pause_for_an_hour_after_the_usage_limit(tmp_path):
+    _, store, view = _view(tmp_path)
+    session = next_sessions(view.day, 1)[0]
+    cross = {"NASDAQ:DB": [{"pattern": "double_bottom", "direction": "bullish", "level": 112.3, "price": 113.0}]}
+
+    def limited(system, user, schema):
+        raise UsageLimit("Claude usage limit reached")
+
+    writer = _writer(store, SyntheticLLM(limited))
+    writer.live(view, session, {}, {}, cross, progress=lambda m: None)
+    assert writer.paused_until is not None
+    again = writer.live(view, session, {}, {}, cross, progress=lambda m: None)
+    assert "paused_until" in again and len(writer.llm.calls) == 1
+
+
+def test_numbers_keep_their_units_in_right_to_left_text():
+    html = str(post_text("נפח יחסי 1.11x, עלייה 12.6%, שווי 25.3B, מחיר $29.38, S0001"))
+    for token in ("1.11x", "12.6%", "25.3B", "$29.38"):
+        assert f'<bdi class="num">{token}</bdi>' in html
+    assert "S0001" in html and '<bdi class="num">0001' not in html
