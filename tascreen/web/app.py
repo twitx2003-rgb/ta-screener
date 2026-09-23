@@ -4,8 +4,13 @@ The owner may expose it through a tunnel (VS Code port forwarding); the tunnel's
 host names are listed in `web.public_hosts`, which also turns on public mode:
 no local details (error texts, file paths) are shown.
 
-Pages:  /  (screener)   /symbol/{EXCHANGE:TICKER}   /patterns   /status
-API:    /api/scan (same filters as /)   /api/symbol/{EXCHANGE:TICKER}   /api/live
+Pages:  /  (#כללי)   /c/{channel}   /screener   /symbol/{EXCHANGE:TICKER}   /patterns   /status
+API:    /api/scan (same filters as /screener)   /api/symbol/{EXCHANGE:TICKER}   /api/live
+        /api/channels   /api/channels/{channel}   /api/stamp
+
+The discussion channels (the home page) show threads written by simulated members,
+labelled as AI agents (see tascreen/channels). Screener links from before the
+channels (/?family=...) are redirected to /screener.
 
 Everything is read from data/ (the newest scan, the stored bars, the newest live
 quotes) and logs/; nothing here calls TradingView. During the session, fresh
@@ -18,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from dataclasses import fields
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -26,16 +32,18 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
+from ..channels.select import GENERAL, Channel, channel_name, find
 from ..config import Settings
 from ..indicators import sma
 from ..patterns.rules import Rules, load_rules
 from ..store import Store
 from . import fmt, labels
+from .channels import ChannelRepository
 from .data import Live, QuotesRepository, ScanRepository, ScanView, live_for, with_live_prices
 from .filters import SORTS, STATUSES, Query, apply, parse_query
 
@@ -47,10 +55,14 @@ NOT_ADVICE = ("Mechanical readings of past prices, not investment advice. A targ
 
 API_COLUMNS = ("symbol", "ticker", "description", "exchange", "sector", "industry", "market_cap",
                "last_date", "close", "change_1d_pct", "change_5d_pct", "change_20d_pct",
-               "rsi14", "sma20", "sma50", "sma200", "above_sma50", "above_sma200", "atr_pct",
+               "rsi14", "sma20", "sma50", "sma150", "above_sma50", "above_sma150", "atr_pct",
                "rel_volume", "pct_from_52w_high", "pct_from_52w_low", "avg_dollar_volume_20d",
                "golden_cross_days_ago", "death_cross_days_ago", "next_earnings", "coverage",
                "patterns_skipped")
+
+
+# Query parameters of the screener: at "/" they mean an old screener link.
+SCREENER_KEYS = ({f.name for f in fields(Query)} | {"pattern", "status"}) - {"errors", "patterns", "statuses"}
 
 
 def symbol_url(symbol: str) -> str:
@@ -99,7 +111,7 @@ def chart_payload(bars: pd.DataFrame, detections: list[dict[str, Any]]) -> dict[
         "volume": [{"time": d, "value": x if fmt.ok(x) else 0, "up": f >= a}
                    for d, x, a, f in zip(days, v, o, c)],
         "sma50": line(sma(bars["close"], 50)),
-        "sma200": line(sma(bars["close"], 200)),
+        "sma150": line(sma(bars["close"], 150)),
         "detections": [{
             "id": i, "family": d["family"], "pattern": d["pattern"], "name": d["name_he"],
             "direction": d["direction"], "status": d["status"],
@@ -126,6 +138,7 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
     rules = rules or load_rules()
     repo = ScanRepository(store, rules)
     quotes_repo = QuotesRepository(store)
+    channel_repo = ChannelRepository(store, rules, settings.channels)
     specs = {**rules.chart, **rules.candle}
     display_tz = ZoneInfo(settings.web.display_timezone)
     max_age = timedelta(minutes=settings.live.interval_minutes * settings.live.stale_after_intervals)
@@ -143,10 +156,11 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
     templates.env.filters.update(
         num=fmt.num, price=fmt.price, pct=fmt.pct, money=fmt.money, day=fmt.day,
         sign=fmt.sign_class, check_text=labels.check_text, sector=labels.sector,
-        symbol_url=symbol_url, tradingview_url=tradingview_url, clock=clock)
+        symbol_url=symbol_url, tradingview_url=tradingview_url, clock=clock,
+        post_text=fmt.post_text)
     public = settings.web.public
     templates.env.globals.update(labels=labels, rules=rules, specs=specs, SORTS=SORTS,
-                                 STATUSES=STATUSES, ok=fmt.ok, public=public)
+                                 STATUSES=STATUSES, ok=fmt.ok, public=public, GENERAL=GENERAL)
 
     app = FastAPI(title="ta-screener", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -165,17 +179,47 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
                        allowed_hosts=[HOST, "localhost", *settings.web.public_hosts])
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
+    def stamp() -> str:
+        quotes = quotes_repo.current()
+        return f"{quotes.summary.get('fetched_at') if quotes else ''}|{channel_repo.stamp()}"
+
     def render(request: Request, name: str, view: ScanView | None, status_code: int = 200,
                live: Live | None = None, **context: Any) -> HTMLResponse:
         stale_rules = bool(view and view.summary.get("rules_digest") != rules.digest)
+        sidebar = {"channels": channel_repo.channel_list(view), "fresh": channel_repo.fresh(),
+                   "current": context.get("channel").id if context.get("channel") else None}
         return templates.TemplateResponse(
             request, name, {"view": view, "stale_rules": stale_rules, "path": request.url.path,
-                            "live": live, **context}, status_code=status_code)
+                            "live": live, "sidebar": sidebar, "stamp": stamp(), **context},
+            status_code=status_code)
 
-    def not_found(request: Request, view: ScanView | None, what: str) -> HTMLResponse:
-        return render(request, "notfound.html", view, status_code=404, what=what)
+    def not_found(request: Request, view: ScanView | None, what: str,
+                  kind: str = "stock") -> HTMLResponse:
+        return render(request, "notfound.html", view, status_code=404, what=what, kind=kind)
+
+    def channel_view(request: Request, channel_id: str) -> HTMLResponse:
+        view, live = current()
+        if not channel_repo.known(channel_id):
+            return not_found(request, view, channel_id, kind="channel")
+        spec = specs.get(channel_id)
+        channel = find(channel_repo.channel_list(view), channel_id)
+        if channel is None:              # a pattern outside the popular list: still readable
+            count = int((view.detections["pattern"] == channel_id).sum()) if view else 0
+            channel = Channel(channel_id, channel_name(spec.name_he), spec.name_he, count, spec.family)
+        return render(request, "channel.html", view, live=live, channel=channel, spec=spec,
+                      threads=channel_repo.threads(channel_id))
 
     @app.get("/", response_class=HTMLResponse)
+    def home(request: Request):
+        if SCREENER_KEYS & set(request.query_params.keys()):
+            return RedirectResponse(f"/screener?{request.url.query}", status_code=307)
+        return channel_view(request, GENERAL)
+
+    @app.get("/c/{channel_id}", response_class=HTMLResponse)
+    def channel_page(request: Request, channel_id: str):
+        return channel_view(request, channel_id.strip().lower())
+
+    @app.get("/screener", response_class=HTMLResponse)
     def screener(request: Request):
         view, live = current()
         if view is None:
@@ -253,6 +297,35 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
                          "crossings": row["crossings"]}
                         for row in result.rows],
         }))
+
+    @app.get("/api/stamp")
+    def api_stamp():
+        return JSONResponse({"stamp": stamp()})
+
+    @app.get("/api/channels")
+    def api_channels():
+        view = repo.current()
+        fresh = channel_repo.fresh()
+        return JSONResponse({"stamp": stamp(), "note": NOT_ADVICE + " The authors are AI agents.",
+                             "channels": [{"id": c.id, "name": c.name, "count": c.count,
+                                           "url": "/" if c.id == GENERAL else f"/c/{c.id}",
+                                           "new_today": c.id in fresh}
+                                          for c in channel_repo.channel_list(view)]})
+
+    @app.get("/api/channels/{channel_id}")
+    def api_channel(channel_id: str):
+        channel_id = channel_id.strip().lower()
+        if not channel_repo.known(channel_id):
+            return JSONResponse({"error": f"no channel {channel_id}"}, status_code=404)
+        threads = [{**{k: t.get(k) for k in ("id", "symbol", "pattern", "status", "live", "created_at")},
+                    "day": t["day"],
+                    "posts": [{"author": p["who"]["name"], "ai_agent": True, "kind": p["kind"],
+                               "reply_to": p["reply_to"], "text": p["text"], "cites": p["cites"],
+                               "drawings": p["drawings"], "has_chart": bool(p.get("svg"))}
+                              for p in t["posts"]]}
+                   for t in channel_repo.threads(channel_id)]
+        return JSONResponse(fmt.clean({"channel": channel_id, "note": NOT_ADVICE + " The authors are AI agents.",
+                                       "threads": threads}))
 
     @app.get("/api/live")
     def api_live():

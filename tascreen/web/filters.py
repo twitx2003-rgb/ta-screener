@@ -1,6 +1,6 @@
 """Screener filters: parsed from the URL, applied to the newest scan.
 
-The same parameters drive the page (`/`) and the API (`/api/scan`), so a
+The same parameters drive the page (`/screener`) and the API (`/api/scan`), so a
 filtered page can be bookmarked and an agent can ask for the same thing.
 
 A stock passes when it passes every stock filter (market cap, RSI, ...). If any
@@ -74,7 +74,7 @@ class Query:
     rsi_min: float | None = None
     rsi_max: float | None = None
     sma50: str = ""
-    sma200: str = ""
+    sma150: str = ""
     relvol_min: float | None = None
     near_high: float | None = None
     atr_min: float | None = None
@@ -112,7 +112,7 @@ class Query:
                 out.append((f.name, f"{value:g}" if isinstance(value, float) else str(value)))
         return out
 
-    def url(self, path: str = "/", **changes: Any) -> str:
+    def url(self, path: str = "/screener", **changes: Any) -> str:
         """This query with some fields changed (page resets unless given)."""
         changes.setdefault("page", 1)
         query = urlencode(replace(self, **changes).params())
@@ -146,7 +146,7 @@ class Query:
         for status in self.statuses:
             out.append((labels.STATUS[status],
                         self.url(statuses=tuple(s for s in self.statuses if s != status))))
-        for name in ("sma50", "sma200"):
+        for name in ("sma50", "sma150"):
             side = getattr(self, name)
             if side:
                 out.append((f"{'מעל' if side == 'above' else 'מתחת ל'}-SMA{name[3:]}",
@@ -219,7 +219,7 @@ def parse_query(params: Mapping, rules: Rules) -> Query:
         direction=choice("direction", DIRECTIONS, "כיוון"),
         statuses=many("status", STATUSES, "סטטוס"),
         sma50=choice("sma50", SIDES, "SMA50"),
-        sma200=choice("sma200", SIDES, "SMA200"),
+        sma150=choice("sma150", SIDES, "SMA150"),
         cross=choice("cross", CROSSES, "חצייה"),
         live=choice("live", LIVE, "מחירים חיים"),
         sort=sort, order=order, page=page,
@@ -264,7 +264,7 @@ def _stock_mask(s: pd.DataFrame, q: Query) -> pd.Series:
         m &= s["rsi14"] >= q.rsi_min
     if q.rsi_max is not None:
         m &= s["rsi14"] <= q.rsi_max
-    for name in ("sma50", "sma200"):
+    for name in ("sma50", "sma150"):
         side = getattr(q, name)
         if side:     # above_smaN is True/False, or None when there are too few bars
             want = side == "above"

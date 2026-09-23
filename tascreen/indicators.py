@@ -11,6 +11,9 @@ Conventions:
   with hundreds of bars the difference has decayed away.
 - EMA uses alpha = 2/(n+1).
 - A value that needs more history than the symbol has is NaN, never a guess.
+- The long moving average is 150 sessions (owner's choice, 2026-09-23, replacing
+  200); golden and death crosses are SMA50 crossing SMA150. EMA200 is still
+  computed, only to cross-check against TradingView's EMA200.
 """
 from __future__ import annotations
 
@@ -74,7 +77,7 @@ def latest(bars: pd.DataFrame, cross_within: int = 20) -> dict[str, Any]:
     """The indicator values on the last bar."""
     close = bars["close"]
     last = float(close.iloc[-1])
-    s20, s50, s200 = sma(close, 20), sma(close, 50), sma(close, 200)
+    s20, s50, s150 = sma(close, 20), sma(close, 50), sma(close, 150)
     e21, e50, e200 = ema(close, 21), ema(close, 50), ema(close, 200)
     a14 = atr(bars, 14)
     window = bars.iloc[-252:]
@@ -93,10 +96,10 @@ def latest(bars: pd.DataFrame, cross_within: int = 20) -> dict[str, Any]:
         "change_1d_pct": _pct(last, at(close, 1)),
         "change_5d_pct": _pct(last, at(close, 5)),
         "change_20d_pct": _pct(last, at(close, 20)),
-        "sma20": at(s20), "sma50": at(s50), "sma200": at(s200),
+        "sma20": at(s20), "sma50": at(s50), "sma150": at(s150),
         "ema21": at(e21), "ema50": at(e50), "ema200": at(e200),
         "above_sma50": bool(last > at(s50)) if not math.isnan(at(s50)) else None,
-        "above_sma200": bool(last > at(s200)) if not math.isnan(at(s200)) else None,
+        "above_sma150": bool(last > at(s150)) if not math.isnan(at(s150)) else None,
         "sma50_slope_10d_pct": _pct(at(s50), at(s50, 10)),
         "rsi14": at(rsi(close, 14)),
         "atr14": at(a14),
@@ -106,8 +109,8 @@ def latest(bars: pd.DataFrame, cross_within: int = 20) -> dict[str, Any]:
         "pct_from_52w_low": _pct(last, low52),
         "rel_volume": float(vol.iloc[-1]) / avg_vol50 if avg_vol50 else math.nan,
         "avg_dollar_volume_20d": dollar20,
-        "golden_cross_days_ago": _days_since_cross(s50, s200, True, cross_within),
-        "death_cross_days_ago": _days_since_cross(s50, s200, False, cross_within),
+        "golden_cross_days_ago": _days_since_cross(s50, s150, True, cross_within),
+        "death_cross_days_ago": _days_since_cross(s50, s150, False, cross_within),
     }
 
 

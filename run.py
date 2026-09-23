@@ -69,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--live", action="store_true",
                         help="Keep running: quotes every live.interval_minutes during the US "
                              "session, then the daily update (universe, bars, scan) after the close")
+    parser.add_argument("--channels", action="store_true",
+                        help="Write today's discussion channels: simulated members (AI agents) discuss "
+                             "the most common patterns, through Claude Code (run from a normal terminal)")
+    parser.add_argument("--force", action="store_true",
+                        help="With --channels: write channels again even if already written today")
     parser.add_argument("--serve", action="store_true",
                         help="Open the website on http://127.0.0.1:<web.port>/ (this computer only; "
                              "reads the newest scan, never calls TradingView)")
@@ -323,7 +328,7 @@ def scan_symbol(settings, symbol: str) -> int:
     rules = load_rules()
     values, found = scan_one(bars, symbol, rules)
     print(f"\n{symbol}: {values['bars']} bars to {values['last_date']}")
-    for key in ("close", "rsi14", "sma50", "sma200", "atr_pct", "rel_volume", "pct_from_52w_high"):
+    for key in ("close", "rsi14", "sma50", "sma150", "atr_pct", "rel_volume", "pct_from_52w_high"):
         print(f"  {key:<18} {values[key]:.4g}" if values[key] == values[key] else f"  {key:<18} n/a")
     print(f"\n{len(found)} detection(s):")
     for det in found:
@@ -390,8 +395,16 @@ def live(settings) -> int:
 
     store, cfg, tz = Store(settings.data_dir), settings.live, settings.market.timezone
     client = make_tradingview(settings)
+    writer = None
+    if settings.channels.enabled:
+        try:
+            writer = make_channel_writer(settings)
+        except ScreenerError as exc:
+            # Inside Claude Code (CLAUDECODE=1) the agents cannot be run; quotes still are.
+            log.warning("channels are off in this run: %s", exc)
     print(f"\nLive: every stock's price every {cfg.interval_minutes:g} min during the US session"
           + (", then the daily update after the close" if cfg.update_after_close else "")
+          + (", with channel posts" if writer is not None else ", channels off")
           + ". Ctrl+C stops.\n")
     wait = cfg.interval_minutes          # grows while the screener keeps answering 429
     try:
@@ -404,6 +417,11 @@ def live(settings) -> int:
                     wait = cfg.interval_minutes
                     log.info("quotes: %d stocks, %d calls, %.0f s%s", s["rows"], s["calls"],
                              s["seconds"], "" if s["complete"] else f", {s['missing']} missed")
+                    if writer is not None:
+                        try:
+                            live_channel_posts(settings, writer)
+                        except ScreenerError as exc:
+                            log.error("live channel posts failed: %s", exc)
                 except RateLimited as exc:
                     # Knocking every few minutes on a scanner that answers 429 for hours
                     # only prolongs it: back off, doubling up to 30 minutes.
@@ -423,6 +441,11 @@ def live(settings) -> int:
                 except ScreenerError as exc:
                     log.error("daily update failed: %s", exc)
                     code = 1
+                if writer is not None:
+                    try:
+                        channels(settings, writer=writer)
+                    except ScreenerError as exc:
+                        log.error("daily channels failed: %s", exc)
                 store.write_live_state({"daily_update_for": target.isoformat(), "exit_code": code,
                                         "finished_at": datetime.now(timezone.utc).isoformat(
                                             timespec="seconds")})
@@ -433,6 +456,63 @@ def live(settings) -> int:
     except KeyboardInterrupt:
         print("\nLive stopped.\n")
         return 0
+
+
+def make_channel_writer(settings):
+    """ChannelWriter over Claude Code; ConfigError inside a Claude Code session."""
+    from tascreen.channels.generate import ChannelWriter
+    from tascreen.llm import ClaudeCodeLLM
+    from tascreen.patterns.rules import load_rules
+    from tascreen.store import Store
+
+    cfg = settings.channels
+    llm = ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s)
+    return ChannelWriter(store=Store(settings.data_dir), rules=load_rules(), cfg=cfg, llm=llm)
+
+
+def channels(settings, force: bool = False, writer=None) -> int:
+    from tascreen.web.data import ScanRepository
+
+    if not settings.channels.enabled:
+        print("\nchannels.enabled is false in config.yaml\n")
+        return 0
+    writer = writer or make_channel_writer(settings)
+    view = ScanRepository(writer.store, writer.rules).current()
+    if view is None:
+        log.error("no scan yet; run: .venv\\Scripts\\python.exe run.py --scan")
+        return 1
+    print(f"\nChannels for the session {view.day}: #כללי + {settings.channels.count} pattern channels, "
+          f"written by Claude Code ({settings.channels.model}, effort {settings.channels.effort})\n")
+    report = writer.daily(view, force=force)
+    (settings.log_dir / "channels_last_run.json").write_text(
+        json.dumps(report, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    failed = 0
+    for channel, result in report["channels"].items():
+        if isinstance(result, dict):
+            print(f"  {channel:<22} {result['threads']} threads, {result['posts']} posts, "
+                  f"{result['dropped']} dropped, {result['seconds']:.0f} s")
+        else:
+            print(f"  {channel:<22} {result}")
+            failed += str(result).startswith("failed")
+    print(f"  details: {settings.log_dir / 'channels_last_run.json'}\n")
+    return 1 if failed else 0
+
+
+def live_channel_posts(settings, writer) -> None:
+    """Threads about the crossings in the newest quotes (deduplicated, hourly cap)."""
+    from datetime import datetime, timedelta, timezone
+
+    from tascreen.web.data import QuotesRepository, ScanRepository, live_for
+
+    view = ScanRepository(writer.store, writer.rules).current()
+    max_age = timedelta(minutes=settings.live.interval_minutes * settings.live.stale_after_intervals)
+    live = live_for(view, QuotesRepository(writer.store).current(), datetime.now(timezone.utc), max_age)
+    if live is None or not live.active or not live.crossings:
+        return
+    result = writer.live(view, live.quotes.session, live.quotes.prices, live.quotes.changes,
+                         live.crossings, progress=lambda m: log.info(m.strip()))
+    if result["written"]:
+        log.info("live channel threads: %d written", result["written"])
 
 
 def update(settings, limit: int | None, stop_at=None) -> int:
@@ -469,6 +549,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.scan_symbol, lambda: scan_symbol(settings, args.scan_symbol.strip().upper())),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
+        (args.channels, lambda: channels(settings, force=args.force)),
         (args.serve, lambda: serve(settings)),
     )
     for requested, command in commands:

@@ -138,7 +138,7 @@ INDICATORS = Contract(
     name="indicators",
     columns={
         "symbol": STRING, "last_date": STRING, "close": NUMERIC, "rsi14": NUMERIC,
-        "sma50": NUMERIC, "sma200": NUMERIC, "atr_pct": NUMERIC, "rel_volume": NUMERIC,
+        "sma50": NUMERIC, "sma150": NUMERIC, "atr_pct": NUMERIC, "rel_volume": NUMERIC,
         "pct_from_52w_high": NUMERIC, "market_cap": NUMERIC,
     },
     required_non_null=("symbol", "last_date", "close", "market_cap"),

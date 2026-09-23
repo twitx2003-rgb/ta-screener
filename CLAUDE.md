@@ -55,6 +55,8 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --serve               # website on http://127.0.0.1:8050/ (opens the browser)
 .venv\Scripts\python.exe run.py --quotes              # every stock's last price once -> data/quotes/
 .venv\Scripts\python.exe run.py --live                # quotes every 5 min in session, daily update after close
+.venv\Scripts\python.exe run.py --channels            # agents write today's channels (normal terminal only)
+.venv\Scripts\python.exe run.py --channels --force    # write them again
 ```
 
 For a long run from a Claude Code session, start a detached process: the tool kills
@@ -118,7 +120,7 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     - Tests cover all of it.
     - To close the site: Stop Forwarding Port in VS Code, or `public_hosts: []`.
   - `ScanRepository` reloads when a newer `scan.json` appears.
-  - `/` and `/api/scan` share one filter model (`web/filters.py`), and filters live in
+  - `/screener` and `/api/scan` share one filter model (`web/filters.py`), and filters live in
     the URL. A bad value is dropped and reported in Hebrew, never guessed.
   - No raw nan/None/NaT on a page: formatters print "—", `fmt.script_json` refuses
     NaN, and `fmt.page_problems` is asserted on every page in `tests/test_web.py`.
@@ -171,6 +173,55 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   - a local OAuth server for the sign-in flow (`tests/test_mcp_client.py`).
 - Bulk work (hundreds of symbols) goes through `run.py`, never through MCP tool calls
   in a conversation.
+
+- **Discussion channels (`tascreen/channels/`, user request 2026-09-23).** The home
+  page is a Discord-like channel view.
+  - Channels: #כללי, plus the `channels.count` (8) most common patterns in the newest
+    scan. They appear in a right-hand sidebar that also holds the tools: screener
+    (`/screener`), glossary and status.
+  - Old `/?family=...` links 307 to `/screener?...`.
+  - **Authors are simulated members, AI agents, labelled on every post and in every
+    channel header.** They are 6 fictional personas (`channels/personas.yaml`). The
+    channels are read-only (owner's decision).
+  - Written through the owner's Claude Code subscription (owner's decision), in
+    `tascreen/llm.py` (`ClaudeCodeLLM`, adapted from market-research-pipeline). Checked
+    on CLI 2.1.280:
+    - npm now ships a native `bin/claude.exe`, which is run directly (no cmd.exe
+      quoting); flags: `-p --output-format json --json-schema --tools "" --strict-mcp-config
+      --no-session-persistence --model --effort --system-prompt`.
+    - `--bare` is avoided: it accepts only an API key, i.e. paid API billing.
+      ANTHROPIC_API_KEY is removed from the child's environment.
+    - **It refuses inside Claude Code (`CLAUDECODE=1`)**, so `--channels` and the channel
+      part of `--live` must run from a normal terminal. Inside Claude Code, `--live` logs
+      "channels are off" and keeps refreshing quotes.
+  - One call per channel per day, with JSON output by schema. Each topic is a stock
+    picked by `select.pick_topics` (fresh breakouts first). The call returns a thread:
+    a chart post, then 2-3 replies. #כללי also gets a counts recap. During the session,
+    each new crossing gets a thread in its pattern's channel, deduplicated per
+    (symbol, pattern, session) and capped at `live_max_per_hour`.
+  - **Grounding** (`generate.post_problem`); a failing post is dropped with its
+    reason, and a thread without its chart post is dropped:
+    - every post cites fact keys from `channels/brief.py`;
+    - every number in text or caption must match a fact value of the thread's brief,
+      within 0.5%; dates, counts < 20 and indicator periods pass;
+    - no advice, trading-claim or forecast words; Hebrew prefix letters are peeled off
+      before matching.
+  - "כלל המדידה" and "לא סופי עד הסגירה" are appended when a post leaves them out.
+  - Charts are `channels/chart_svg.py`: a server-side SVG "screenshot" (fixed dark
+    look) with a highlighter drawing layer.
+    - The agent chooses from `DRAWINGS`; the geometry comes from the detection.
+    - The shake is seeded by the thread id, so a chart never changes between loads.
+    - The caption goes in the emptiest corner.
+    - It is inlined in the page, so the Amatic SC handwriting font applies.
+  - Storage: `data/channels/<day>/<channel>.json`, `live.json`, `charts/*.svg`. Pages
+    poll `/api/stamp` and reload on new posts or quotes.
+  - Post numbers are wrapped in `<bdi>` (`fmt.post_text`), so "ב-85.0" is not
+    reordered by RTL.
+- **The long average is SMA150, not SMA200 (owner's decision, 2026-09-23).**
+  - Golden and death crosses are 50/150.
+  - EMA200 stays only for the TradingView cross-check.
+  - INDICATORS has `sma150`/`above_sma150`, and the filter parameter is `sma150`.
+  - Rescanned the same day.
 
 ## Claude Code integration
 

@@ -72,3 +72,17 @@ live:
   after_close_minutes: 20    # keep refreshing this long after the close (delayed quotes)
   update_after_close: true   # then run the daily update (universe, bars, scan) once
   stale_after_intervals: 3   # an older quote is shown as not live
+
+channels:
+  # Discussion channels: simulated members (AI agents, labelled as such on the site)
+  # discuss the most common patterns, each thread opening with a chart screenshot with
+  # drawings. Written through your Claude Code subscription (`claude -p`), which must
+  # run from a normal terminal, not from inside Claude Code.
+  enabled: true
+  count: 8                   # pattern channels, plus #כללי
+  topics_per_channel: 3      # stocks per channel per day
+  days_shown: 5
+  live_max_per_hour: 4       # threads about live breakout crossings, at most
+  model: "sonnet"
+  effort: "medium"
+  timeout_s: 600

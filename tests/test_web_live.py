@@ -69,7 +69,7 @@ def test_fresh_quotes_replace_prices_and_show_crossings(tmp_path):
     _quotes(store, next_sessions(day, 1)[0], datetime.now(timezone.utc))
     client = _client(settings)
 
-    html = _ok(client.get("/"))
+    html = _ok(client.get("/screener"))
     assert "מחירים חיים" in html and "live-dot" in html and "חוצה עכשיו" in html
 
     data = client.get("/api/scan?live=cross").json()
@@ -95,7 +95,7 @@ def test_stale_quotes_are_flagged_and_not_used(tmp_path):
     settings, store, day = _setup(tmp_path)
     _quotes(store, next_sessions(day, 1)[0], datetime.now(timezone.utc) - timedelta(hours=2))
     client = _client(settings)
-    html = _ok(client.get("/"))
+    html = _ok(client.get("/screener"))
     assert "המחירים החיים לא התעדכנו" in html and "חוצה עכשיו" not in html
     rows = client.get("/api/scan").json()["results"]
     assert not any(r["live"] for r in rows)
@@ -106,7 +106,7 @@ def test_quotes_that_the_scan_already_covers_are_ignored(tmp_path, session_of):
     settings, store, day = _setup(tmp_path)
     _quotes(store, day if session_of == "scan_day" else None, datetime.now(timezone.utc))
     client = _client(settings)
-    html = _ok(client.get("/"))
+    html = _ok(client.get("/screener"))
     assert "מחירים חיים" not in html
     assert client.get("/api/live").json()["active"] is False
     _ok(client.get("/status"))
@@ -114,7 +114,7 @@ def test_quotes_that_the_scan_already_covers_are_ignored(tmp_path, session_of):
 
 def test_live_filter_without_live_quotes_explains_why_it_is_empty(tmp_path):
     settings, _, _ = _setup(tmp_path)
-    html = _ok(_client(settings).get("/?live=cross"))
+    html = _ok(_client(settings).get("/screener?live=cross"))
     assert "אין כרגע מחירים חיים" in html
 
 

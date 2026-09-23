@@ -104,7 +104,8 @@ class UniverseSettings:
 @dataclass(frozen=True)
 class BarsSettings:
     # Daily bars fetched for a symbol seen for the first time (~2.4 years:
-    # enough for a 200-day average and patterns that take up to a year).
+    # enough for the 150-day average, the EMA200 cross-check, and patterns that
+    # take up to a year).
     history: int = 600
     # Bars re-fetched on top of what is stored; they must match what is stored,
     # or the whole history is fetched again (a split changes every past price).
@@ -192,6 +193,36 @@ class LiveSettings:
             raise ConfigError("live.stale_after_intervals must be at least 1")
 
 
+@dataclass(frozen=True)
+class ChannelsSettings:
+    # Discussion channels written by simulated members (AI agents, labelled so),
+    # through the owner's Claude Code subscription (`claude -p`).
+    enabled: bool = True
+    count: int = 8                 # pattern channels (the most common patterns), plus #כללי
+    topics_per_channel: int = 3    # stocks discussed per channel per day
+    days_shown: int = 5
+    live_max_per_hour: int = 4     # live-crossing threads per hour, at most
+    model: str = "sonnet"          # a Claude Code model alias or full name
+    effort: str = "medium"         # low | medium | high | xhigh | max
+    timeout_s: int = 600
+
+    def __post_init__(self):
+        for name in ("count", "topics_per_channel", "days_shown", "live_max_per_hour", "timeout_s"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        if not 1 <= self.count <= 20:
+            raise ConfigError("channels.count must be 1..20")
+        if not 1 <= self.topics_per_channel <= 6:
+            raise ConfigError("channels.topics_per_channel must be 1..6")
+        if not 1 <= self.days_shown <= 30:
+            raise ConfigError("channels.days_shown must be 1..30")
+        if not 0 <= self.live_max_per_hour <= 30:
+            raise ConfigError("channels.live_max_per_hour must be 0..30")
+        if self.effort not in ("low", "medium", "high", "xhigh", "max"):
+            raise ConfigError("channels.effort must be low, medium, high, xhigh or max")
+        if self.timeout_s < 30:
+            raise ConfigError("channels.timeout_s must be at least 30")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
@@ -200,6 +231,7 @@ _SECTIONS = {
     "bars": BarsSettings,
     "web": WebSettings,
     "live": LiveSettings,
+    "channels": ChannelsSettings,
 }
 
 
@@ -213,6 +245,7 @@ class Settings:
     bars: BarsSettings = field(default_factory=BarsSettings)
     web: WebSettings = field(default_factory=WebSettings)
     live: LiveSettings = field(default_factory=LiveSettings)
+    channels: ChannelsSettings = field(default_factory=ChannelsSettings)
 
     @property
     def data_dir(self) -> Path:

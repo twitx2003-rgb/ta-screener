@@ -3,7 +3,11 @@
 {% block content %}
 <section class="panel" style="margin-top: 18px">
   <h1>לא נמצא</h1>
+  {% if kind == "channel" %}
+  <p style="margin-top: 8px">אין ערוץ בשם <span class="mono">{{ what }}</span>. רשימת הערוצים נמצאת בצד הדף.</p>
+  {% else %}
   <p style="margin-top: 8px">המניה <span class="mono">{{ what }}</span> לא נמצאת בסריקה האחרונה. הסימול צריך להיות בפורמט של TradingView, בורסה:סימול, למשל <a class="mono" href="/symbol/NASDAQ:AAPL">NASDAQ:AAPL</a>.</p>
-  <p style="margin-top: 8px"><a href="/">→ לסורק</a></p>
+  {% endif %}
+  <p style="margin-top: 8px"><a href="/">→ לדף הבית</a> · <a href="/screener">לסורק</a></p>
 </section>
 {% endblock %}

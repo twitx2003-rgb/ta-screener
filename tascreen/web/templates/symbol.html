@@ -11,7 +11,7 @@
     <h1>{{ stock.symbol }}</h1>
     <p class="meta">{{ stock.description or "" }} · {{ stock.sector|sector }}{% if stock.industry %} · <span dir="ltr">{{ stock.industry }}</span>{% endif %}</p>
     <div class="links">
-      {% if back %}<a href="{{ back }}">→ חזרה לתוצאות</a>{% else %}<a href="/">→ לסורק</a>{% endif %}
+      {% if back %}<a href="{{ back }}">→ חזרה לתוצאות</a>{% else %}<a href="/screener">→ לסורק</a>{% endif %}
       <a href="{{ stock.symbol|tradingview_url }}" target="_blank" rel="noopener">פתיחה ב-TradingView ↗</a>
     </div>
   </div>
@@ -28,14 +28,14 @@
 <div class="figs">
   {{ fig("RSI (14)", stock.rsi14|num(1)) }}
   {{ fig("ממוצע 50 יום", stock.sma50|price, ("המחיר מעל" if stock.above_sma50 is sameas true else ("המחיר מתחת" if stock.above_sma50 is sameas false else ""))) }}
-  {{ fig("ממוצע 200 יום", stock.sma200|price, ("המחיר מעל" if stock.above_sma200 is sameas true else ("המחיר מתחת" if stock.above_sma200 is sameas false else "פחות מ-200 ימי מסחר"))) }}
+  {{ fig("ממוצע 150 יום", stock.sma150|price, ("המחיר מעל" if stock.above_sma150 is sameas true else ("המחיר מתחת" if stock.above_sma150 is sameas false else "פחות מ-150 ימי מסחר"))) }}
   {{ fig("ATR (14)", stock.atr14|price, "תנודתיות יומית " ~ stock.atr_pct|pct(1, false)) }}
   {{ fig("נפח יחסי", stock.rel_volume|num(2), "נפח היום / ממוצע 50 יום") }}
   {{ fig("מהשיא השנתי", stock.pct_from_52w_high|pct, "שיא " ~ stock.high_52w|price, stock.pct_from_52w_high|sign) }}
   {{ fig("מהשפל השנתי", stock.pct_from_52w_low|pct, "שפל " ~ stock.low_52w|price, stock.pct_from_52w_low|sign) }}
   {{ fig("מחזור דולרי יומי", stock.avg_dollar_volume_20d|money, "ממוצע 20 יום") }}
-  {% if ok(stock.golden_cross_days_ago) %}{{ fig("חציית זהב", "לפני " ~ stock.golden_cross_days_ago|int ~ " ימים", "ממוצע 50 חצה מעל 200") }}{% endif %}
-  {% if ok(stock.death_cross_days_ago) %}{{ fig("חציית מוות", "לפני " ~ stock.death_cross_days_ago|int ~ " ימים", "ממוצע 50 חצה מתחת ל-200") }}{% endif %}
+  {% if ok(stock.golden_cross_days_ago) %}{{ fig("חציית זהב", "לפני " ~ stock.golden_cross_days_ago|int ~ " ימים", "ממוצע 50 חצה מעל 150") }}{% endif %}
+  {% if ok(stock.death_cross_days_ago) %}{{ fig("חציית מוות", "לפני " ~ stock.death_cross_days_ago|int ~ " ימים", "ממוצע 50 חצה מתחת ל-150") }}{% endif %}
   {% if stock.next_earnings %}{{ fig("דוחות הבאים", stock.next_earnings|day, "לפי TradingView, ייתכן שמשוער") }}{% endif %}
 </div>
 
@@ -51,7 +51,7 @@
     <div class="chart-box" id="chart" aria-label="גרף נרות יומי של {{ stock.ticker }}"></div>
     <div class="legend">
       <span><span class="swatch" style="background: var(--sma50)"></span>ממוצע 50 יום</span>
-      <span><span class="swatch" style="background: var(--sma200)"></span>ממוצע 200 יום</span>
+      <span><span class="swatch" style="background: var(--sma150)"></span>ממוצע 150 יום</span>
       <span><span class="swatch" style="background: var(--accent)"></span>קווי התבנית</span>
       <span><span class="swatch" style="background: var(--muted)"></span>יעד לפי כלל המדידה (לא תחזית)</span>
     </div>

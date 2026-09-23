@@ -1,4 +1,4 @@
-// Symbol page chart: daily candles, volume, SMA 50/200, and the selected detection's
+// Symbol page chart: daily candles, volume, SMA 50/150, and the selected detection's
 // lines, turning points, breakout and measure-rule target.
 // Uses TradingView Lightweight Charts 5.2.1 (vendored; Apache-2.0, see static/vendor/).
 (function () {
@@ -12,7 +12,7 @@
   const colors = () => ({
     bg: cssVar("--surface"), ink: cssVar("--ink"), muted: cssVar("--muted"), line: cssVar("--line"),
     accent: cssVar("--accent"), up: cssVar("--up"), down: cssVar("--down"),
-    sma50: cssVar("--sma50"), sma200: cssVar("--sma200"),
+    sma50: cssVar("--sma50"), sma150: cssVar("--sma150"),
   });
   const withAlpha = (hex, alpha) => {
     const m = /^#([0-9a-f]{6})$/i.exec(hex);
@@ -37,9 +37,9 @@
   chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
   const quiet = { lineWidth: 1.5, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false };
   const sma50 = chart.addSeries(LC.LineSeries, quiet);
-  const sma200 = chart.addSeries(LC.LineSeries, quiet);
+  const sma150 = chart.addSeries(LC.LineSeries, quiet);
   sma50.setData(data.sma50);
-  sma200.setData(data.sma200);
+  sma150.setData(data.sma150);
   const markers = LC.createSeriesMarkers(candles, []);
 
   const indexOf = new Map(data.candles.map((c, i) => [c.time, i]));
@@ -57,7 +57,7 @@
     volume.setData(data.volume.map((v) => ({ time: v.time, value: v.value,
                                                color: withAlpha(v.up ? c.up : c.down, 0.35) })));
     sma50.applyOptions({ color: c.sma50 });
-    sma200.applyOptions({ color: c.sma200 });
+    sma150.applyOptions({ color: c.sma150 });
   }
 
   let overlay = { series: [], priceLines: [] };

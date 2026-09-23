@@ -6,53 +6,54 @@
 <title>{% block title %}סורק טכני{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Hebrew:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Frank+Ruhl+Libre:wght@500;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Hebrew:wght@400;600&display=swap">
 <link rel="stylesheet" href="/static/app.css">
 <script>
   try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 </script>
 </head>
 <body>
-<header class="top">
-  <div class="inner">
-    <a class="brand" href="/">סורק טכני<span>מניות ארה״ב מעל מיליארד דולר · לפי Bulkowski</span></a>
-    <nav aria-label="ניווט">
-      <a href="/" {% if path == "/" %}aria-current="page"{% endif %}>סורק</a>
-      <a href="/patterns" {% if path == "/patterns" %}aria-current="page"{% endif %}>מילון התבניות</a>
-      <a href="/status" {% if path == "/status" %}aria-current="page"{% endif %}>מצב הנתונים</a>
-    </nav>
-    <button class="theme-toggle" type="button" id="theme-toggle">מצב כהה / בהיר</button>
+<div class="shell">
+  <aside class="sidebar" id="sidebar" aria-label="ערוצים וכלים">
+    {% include "_sidebar.html" %}
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="menu-btn" type="button" id="menu-btn" aria-controls="sidebar" aria-expanded="false">☰ ערוצים</button>
+      <a class="brand" href="/">סורק טכני</a>
+    </header>
+    <div class="wrap">
+      {% if view %}
+      <div class="banner">
+        <span>סריקה של יום המסחר <strong class="num">{{ view.day|day }}</strong></span>
+        <span><strong class="num">{{ "{:,}".format(view.summary.symbols_scanned) }}</strong> מניות נסרקו מתוך <span class="num">{{ "{:,}".format(view.summary.symbols_in_universe) }}</span> ברשימה</span>
+        {% set nobars = view.summary.symbols_without_bars|length %}
+        {% if nobars %}<span class="muted">ל-<span class="num">{{ "{:,}".format(nobars) }}</span> מניות עדיין אין נרות (<a href="/status">פרטים</a>)</span>{% endif %}
+      </div>
+      {% endif %}
+      {% if live and live.active %}
+      <div class="banner live">
+        <span><span class="live-dot" aria-hidden="true"></span> מחירים חיים: עודכנו ב-<strong class="num">{{ live.quotes.fetched_at|clock }}</strong> שעון ישראל, באיחור של 15 דקות לפחות</span>
+        {% set n = live.crossings|length %}
+        {% if n == 1 %}<a href="/screener?live=cross">מניה אחת חוצה עכשיו קו פריצה</a>
+        {% elif n %}<a href="/screener?live=cross"><span class="num">{{ n }}</span> מניות חוצות עכשיו קו פריצה</a>{% endif %}
+        <span class="muted">חציית קו במהלך היום היא עדיין לא פריצה: פריצה נקבעת רק בסגירה</span>
+      </div>
+      {% elif live and live.stale %}
+      <div class="banner warn">המחירים החיים לא התעדכנו מאז <span class="num">{{ live.quotes.fetched_at|clock }}</span>, ולכן המחירים בטבלה הם של הסגירה האחרונה.{% if not public %} לעדכון: <span class="mono">run.py --live</span>{% endif %}</div>
+      {% endif %}
+      {% if stale_rules %}
+      <div class="banner warn">הקובץ rules.yaml השתנה מאז הסריקה, ולכן התוצאות לפי הכללים הקודמים. להרצה מחדש: <span class="mono">run.py --scan</span></div>
+      {% endif %}
+      <main>{% block content %}{% endblock %}</main>
+    </div>
+    <footer>
+      <p class="disclaimer"><strong>לא ייעוץ השקעות.</strong> כל מה שמוצג כאן הוא קריאה מכנית של מחירי עבר לפי כללי הזיהוי שבספרים של Thomas Bulkowski, בניסוח שלנו. המשתתפים בערוצים הם סוכני AI שמדמים מנויים, לא אנשים אמיתיים. יעד מחיר הוא כלל המדידה של הספר, גובה התבנית שמוסף לנקודת הפריצה, ולא תחזית. תבנית שזוהתה אינה המלצה לקנות או למכור.</p>
+      <p class="attrib">מקור הנתונים: TradingView (נרות יומיים). הגרפים: TradingView Lightweight Charts™ · Copyright (c) 2025 TradingView, Inc. · <a href="https://www.tradingview.com/" rel="noopener">tradingview.com</a></p>
+    </footer>
   </div>
-</header>
-<div class="wrap">
-  {% if view %}
-  <div class="banner">
-    <span>סריקה של יום המסחר <strong class="num">{{ view.day|day }}</strong></span>
-    <span><strong class="num">{{ "{:,}".format(view.summary.symbols_scanned) }}</strong> מניות נסרקו מתוך <span class="num">{{ "{:,}".format(view.summary.symbols_in_universe) }}</span> ברשימה</span>
-    {% set nobars = view.summary.symbols_without_bars|length %}
-    {% if nobars %}<span class="muted">ל-<span class="num">{{ "{:,}".format(nobars) }}</span> מניות עדיין אין נרות (<a href="/status">פרטים</a>)</span>{% endif %}
-  </div>
-  {% endif %}
-  {% if live and live.active %}
-  <div class="banner live">
-    <span><span class="live-dot" aria-hidden="true"></span> מחירים חיים: עודכנו ב-<strong class="num">{{ live.quotes.fetched_at|clock }}</strong> שעון ישראל, באיחור של 15 דקות לפחות</span>
-    {% set n = live.crossings|length %}
-    {% if n == 1 %}<a href="/?live=cross">מניה אחת חוצה עכשיו קו פריצה</a>
-    {% elif n %}<a href="/?live=cross"><span class="num">{{ n }}</span> מניות חוצות עכשיו קו פריצה</a>{% endif %}
-    <span class="muted">חציית קו במהלך היום היא עדיין לא פריצה: פריצה נקבעת רק בסגירה</span>
-  </div>
-  {% elif live and live.stale %}
-  <div class="banner warn">המחירים החיים לא התעדכנו מאז <span class="num">{{ live.quotes.fetched_at|clock }}</span>, ולכן המחירים בטבלה הם של הסגירה האחרונה.{% if not public %} לעדכון: <span class="mono">run.py --live</span>{% endif %}</div>
-  {% endif %}
-  {% if stale_rules %}
-  <div class="banner warn">הקובץ rules.yaml השתנה מאז הסריקה, ולכן התוצאות לפי הכללים הקודמים. להרצה מחדש: <span class="mono">run.py --scan</span></div>
-  {% endif %}
-  <main>{% block content %}{% endblock %}</main>
 </div>
-<footer>
-  <p class="disclaimer"><strong>לא ייעוץ השקעות.</strong> כל מה שמוצג כאן הוא קריאה מכנית של מחירי עבר לפי כללי הזיהוי שבספרים של Thomas Bulkowski, בניסוח שלנו. יעד מחיר הוא כלל המדידה של הספר, גובה התבנית שמוסף לנקודת הפריצה, ולא תחזית. תבנית שזוהתה אינה המלצה לקנות או למכור.</p>
-  <p class="attrib">מקור הנתונים: TradingView (נרות יומיים). הגרפים: TradingView Lightweight Charts™ · Copyright (c) 2025 TradingView, Inc. · <a href="https://www.tradingview.com/" rel="noopener">tradingview.com</a></p>
-</footer>
 <script>
   document.getElementById("theme-toggle").addEventListener("click", () => {
     const root = document.documentElement;
@@ -62,26 +63,31 @@
     try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
     document.dispatchEvent(new Event("themechange"));
   });
-</script>
-<script>
+  // Narrow screens: the sidebar is a drawer.
+  (function () {
+    const bar = document.getElementById("sidebar"), btn = document.getElementById("menu-btn"),
+          scrim = document.getElementById("scrim");
+    function open(on) {
+      bar.classList.toggle("open", on); scrim.hidden = !on; btn.setAttribute("aria-expanded", String(on));
+    }
+    btn.addEventListener("click", () => open(!bar.classList.contains("open")));
+    scrim.addEventListener("click", () => open(false));
+    addEventListener("keydown", (e) => { if (e.key === "Escape") open(false); });
+  })();
   // Keep the reading position across the automatic refresh below.
   try {
     const key = "scrollY:" + location.href, y = sessionStorage.getItem(key);
     if (y !== null) { sessionStorage.removeItem(key); addEventListener("load", () => scrollTo(0, +y)); }
   } catch (e) {}
-</script>
-{% if live %}
-<script>
-  // New live prices: reload the page (not while the visitor is typing in a filter).
+  // New live prices or new channel posts: reload (not while the visitor is typing).
   (function () {
-    const shown = {{ (live.quotes.summary.fetched_at or "")|tojson }};
+    const shown = {{ stamp|tojson }};
     setInterval(async () => {
       const el = document.activeElement;
       if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
       try {
-        const r = await fetch("/api/live", { cache: "no-store" });
-        const d = await r.json();
-        if (d.fetched_at && d.fetched_at !== shown) {
+        const d = await (await fetch("/api/stamp", { cache: "no-store" })).json();
+        if (d.stamp !== shown) {
           try { sessionStorage.setItem("scrollY:" + location.href, String(scrollY)); } catch (e) {}
           location.reload();
         }
@@ -89,7 +95,6 @@
     }, 60000);
   })();
 </script>
-{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

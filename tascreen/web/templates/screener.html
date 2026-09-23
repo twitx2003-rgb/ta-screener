@@ -31,7 +31,7 @@
 <div class="layout">
   <details class="filters" id="filters" open>
     <summary>סינון</summary>
-    <form method="get" action="/">
+    <form method="get" action="/screener">
       <input type="hidden" name="sort" value="{{ query.sort }}">
       {% if query.order %}<input type="hidden" name="order" value="{{ query.order }}">{% endif %}
 
@@ -109,13 +109,13 @@
           {{ number("rsi_max", "עד", placeholder="100") }}
         </div>
         {{ side("sma50", "מול ממוצע 50 יום") }}
-        {{ side("sma200", "מול ממוצע 200 יום") }}
+        {{ side("sma150", "מול ממוצע 150 יום") }}
         <div class="field">
           <label for="f-cross">חציית ממוצעים ב-20 הימים האחרונים</label>
           <select id="f-cross" name="cross">
             <option value="">הכול</option>
-            <option value="golden" {% if query.cross == "golden" %}selected{% endif %}>חציית זהב (50 מעל 200)</option>
-            <option value="death" {% if query.cross == "death" %}selected{% endif %}>חציית מוות (50 מתחת ל-200)</option>
+            <option value="golden" {% if query.cross == "golden" %}selected{% endif %}>חציית זהב (50 מעל 150)</option>
+            <option value="death" {% if query.cross == "death" %}selected{% endif %}>חציית מוות (50 מתחת ל-150)</option>
           </select>
         </div>
         {{ number("relvol_min", "נפח יחסי מינימלי (נפח היום / ממוצע 50 יום)", placeholder="1.5") }}
@@ -130,21 +130,21 @@
 
       <div class="actions">
         <button class="btn" type="submit">סנן</button>
-        <a class="btn ghost" href="/">ניקוי</a>
+        <a class="btn ghost" href="/screener">ניקוי</a>
       </div>
     </form>
   </details>
 
   <section aria-label="תוצאות">
     <div class="presets" aria-label="סינונים מהירים">
-      {% if live and live.active %}<a href="/?live=cross">⚡ חוצות עכשיו קו פריצה</a>{% endif %}
-      <a href="/?family=chart&amp;status=breakout&amp;within=5&amp;sort=age">פריצות מתבניות גרף, 5 ימים אחרונים</a>
-      <a href="/?family=chart&amp;status=forming">תבניות גרף בבנייה</a>
-      <a href="/?family=candle&amp;direction=bullish&amp;within=1">נרות שוריים ביום האחרון</a>
-      <a href="/?family=candle&amp;direction=bearish&amp;within=1">נרות דוביים ביום האחרון</a>
-      <a href="/?near_high=3&amp;relvol_min=1.5">ליד שיא שנתי, בנפח גבוה</a>
-      <a href="/?rsi_max=30">RSI מתחת ל-30</a>
-      <a href="/?cross=golden">חציית זהב</a>
+      {% if live and live.active %}<a href="/screener?live=cross">⚡ חוצות עכשיו קו פריצה</a>{% endif %}
+      <a href="/screener?family=chart&amp;status=breakout&amp;within=5&amp;sort=age">פריצות מתבניות גרף, 5 ימים אחרונים</a>
+      <a href="/screener?family=chart&amp;status=forming">תבניות גרף בבנייה</a>
+      <a href="/screener?family=candle&amp;direction=bullish&amp;within=1">נרות שוריים ביום האחרון</a>
+      <a href="/screener?family=candle&amp;direction=bearish&amp;within=1">נרות דוביים ביום האחרון</a>
+      <a href="/screener?near_high=3&amp;relvol_min=1.5">ליד שיא שנתי, בנפח גבוה</a>
+      <a href="/screener?rsi_max=30">RSI מתחת ל-30</a>
+      <a href="/screener?cross=golden">חציית זהב</a>
     </div>
 
     {% if query.errors %}
@@ -177,7 +177,7 @@
             {{ head("change_1d_pct", "יומי") }}
             {{ head("change_20d_pct", "20 ימים") }}
             {{ head("rsi14", "RSI") }}
-            <th scope="col" title="המחיר מעל (↑) או מתחת (↓) לממוצע 50 ו-200 יום">ממוצעים</th>
+            <th scope="col" title="המחיר מעל (↑) או מתחת (↓) לממוצע 50 ו-150 יום">ממוצעים</th>
             {{ head("rel_volume", "נפח יחסי") }}
             {{ head("pct_from_52w_high", "מהשיא השנתי") }}
             {{ head("atr_pct", "ATR%") }}
@@ -207,7 +207,7 @@
             <td class="n"><span class="num {{ row.change_20d_pct|sign }}">{{ row.change_20d_pct|pct }}</span></td>
             <td class="n"><span class="num">{{ row.rsi14|num(1) }}</span></td>
             <td><span class="avg">
-              {% for n in (50, 200) %}{% set above = row["above_sma" ~ n] %}
+              {% for n in (50, 150) %}{% set above = row["above_sma" ~ n] %}
                 {% if above is sameas true %}<span class="chip up" title="המחיר מעל ממוצע {{ n }} יום">{{ n }}↑</span>
                 {% elif above is sameas false %}<span class="chip down" title="המחיר מתחת לממוצע {{ n }} יום">{{ n }}↓</span>{% endif %}
               {% endfor %}

@@ -6,6 +6,7 @@ because RTL layout moves a leading minus sign to the wrong end.
 """
 from __future__ import annotations
 
+import html
 import json
 import math
 import re
@@ -13,6 +14,7 @@ from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
+from markupsafe import Markup
 
 MISSING = "—"
 
@@ -103,6 +105,16 @@ def script_json(obj: Any) -> str:
     """JSON for a <script type="application/json"> block: no NaN, no '</'."""
     return json.dumps(clean(obj), ensure_ascii=False, allow_nan=False,
                       separators=(",", ":")).replace("</", "<\\/")
+
+
+_POST_NUMBER = re.compile(r"(?<![\w.])\$?\d[\d,]*(?:\.\d+)?%?")
+
+
+def post_text(text: Any) -> Markup:
+    """An agent's post as HTML: escaped, with every number isolated left to right, so
+    that "ב-85.0" or "12.6%" is not reordered by the right-to-left paragraph."""
+    escaped = html.escape(str(text), quote=False)      # no entities with digits in them
+    return Markup(_POST_NUMBER.sub(lambda m: f'<bdi class="num">{m.group(0)}</bdi>', escaped))
 
 
 # ------------------------------------------------------------------ page check

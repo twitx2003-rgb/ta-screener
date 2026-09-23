@@ -52,9 +52,11 @@ def _html_ok(response):
 
 # ------------------------------------------------------------------ pages
 @pytest.mark.parametrize("url", [
-    "/", "/?family=chart", "/?family=candle&direction=bullish&within=3",
-    "/?pattern=head_shoulders_top&status=breakout", "/?rsi_min=20&rsi_max=80&sma50=above",
-    "/?sort=rsi14&order=asc", "/?sort=age", "/?page=99", "/?q=hs",
+    "/", "/c/head_shoulders_top", "/screener", "/screener?family=chart",
+    "/screener?family=candle&direction=bullish&within=3",
+    "/screener?pattern=head_shoulders_top&status=breakout",
+    "/screener?rsi_min=20&rsi_max=80&sma50=above",
+    "/screener?sort=rsi14&order=asc", "/screener?sort=age", "/screener?page=99", "/screener?q=hs",
     "/patterns", "/status", "/symbol/NYSE:HS", "/symbol/NASDAQ:DB", "/symbol/NYSE:THIN",
 ])
 def test_every_page_renders_without_raw_nan_or_none(client, url):
@@ -64,7 +66,7 @@ def test_every_page_renders_without_raw_nan_or_none(client, url):
 
 
 def test_pattern_filter_keeps_only_stocks_with_a_matching_detection(client):
-    html = _html_ok(client.get("/?pattern=head_shoulders_top"))
+    html = _html_ok(client.get("/screener?pattern=head_shoulders_top"))
     assert "/symbol/NYSE:HS" in html and "/symbol/NASDAQ:DB" not in html
     data = client.get("/api/scan?pattern=head_shoulders_top").json()
     assert data["total"] == 1
@@ -82,7 +84,7 @@ def test_without_pattern_filters_every_scanned_stock_is_listed(client):
 def test_bad_filter_values_are_reported_not_applied(client):
     data = client.get("/api/scan?rsi_min=abc&pattern=nope&family=weird").json()
     assert data["total"] == 3 and len(data["errors"]) == 3
-    html = _html_ok(client.get("/?rsi_min=abc"))
+    html = _html_ok(client.get("/screener?rsi_min=abc"))
     assert "RSI מינימלי" in html
 
 
@@ -94,7 +96,8 @@ def test_symbol_page_embeds_chart_data_with_lines_on_real_sessions(client):
     hs = next(d for d in chart["detections"] if d["pattern"] == "head_shoulders_top")
     assert hs["lines"] and all(ln["x1"] in days and ln["x2"] in days for ln in hs["lines"])
     assert all(p["date"] in days for p in hs["points"])
-    assert len(chart["sma50"]) == len(chart["candles"]) - 49 and chart["sma200"] == []
+    assert len(chart["sma50"]) == len(chart["candles"]) - 49
+    assert len(chart["sma150"]) == len(chart["candles"]) - 149
     assert "כלל המדידה של הספר, לא תחזית" in html
     assert 'id="p-head_shoulders_top"' in html                  # screener chips link here
 
@@ -123,7 +126,8 @@ def test_a_foreign_host_name_is_refused(client):
 
 def test_no_scan_yet(tmp_path):
     client = TestClient(create_app(Settings(root=tmp_path), rules=RULES), base_url=f"http://{HOST}")
-    assert "אין עדיין סריקה" in _html_ok(client.get("/"))
+    assert "אין עדיין סריקה" in _html_ok(client.get("/screener"))
+    assert "עוד אין פוסטים" in _html_ok(client.get("/"))
     _html_ok(client.get("/status"))
     _html_ok(client.get("/patterns"))
     assert client.get("/api/scan").status_code == 503
@@ -144,7 +148,7 @@ def test_changed_rules_are_flagged(tmp_path):
     changed = load_rules()
     object.__setattr__(changed, "digest", "not-the-scan")
     client = TestClient(create_app(settings, rules=changed), base_url=f"http://{HOST}")
-    assert "rules.yaml השתנה מאז הסריקה" in _html_ok(client.get("/"))
+    assert "rules.yaml השתנה מאז הסריקה" in _html_ok(client.get("/screener"))
     assert client.get("/api/scan").json()["rules_changed_since_scan"] is True
 
 
@@ -155,7 +159,7 @@ def _view():
         "description": ["Alpha Corp", "Beta Inc", "Gamma plc"], "exchange": ["NYSE", "NASDAQ", "NYSE"],
         "sector": ["Finance", "Utilities", "Finance"], "market_cap": [5e9, 50e9, 1.5e9],
         "rsi14": [25.0, 55.0, np.nan], "above_sma50": [True, False, None],
-        "above_sma200": [None, True, False], "rel_volume": [2.0, 0.8, 1.2],
+        "above_sma150": [None, True, False], "rel_volume": [2.0, 0.8, 1.2],
         "pct_from_52w_high": [-2.0, -30.0, -8.0], "atr_pct": [1.0, 3.0, 5.0],
         "avg_dollar_volume_20d": [50e6, 5e6, 20e6],
         "golden_cross_days_ago": [3.0, np.nan, np.nan], "death_cross_days_ago": [np.nan, 7.0, np.nan],
@@ -181,7 +185,7 @@ def _run(url_query: str):
     ("sector=Finance", ["NYSE:AAA", "NYSE:CCC"]),
     ("rsi_max=30", ["NYSE:AAA"]),                                  # NaN RSI never passes
     ("sma50=above", ["NYSE:AAA"]), ("sma50=below", ["NASDAQ:BBB"]),
-    ("sma200=below", ["NYSE:CCC"]),                                # None (too few bars) passes neither
+    ("sma150=below", ["NYSE:CCC"]),                                # None (too few bars) passes neither
     ("near_high=5", ["NYSE:AAA"]), ("relvol_min=1.1", ["NYSE:AAA", "NYSE:CCC"]),
     ("atr_min=2&atr_max=4", ["NASDAQ:BBB"]), ("dollar_vol_min=10", ["NYSE:AAA", "NYSE:CCC"]),
     ("cross=golden", ["NYSE:AAA"]), ("cross=death", ["NASDAQ:BBB"]),
@@ -217,7 +221,7 @@ def test_paging():
 
 def test_query_survives_a_round_trip_through_its_url():
     q = parse_query(QueryParams("pattern=hammer&pattern=flag&status=breakout&rsi_min=30.5"
-                                "&sma200=above&sort=rsi14&order=asc&page=3"), RULES)
+                                "&sma150=above&sort=rsi14&order=asc&page=3"), RULES)
     back = parse_query(QueryParams(q.url(page=3).split("?", 1)[1]), RULES)
     assert back == q and not q.errors
 
@@ -332,12 +336,12 @@ def test_security_headers(client):
 
 
 def test_search_text_is_escaped(client):
-    html = client.get("/", params={"q": '<script>alert(1)</script>"'}).text
+    html = client.get("/screener", params={"q": '<script>alert(1)</script>"'}).text
     assert "<script>alert(1)" not in html and "&lt;script&gt;alert(1)" in html
 
 
 @pytest.mark.parametrize("referer, expected", [
-    (f"http://{HOST}/?family=chart&sort=age", "/?family=chart&amp;sort=age"),
+    (f"http://{HOST}/screener?family=chart&sort=age", "/screener?family=chart&amp;sort=age"),
     ("https://evil.example/?x=1", None),
     (f"http://{HOST}/symbol/NASDAQ:DB", None),
 ])
@@ -346,3 +350,25 @@ def test_back_link_only_leads_back_into_this_site(client, referer, expected):
     back = re.search(r'<a href="([^"]*)">→ חזרה לתוצאות</a>', html)
     assert (back.group(1) if back else None) == expected
     assert "evil.example" not in html
+
+
+def test_old_screener_links_are_redirected(client):
+    response = client.get("/?family=chart&pattern=flag", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/screener?family=chart&pattern=flag"
+    assert client.get("/", follow_redirects=False).status_code == 200      # the channels
+
+
+def test_screener_links_point_at_the_screener(client):
+    html = _html_ok(client.get("/screener?pattern=head_shoulders_top"))
+    assert 'href="/?' not in html and 'action="/screener"' in html
+
+
+def test_the_sidebar_lists_the_channels_and_the_tools(client):
+    html = _html_ok(client.get("/patterns"))
+    assert 'href="/c/head_shoulders_top"' in html and '<span class="cname">כללי</span>' in html
+    assert 'href="/screener"' in html and "סוכני AI" in html
+
+
+def test_unknown_channel_is_404(client):
+    assert client.get("/c/no_such_pattern").status_code == 404

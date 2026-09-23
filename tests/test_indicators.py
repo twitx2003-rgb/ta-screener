@@ -35,7 +35,7 @@ def test_latest_reports_crosses_and_52_week_distance():
     closes = [100.0] * 220 + [100 + 2 * i for i in range(1, 21)]          # a late rally
     rows = [(c, c + 1, c - 1, c) for c in closes]
     values = latest(frame(rows))
-    assert values["above_sma50"] is True and values["above_sma200"] is True
+    assert values["above_sma50"] is True and values["above_sma150"] is True
     assert values["pct_from_52w_high"] == pytest.approx((140 / 141 - 1) * 100)
     assert values["golden_cross_days_ago"] >= 0
     assert values["bars"] == 240
@@ -44,7 +44,22 @@ def test_latest_reports_crosses_and_52_week_distance():
 def test_short_history_gives_nan_not_a_guess():
     rows = [(10.0, 11.0, 9.0, 10.0)] * 30
     values = latest(frame(rows))
-    assert math.isnan(values["sma200"]) and values["above_sma200"] is None
+    assert math.isnan(values["sma150"]) and values["above_sma150"] is None
+
+
+def test_the_long_average_is_150_sessions():
+    closes = [float(i) for i in range(1, 181)]
+    values = latest(frame([(c, c + 1, c - 1, c) for c in closes]))
+    assert values["sma150"] == pytest.approx(sum(closes[-150:]) / 150)
+    assert "sma200" not in values and "above_sma200" not in values
+
+
+def test_golden_cross_is_sma50_over_sma150():
+    # 190 bars: too few for a 200-day average, enough for 150
+    closes = [100.0 - 0.1 * i for i in range(170)] + [83.0 + 3 * i for i in range(1, 21)]
+    values = latest(frame([(c, c + 1, c - 1, c) for c in closes]))
+    assert 0 <= values["golden_cross_days_ago"] < 20
+    assert math.isnan(values["death_cross_days_ago"])
 
 
 def test_cross_check_counts_agreement():

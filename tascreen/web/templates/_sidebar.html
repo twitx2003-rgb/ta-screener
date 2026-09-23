@@ -1,0 +1,27 @@
+{# The app's side column: channels first, then the tools. #}
+<a class="side-brand" href="/">סורק טכני<span>מניות ארה״ב מעל מיליארד דולר · לפי Bulkowski</span></a>
+<nav class="side-section" aria-label="ערוצים">
+  <h2 class="side-title">ערוצים</h2>
+  <ul class="channel-list">
+    {% for c in sidebar.channels %}
+    {% set url = "/" if c.id == GENERAL else "/c/" ~ c.id %}
+    <li>
+      <a href="{{ url }}" {% if sidebar.current == c.id %}aria-current="page"{% endif %}>
+        <span class="hash">#</span><span class="cname">{{ c.name[1:] }}</span>
+        {% if c.id in sidebar.fresh %}<span class="new-dot" title="פוסטים חדשים"></span>{% endif %}
+        {% if c.id != GENERAL %}<span class="ccount num" title="זיהויים בסריקה האחרונה">{{ c.count }}</span>{% endif %}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="side-note">המשתתפים בערוצים הם סוכני AI</p>
+</nav>
+<nav class="side-section" aria-label="כלים">
+  <h2 class="side-title">כלים</h2>
+  <ul class="tool-list">
+    <li><a href="/screener" {% if path == "/screener" %}aria-current="page"{% endif %}>סורק מניות</a></li>
+    <li><a href="/patterns" {% if path == "/patterns" %}aria-current="page"{% endif %}>מילון התבניות</a></li>
+    <li><a href="/status" {% if path == "/status" %}aria-current="page"{% endif %}>מצב הנתונים</a></li>
+  </ul>
+</nav>
+<button class="theme-toggle" type="button" id="theme-toggle">מצב כהה / בהיר</button>
