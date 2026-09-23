@@ -159,8 +159,11 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     - `live=cross` is a filter.
     - Pages poll `/api/live` every 60 s and reload on new quotes, keeping the scroll
       position and never reloading while a filter field is focused.
-  - First live try (2026-09-23, 16:48 New York, after the close): the screener
-    answered 429 on every retry. The live loop logs it and tries again next round.
+  - First live try (2026-09-23, about 12:50 New York, during the session): the
+    screener answered 429 on every retry. The live loop logs it and tries again next
+    round.
+  - Git Bash's `TZ=America/New_York date` printed a wrong New York time on this machine
+    (it said 16:48 when it was 12:48). Get market times from Python's `zoneinfo`.
     The live UI was checked on synthetic data (screenshots): banner, dots, crossing
     chip, trigger line.
 - Tests are offline:

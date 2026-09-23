@@ -393,6 +393,7 @@ def live(settings) -> int:
     print(f"\nLive: every stock's price every {cfg.interval_minutes:g} min during the US session"
           + (", then the daily update after the close" if cfg.update_after_close else "")
           + ". Ctrl+C stops.\n")
+    wait = cfg.interval_minutes          # grows while the screener keeps answering 429
     try:
         while True:
             now = datetime.now(timezone.utc)
@@ -400,14 +401,17 @@ def live(settings) -> int:
                 started = clock.monotonic()
                 try:
                     s = refresh_quotes(settings, client)
+                    wait = cfg.interval_minutes
                     log.info("quotes: %d stocks, %d calls, %.0f s%s", s["rows"], s["calls"],
                              s["seconds"], "" if s["complete"] else f", {s['missing']} missed")
                 except RateLimited as exc:
-                    log.warning("screener rate limited (%s); next try in %g min", exc,
-                                cfg.interval_minutes)
+                    # Knocking every few minutes on a scanner that answers 429 for hours
+                    # only prolongs it: back off, doubling up to 30 minutes.
+                    wait = min(wait * 2, max(30.0, cfg.interval_minutes))
+                    log.warning("screener rate limited (%s); next try in %g min", exc, wait)
                 except ScreenerError as exc:
                     log.error("quotes failed: %s", exc)
-                clock.sleep(max(5.0, cfg.interval_minutes * 60 - (clock.monotonic() - started)))
+                clock.sleep(max(5.0, wait * 60 - (clock.monotonic() - started)))
                 continue
             target = _target(settings)
             done_for = store.read_live_state().get("daily_update_for")
