@@ -20,13 +20,23 @@ py -3.14 -m venv .venv
 .venv\Scripts\python.exe -m pytest -q
 .venv\Scripts\python.exe run.py --auth-tradingview    # sign in to tradingview.com in your browser first
 .venv\Scripts\python.exe run.py --discover
+.venv\Scripts\python.exe run.py --universe          # US stocks above $1B
+.venv\Scripts\python.exe run.py --bars              # daily bars (resumable)
+.venv\Scripts\python.exe run.py --scan              # indicators + patterns
+.venv\Scripts\python.exe run.py --serve             # the website, http://127.0.0.1:8050/
 ```
 
 ## Status
 
-Built: the TradingView connection, the stock universe with daily bars, and the scan (indicators, candlesticks, chart patterns). Still to come:
+Built:
 
-- the website.
+- the TradingView connection;
+- the stock universe, with daily bars;
+- the scan: indicators, candlesticks and chart patterns;
+- the local website: screener, chart per stock with the pattern drawn and its rule
+  checklist, pattern glossary, and data status.
+
+Still to come: more Claude Code skills and agents, and scheduling.
 
 ## Not financial advice
 

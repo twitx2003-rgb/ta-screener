@@ -127,12 +127,30 @@ class BarsSettings:
             raise ConfigError("bars.session_batch and bars.concurrency must be >= 1")
 
 
+@dataclass(frozen=True)
+class WebSettings:
+    # The site always binds to 127.0.0.1 (TradingView data may not be served to
+    # others); the host is deliberately not a setting.
+    port: int = 8050
+    open_browser: bool = True
+    rows_per_page: int = 100
+
+    def __post_init__(self):
+        object.__setattr__(self, "port", int(self.port))
+        object.__setattr__(self, "rows_per_page", int(self.rows_per_page))
+        if not 1024 <= self.port <= 65535:
+            raise ConfigError("web.port must be 1024..65535")
+        if not 10 <= self.rows_per_page <= 1000:
+            raise ConfigError("web.rows_per_page must be 10..1000")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
     "market": MarketSettings,
     "universe": UniverseSettings,
     "bars": BarsSettings,
+    "web": WebSettings,
 }
 
 
@@ -144,6 +162,7 @@ class Settings:
     market: MarketSettings = field(default_factory=MarketSettings)
     universe: UniverseSettings = field(default_factory=UniverseSettings)
     bars: BarsSettings = field(default_factory=BarsSettings)
+    web: WebSettings = field(default_factory=WebSettings)
 
     @property
     def data_dir(self) -> Path:

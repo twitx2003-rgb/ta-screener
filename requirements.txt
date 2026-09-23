@@ -8,3 +8,10 @@ numpy>=2
 PyYAML>=6
 tzdata
 pytest>=8
+# Website (phase 3). Starlette and uvicorn also come with mcp; starlette's version
+# is left to mcp's pin.
+fastapi>=0.141
+jinja2>=3.1
+uvicorn>=0.53
+# Tests only: FastAPI's TestClient
+httpx>=0.28

@@ -63,6 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scan-symbol", metavar="SYMBOL",
                         help="Scan one symbol from stored bars and print every detection with "
                              "its rule checklist (e.g. NASDAQ:NVDA)")
+    parser.add_argument("--serve", action="store_true",
+                        help="Open the website on http://127.0.0.1:<web.port>/ (this computer only; "
+                             "reads the newest scan, never calls TradingView)")
     parser.add_argument("--limit", type=int, metavar="N",
                         help="With --bars/--update: only the N largest symbols (a pilot run)")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -327,6 +330,22 @@ def scan_symbol(settings, symbol: str) -> int:
     return 0
 
 
+def serve(settings) -> int:
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    from tascreen.web.app import HOST, create_app
+
+    url = f"http://{HOST}:{settings.web.port}/"
+    print(f"\nThe screener is at {url} (this computer only). Ctrl+C stops it.\n")
+    if settings.web.open_browser:
+        threading.Timer(1.5, webbrowser.open, (url,)).start()
+    uvicorn.run(create_app(settings), host=HOST, port=settings.web.port, log_level="warning")
+    return 0
+
+
 def update(settings, limit: int | None) -> int:
     from tascreen.tv.data import RateLimited
 
@@ -359,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.check_bars, lambda: check_bars(settings)),
         (args.scan, lambda: scan(settings)),
         (args.scan_symbol, lambda: scan_symbol(settings, args.scan_symbol.strip().upper())),
+        (args.serve, lambda: serve(settings)),
     )
     for requested, command in commands:
         if requested:

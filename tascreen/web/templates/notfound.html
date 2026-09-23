@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}לא נמצא · סורק טכני{% endblock %}
+{% block content %}
+<section class="panel" style="margin-top: 18px">
+  <h1>לא נמצא</h1>
+  <p style="margin-top: 8px">המניה <span class="mono">{{ what }}</span> לא נמצאת בסריקה האחרונה. הסימול צריך להיות בפורמט של TradingView, בורסה:סימול, למשל <a class="mono" href="/symbol/NASDAQ:AAPL">NASDAQ:AAPL</a>.</p>
+  <p style="margin-top: 8px"><a href="/">→ לסורק</a></p>
+</section>
+{% endblock %}

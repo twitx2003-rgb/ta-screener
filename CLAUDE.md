@@ -52,6 +52,7 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --check-bars          # bars vs trading calendar -> logs/bars_audit.json
 .venv\Scripts\python.exe run.py --scan                # indicators + patterns -> data/scans/<session>/ (~3 min)
 .venv\Scripts\python.exe run.py --scan-symbol NASDAQ:NVDA   # one symbol's detections with checklists
+.venv\Scripts\python.exe run.py --serve               # website on http://127.0.0.1:8050/ (opens the browser)
 ```
 
 For a long run from a Claude Code session, start a detached process: the tool kills
@@ -94,6 +95,24 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 - A daily bar is a close only after `market.session_close` (16:15 New York); see
   `tascreen/market_hours.py`.
 - Config is in `config.yaml`. Unknown sections and keys are rejected.
+- **The website (`tascreen/web/`) only reads** data/ and logs/; it never calls
+  TradingView, so it can stay open during `--bars`.
+  - It binds to `web.app.HOST` = 127.0.0.1. The host is deliberately not a setting,
+    and `TrustedHostMiddleware` refuses other Host names (DNS rebinding).
+  - `ScanRepository` reloads when a newer `scan.json` appears.
+  - `/` and `/api/scan` share one filter model (`web/filters.py`), and filters live in
+    the URL. A bad value is dropped and reported in Hebrew, never guessed.
+  - No raw nan/None/NaT on a page: formatters print "—", `fmt.script_json` refuses
+    NaN, and `fmt.page_problems` is asserted on every page in `tests/test_web.py`.
+  - RTL: numbers go in `num` spans (LTR). English names get LTR isolation (`.co`),
+    or a trailing period jumps to the wrong end. Numeric inputs are LTR, so their
+    placeholders are digits only; Hebrew in them comes out reversed.
+  - Hebrew wording for sectors, statuses and rule parameters lives in `web/labels.py`;
+    a test checks that every rules.yaml parameter has a label.
+  - Chart: TradingView Lightweight Charts 5.2.1, vendored in `web/static/vendor/`
+    with its LICENSE/NOTICE. The API was read from its typings, v5 style:
+    `addSeries(LC.CandlestickSeries, ...)`, `createSeriesMarkers`. The footer
+    NOTICE line and `attributionLogo` are licence requirements.
 - Tests are offline:
   - an in-process MCP server;
   - a local OAuth server for the sign-in flow (`tests/test_mcp_client.py`).
@@ -122,7 +141,9 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
       skill with "mcp" in its name over the built-in command) and `bulkowski-patterns`;
     - agent: `pattern-verifier`.
   - Planned: the skills `daily-update` and `add-pattern`, and the agents
-    `setup-analyst` and `screener-scout`.
+    `setup-analyst` and `screener-scout`. The agents should read the site's JSON
+    (`/api/scan` with the page's filters, and `/api/symbol/{EXCHANGE:TICKER}` with
+    checklists) rather than parquet files.
 
 ## Verified facts (from market-research-pipeline's live runs, 2026-09)
 
@@ -301,6 +322,43 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
       in this folder, where the MCP is connected);
     - the user reviews rules.yaml;
     - a full scan once all bars are in.
+
+- **Phases 1+2 approved by the user 2026-09-23** ("מאשר").
+  - At that point the `get-ohlcv` throttle had not lifted: a single call took 56 s,
+    about 2 hours after the heavy run.
+  - So bars are still 1,008 of ~2,370; resuming with pacing is pending.
+- **Phase 3 (website): BUILT 2026-09-23. Review is pending.**
+  - Code: `tascreen/web/{app,data,filters,fmt,labels}.py`, templates and static files.
+    `run.py --serve` serves 127.0.0.1:8050 (config section `web`: port,
+    open_browser, rows_per_page).
+  - Pages:
+    - `/`: the screener. A filter panel covers stock, patterns and indicators, and
+      filters live in the URL. There are quick presets and removable
+      active-filter chips. The table is sortable, with the patterns column second.
+    - `/symbol/X`: the chart with the selected detection's lines, points, breakout
+      and target price lines, a picker, and a card per detection with its checklist
+      and the origin of each threshold.
+    - `/patterns`: the glossary built from rules.yaml, with Hebrew parameter
+      labels, site/ours chips and live counts.
+    - `/status`: scan, cross-check, universe, bars and audit.
+    - `/api/scan` and `/api/symbol/X`.
+  - Checked live on the 1,008-symbol scan: every page 200, no nan/None, 40-110 ms
+    per page (the first load of a scan ~300 ms).
+  - Screenshots with headless Edge, which on this machine needs all of these:
+    - Windows paths for `--screenshot` and `--user-data-dir` (MSYS paths write nothing);
+    - a separate `--user-data-dir` per shot (a reused profile silently skipped the
+      second shot);
+    - `Start-Process -Wait` from PowerShell;
+    - `--virtual-time-budget=8000` for the chart.
+    - Headless windows are at least **504 px** wide: a 400 px shot shows the left
+      part of a 504 px page. Phone layouts are therefore checked at 500 px.
+    - `--blink-settings=preferredColorScheme=1` forces the light theme.
+  - Fixed from screenshots:
+    - the patterns column was last and off-screen, so it now comes second;
+    - English names had their final period on the wrong side;
+    - Hebrew placeholders in numeric inputs came out reversed;
+    - on phones, the grid column must be `minmax(0, 1fr)`, or the table widens the page;
+    - candle detections sorted before chart patterns.
 
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 

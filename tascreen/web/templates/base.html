@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}סורק טכני{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Hebrew:wght@400;600&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+<script>
+  try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <a class="brand" href="/">סורק טכני<span>מניות ארה״ב מעל מיליארד דולר · לפי Bulkowski</span></a>
+    <nav aria-label="ניווט">
+      <a href="/" {% if path == "/" %}aria-current="page"{% endif %}>סורק</a>
+      <a href="/patterns" {% if path == "/patterns" %}aria-current="page"{% endif %}>מילון התבניות</a>
+      <a href="/status" {% if path == "/status" %}aria-current="page"{% endif %}>מצב הנתונים</a>
+    </nav>
+    <button class="theme-toggle" type="button" id="theme-toggle">מצב כהה / בהיר</button>
+  </div>
+</header>
+<div class="wrap">
+  {% if view %}
+  <div class="banner">
+    <span>סריקה של יום המסחר <strong class="num">{{ view.day|day }}</strong></span>
+    <span><strong class="num">{{ "{:,}".format(view.summary.symbols_scanned) }}</strong> מניות נסרקו מתוך <span class="num">{{ "{:,}".format(view.summary.symbols_in_universe) }}</span> ברשימה</span>
+    {% set nobars = view.summary.symbols_without_bars|length %}
+    {% if nobars %}<span class="muted">ל-<span class="num">{{ "{:,}".format(nobars) }}</span> מניות עדיין אין נרות (<a href="/status">פרטים</a>)</span>{% endif %}
+  </div>
+  {% endif %}
+  {% if stale_rules %}
+  <div class="banner warn">הקובץ rules.yaml השתנה מאז הסריקה, ולכן התוצאות לפי הכללים הקודמים. להרצה מחדש: <span class="mono">run.py --scan</span></div>
+  {% endif %}
+  <main>{% block content %}{% endblock %}</main>
+</div>
+<footer>
+  <p class="disclaimer"><strong>לא ייעוץ השקעות.</strong> כל מה שמוצג כאן הוא קריאה מכנית של מחירי עבר לפי כללי הזיהוי שבספרים של Thomas Bulkowski, בניסוח שלנו. יעד מחיר הוא כלל המדידה של הספר, גובה התבנית שמוסף לנקודת הפריצה, ולא תחזית. תבנית שזוהתה אינה המלצה לקנות או למכור.</p>
+  <p class="attrib">הנתונים: TradingView, לשימוש אישי בלבד. הגרפים: TradingView Lightweight Charts™ · Copyright (c) 2025 TradingView, Inc. · <a href="https://www.tradingview.com/" rel="noopener">tradingview.com</a></p>
+</footer>
+<script>
+  document.getElementById("theme-toggle").addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark"
+      : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
+    document.dispatchEvent(new Event("themechange"));
+  });
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

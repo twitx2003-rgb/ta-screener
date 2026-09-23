@@ -52,3 +52,9 @@ market:
   # Today's daily bar is used only after this New York time (after the close
   # auction has printed); before it, the bar is a partial session and is dropped.
   session_close: "16:15"
+
+web:
+  # The site listens on 127.0.0.1 only (not configurable: the data is for your own use).
+  port: 8050
+  open_browser: true         # --serve opens the screener in the default browser
+  rows_per_page: 100

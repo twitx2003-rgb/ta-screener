@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}סורק טכני · {{ result.total }} מניות{% endblock %}
+
+{% macro number(name, label, step="any", placeholder="") -%}
+  <div class="field">
+    <label for="f-{{ name }}">{{ label }}</label>
+    <input type="number" inputmode="decimal" id="f-{{ name }}" name="{{ name }}" step="{{ step }}"
+           placeholder="{{ placeholder }}" value="{{ '%g'|format(query[name]) if query[name] is not none else '' }}">
+  </div>
+{%- endmacro %}
+
+{% macro side(name, label) -%}
+  <div class="field">
+    <label for="f-{{ name }}">{{ label }}</label>
+    <select id="f-{{ name }}" name="{{ name }}">
+      <option value="">הכול</option>
+      <option value="above" {% if query[name] == "above" %}selected{% endif %}>המחיר מעל הממוצע</option>
+      <option value="below" {% if query[name] == "below" %}selected{% endif %}>המחיר מתחת לממוצע</option>
+    </select>
+  </div>
+{%- endmacro %}
+
+{% macro pattern_boxes(group) -%}
+  {% for key, spec in group.items() %}
+    <label><input type="checkbox" name="pattern" value="{{ key }}" {% if key in query.patterns %}checked{% endif %}>
+      {{ spec.name_he }}<span class="count">{{ facets.counts.get(key, 0) }}</span></label>
+  {% endfor %}
+{%- endmacro %}
+
+{% block content %}
+<div class="layout">
+  <details class="filters" id="filters" open>
+    <summary>סינון</summary>
+    <form method="get" action="/">
+      <input type="hidden" name="sort" value="{{ query.sort }}">
+      {% if query.order %}<input type="hidden" name="order" value="{{ query.order }}">{% endif %}
+
+      <fieldset>
+        <legend>מניה</legend>
+        <div class="field">
+          <label for="f-q">סימול או שם חברה</label>
+          <input type="search" id="f-q" name="q" value="{{ query.q }}" placeholder="לדוגמה NVDA">
+        </div>
+        <div class="field">
+          <label for="f-sector">סקטור</label>
+          <select id="f-sector" name="sector">
+            <option value="">כל הסקטורים</option>
+            {% for he, en in facets.sectors %}<option value="{{ en }}" {% if query.sector == en %}selected{% endif %}>{{ he }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-exchange">בורסה</label>
+          <select id="f-exchange" name="exchange">
+            <option value="">כל הבורסות</option>
+            {% for ex in facets.exchanges %}<option value="{{ ex }}" {% if query.exchange == ex %}selected{% endif %}>{{ ex }}</option>{% endfor %}
+          </select>
+        </div>
+        <span class="pair-label">שווי שוק, במיליארדי דולרים</span>
+        <div class="pair">
+          {{ number("mcap_min", "מ-", placeholder="1") }}
+          {{ number("mcap_max", "עד", placeholder="∞") }}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>תבניות</legend>
+        <div class="field">
+          <label for="f-family">סוג</label>
+          <select id="f-family" name="family">
+            <option value="">בלי סינון תבניות</option>
+            <option value="any" {% if query.family == "any" %}selected{% endif %}>כל תבנית</option>
+            <option value="chart" {% if query.family == "chart" %}selected{% endif %}>תבניות גרף</option>
+            <option value="candle" {% if query.family == "candle" %}selected{% endif %}>תבניות נרות</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-direction">כיוון</label>
+          <select id="f-direction" name="direction">
+            <option value="">שורי ודובי</option>
+            <option value="bullish" {% if query.direction == "bullish" %}selected{% endif %}>שורי</option>
+            <option value="bearish" {% if query.direction == "bearish" %}selected{% endif %}>דובי</option>
+          </select>
+        </div>
+        <span class="pair-label">מצב</span>
+        <div class="checks">
+          {% for status in STATUSES %}
+          <label title="{{ labels.STATUS_HELP[status] }}"><input type="checkbox" name="status" value="{{ status }}" {% if status in query.statuses %}checked{% endif %}> {{ labels.STATUS[status] }}</label>
+          {% endfor %}
+        </div>
+        {{ number("within", "פריצה או אות בימי המסחר האחרונים (מספר ימים)", step="1", placeholder="5") }}
+        <details class="group" {% if query.patterns|select("in", rules.chart)|list %}open{% endif %}>
+          <summary>תבניות גרף</summary>
+          <div class="checks">{{ pattern_boxes(rules.chart) }}</div>
+        </details>
+        <details class="group" {% if query.patterns|select("in", rules.candle)|list %}open{% endif %}>
+          <summary>תבניות נרות</summary>
+          <div class="checks">{{ pattern_boxes(rules.candle) }}</div>
+        </details>
+      </fieldset>
+
+      <fieldset>
+        <legend>אינדיקטורים</legend>
+        <span class="pair-label">RSI (14)</span>
+        <div class="pair">
+          {{ number("rsi_min", "מ-", placeholder="0") }}
+          {{ number("rsi_max", "עד", placeholder="100") }}
+        </div>
+        {{ side("sma50", "מול ממוצע 50 יום") }}
+        {{ side("sma200", "מול ממוצע 200 יום") }}
+        <div class="field">
+          <label for="f-cross">חציית ממוצעים ב-20 הימים האחרונים</label>
+          <select id="f-cross" name="cross">
+            <option value="">הכול</option>
+            <option value="golden" {% if query.cross == "golden" %}selected{% endif %}>חציית זהב (50 מעל 200)</option>
+            <option value="death" {% if query.cross == "death" %}selected{% endif %}>חציית מוות (50 מתחת ל-200)</option>
+          </select>
+        </div>
+        {{ number("relvol_min", "נפח יחסי מינימלי (נפח היום / ממוצע 50 יום)", placeholder="1.5") }}
+        {{ number("near_high", "עד כמה אחוזים מתחת לשיא של 52 שבועות", placeholder="5") }}
+        <span class="pair-label">ATR% (תנודתיות יומית)</span>
+        <div class="pair">
+          {{ number("atr_min", "מ-") }}
+          {{ number("atr_max", "עד") }}
+        </div>
+        {{ number("dollar_vol_min", "מחזור דולרי יומי ממוצע, מיליוני $", placeholder="20") }}
+      </fieldset>
+
+      <div class="actions">
+        <button class="btn" type="submit">סנן</button>
+        <a class="btn ghost" href="/">ניקוי</a>
+      </div>
+    </form>
+  </details>
+
+  <section aria-label="תוצאות">
+    <div class="presets" aria-label="סינונים מהירים">
+      <a href="/?family=chart&amp;status=breakout&amp;within=5&amp;sort=age">פריצות מתבניות גרף, 5 ימים אחרונים</a>
+      <a href="/?family=chart&amp;status=forming">תבניות גרף בבנייה</a>
+      <a href="/?family=candle&amp;direction=bullish&amp;within=1">נרות שוריים ביום האחרון</a>
+      <a href="/?family=candle&amp;direction=bearish&amp;within=1">נרות דוביים ביום האחרון</a>
+      <a href="/?near_high=3&amp;relvol_min=1.5">ליד שיא שנתי, בנפח גבוה</a>
+      <a href="/?rsi_max=30">RSI מתחת ל-30</a>
+      <a href="/?cross=golden">חציית זהב</a>
+    </div>
+
+    {% if query.errors %}
+    <div class="errors" role="alert">{% for e in query.errors %}<div>{{ e }}</div>{% endfor %}</div>
+    {% endif %}
+
+    <div class="results-head">
+      <span class="count"><span class="num">{{ "{:,}".format(result.total) }}</span> מניות</span>
+      {% if query.pattern_filter %}<span class="muted small"><span class="num">{{ result.detections }}</span> זיהויים תואמים</span>{% endif %}
+      {% set active = query.active(rules) %}
+      {% if active %}
+      <div class="active">
+        {% for text, url in active %}<a class="chip accent" href="{{ url }}" title="הסרת הסינון">{{ text }} <span class="x">✕</span></a>{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    {% if result.rows %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {% macro head(key, text) -%}
+              <th scope="col"><a href="{{ query.sort_url(key) }}" {% if query.sort == key %}aria-sort="{{ 'ascending' if query.sort_order == 'asc' else 'descending' }}"{% endif %}>{{ text }}{% if query.sort == key %} {{ '▲' if query.sort_order == 'asc' else '▼' }}{% endif %}</a></th>
+            {%- endmacro %}
+            {{ head("symbol", "מניה") }}
+            {{ head("age", "תבניות") }}
+            {{ head("market_cap", "שווי שוק") }}
+            <th scope="col">מחיר</th>
+            {{ head("change_1d_pct", "יומי") }}
+            {{ head("change_20d_pct", "20 ימים") }}
+            {{ head("rsi14", "RSI") }}
+            <th scope="col" title="המחיר מעל (↑) או מתחת (↓) לממוצע 50 ו-200 יום">ממוצעים</th>
+            {{ head("rel_volume", "נפח יחסי") }}
+            {{ head("pct_from_52w_high", "מהשיא השנתי") }}
+            {{ head("atr_pct", "ATR%") }}
+            <th scope="col">סקטור</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in result.rows %}
+          <tr>
+            <td><a class="tick" href="{{ row.symbol|symbol_url }}">{{ row.ticker }}</a><span class="co" title="{{ row.description or '' }}">{{ row.description or row.exchange }}</span></td>
+            <td>
+              <div class="matches">
+              {% for m in row.matches %}
+                <a class="chip {{ 'up' if m.direction == 'bullish' else ('down' if m.direction == 'bearish' else '') }}"
+                   href="{{ row.symbol|symbol_url }}#p-{{ m.pattern }}"
+                   title="{{ labels.FAMILY[m.family] }} · {{ labels.DIRECTION[m.direction] }} · {{ m.event_day|day }}">{{ m.name_he }} · {{ labels.STATUS[m.status] }}</a>
+              {% endfor %}
+              </div>
+            </td>
+            <td class="n"><span class="num">{{ row.market_cap|money }}</span></td>
+            <td class="n"><span class="num">{{ row.close|price }}</span></td>
+            <td class="n"><span class="num {{ row.change_1d_pct|sign }}">{{ row.change_1d_pct|pct }}</span></td>
+            <td class="n"><span class="num {{ row.change_20d_pct|sign }}">{{ row.change_20d_pct|pct }}</span></td>
+            <td class="n"><span class="num">{{ row.rsi14|num(1) }}</span></td>
+            <td><span class="avg">
+              {% for n in (50, 200) %}{% set above = row["above_sma" ~ n] %}
+                {% if above is sameas true %}<span class="chip up" title="המחיר מעל ממוצע {{ n }} יום">{{ n }}↑</span>
+                {% elif above is sameas false %}<span class="chip down" title="המחיר מתחת לממוצע {{ n }} יום">{{ n }}↓</span>{% endif %}
+              {% endfor %}
+            </span></td>
+            <td class="n"><span class="num">{{ row.rel_volume|num(2) }}</span></td>
+            <td class="n"><span class="num">{{ row.pct_from_52w_high|pct }}</span></td>
+            <td class="n"><span class="num">{{ row.atr_pct|num(1) }}</span></td>
+            <td class="small">{{ row.sector|sector }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if result.pages > 1 %}
+    <nav class="pager" aria-label="עמודים">
+      {% if result.page > 1 %}<a href="{{ query.url(page=result.page - 1) }}">→ הקודם</a>{% endif %}
+      <span>עמוד <span class="num">{{ result.page }}</span> מתוך <span class="num">{{ result.pages }}</span></span>
+      {% if result.page < result.pages %}<a href="{{ query.url(page=result.page + 1) }}">הבא ←</a>{% endif %}
+    </nav>
+    {% endif %}
+    {% else %}
+    <div class="table-wrap"><p class="empty">אין מניות שעונות על כל הסינונים.</p></div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Phones: start with the filter panel folded (active filters show as chips above the results).
+  if (matchMedia("(max-width: 980px)").matches) {
+    document.getElementById("filters").removeAttribute("open");
+  }
+</script>
+{% endblock %}

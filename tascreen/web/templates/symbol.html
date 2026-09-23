@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}{{ stock.ticker }} · סורק טכני{% endblock %}
+
+{% macro fig(label, value, sub="", cls="") -%}
+  <div class="fig"><div class="label">{{ label }}</div><div class="value {{ cls }}">{{ value }}</div>{% if sub %}<div class="sub">{{ sub }}</div>{% endif %}</div>
+{%- endmacro %}
+
+{% block content %}
+<div class="sym-head">
+  <div>
+    <h1>{{ stock.symbol }}</h1>
+    <p class="meta">{{ stock.description or "" }} · {{ stock.sector|sector }}{% if stock.industry %} · <span dir="ltr">{{ stock.industry }}</span>{% endif %}</p>
+    <div class="links">
+      {% if back and "/symbol/" not in back %}<a href="{{ back }}">→ חזרה לתוצאות</a>{% else %}<a href="/">→ לסורק</a>{% endif %}
+      <a href="{{ stock.symbol|tradingview_url }}" target="_blank" rel="noopener">פתיחה ב-TradingView ↗</a>
+    </div>
+  </div>
+  <div>
+    <div class="px">{{ stock.close|price }}</div>
+    <p class="meta">סגירה ב-<span class="num">{{ stock.last_date|day }}</span> · <span class="num {{ stock.change_1d_pct|sign }}">{{ stock.change_1d_pct|pct }}</span> ביום · שווי שוק <span class="num">{{ stock.market_cap|money }}</span></p>
+  </div>
+</div>
+
+<div class="figs">
+  {{ fig("RSI (14)", stock.rsi14|num(1)) }}
+  {{ fig("ממוצע 50 יום", stock.sma50|price, ("המחיר מעל" if stock.above_sma50 is sameas true else ("המחיר מתחת" if stock.above_sma50 is sameas false else ""))) }}
+  {{ fig("ממוצע 200 יום", stock.sma200|price, ("המחיר מעל" if stock.above_sma200 is sameas true else ("המחיר מתחת" if stock.above_sma200 is sameas false else "פחות מ-200 ימי מסחר"))) }}
+  {{ fig("ATR (14)", stock.atr14|price, "תנודתיות יומית " ~ stock.atr_pct|pct(1, false)) }}
+  {{ fig("נפח יחסי", stock.rel_volume|num(2), "נפח היום / ממוצע 50 יום") }}
+  {{ fig("מהשיא השנתי", stock.pct_from_52w_high|pct, "שיא " ~ stock.high_52w|price, stock.pct_from_52w_high|sign) }}
+  {{ fig("מהשפל השנתי", stock.pct_from_52w_low|pct, "שפל " ~ stock.low_52w|price, stock.pct_from_52w_low|sign) }}
+  {{ fig("מחזור דולרי יומי", stock.avg_dollar_volume_20d|money, "ממוצע 20 יום") }}
+  {% if ok(stock.golden_cross_days_ago) %}{{ fig("חציית זהב", "לפני " ~ stock.golden_cross_days_ago|int ~ " ימים", "ממוצע 50 חצה מעל 200") }}{% endif %}
+  {% if ok(stock.death_cross_days_ago) %}{{ fig("חציית מוות", "לפני " ~ stock.death_cross_days_ago|int ~ " ימים", "ממוצע 50 חצה מתחת ל-200") }}{% endif %}
+  {% if stock.next_earnings %}{{ fig("דוחות הבאים", stock.next_earnings|day, "לפי TradingView, ייתכן שמשוער") }}{% endif %}
+</div>
+
+<section class="panel" aria-label="גרף">
+  {% if chart %}
+    {% if detections %}
+    <div class="picker" id="picker" role="group" aria-label="איזו תבנית לסמן בגרף">
+      {% for d in detections %}
+      <button type="button" data-id="{{ loop.index0 }}" aria-pressed="false">{{ d.name_he }} · {{ labels.STATUS[d.status] }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="chart-box" id="chart" aria-label="גרף נרות יומי של {{ stock.ticker }}"></div>
+    <div class="legend">
+      <span><span class="swatch" style="background: var(--sma50)"></span>ממוצע 50 יום</span>
+      <span><span class="swatch" style="background: var(--sma200)"></span>ממוצע 200 יום</span>
+      <span><span class="swatch" style="background: var(--accent)"></span>קווי התבנית</span>
+      <span><span class="swatch" style="background: var(--muted)"></span>יעד לפי כלל המדידה (לא תחזית)</span>
+    </div>
+    <script type="application/json" id="chart-data">{{ chart|safe }}</script>
+  {% else %}
+    <p class="empty">אין עדיין נרות שמורים למניה הזו.</p>
+  {% endif %}
+</section>
+
+{% if stock.patterns_skipped %}
+<p class="caution warn">בנתונים של המניה הזו יש חורים: רק <span class="num">{{ (stock.coverage * 100)|round(0)|int }}%</span> מימי המסחר האחרונים. לכן לא חיפשנו בה תבניות, כי חורים בסדרה יוצרים צורות מדומות.</p>
+{% endif %}
+
+{% if detections %}
+<h2 style="margin-top: 22px">תבניות שזוהו בסריקה</h2>
+{% set seen = namespace(keys=[]) %}
+{% for d in detections %}
+{% set spec = specs.get(d.pattern) %}
+<article class="panel det" id="{{ 'p-' ~ d.pattern if d.pattern not in seen.keys else 'det-' ~ loop.index0 }}" data-id="{{ loop.index0 }}">
+  {% set seen.keys = seen.keys + [d.pattern] %}
+  <div class="det-head">
+    <h3>{{ d.name_he }}</h3>
+    <span class="chip">{{ labels.FAMILY[d.family] }}</span>
+    <span class="chip {{ 'up' if d.direction == 'bullish' else ('down' if d.direction == 'bearish' else '') }}">{{ labels.DIRECTION[d.direction] }}</span>
+    <span class="chip {{ 'warn' if d.status == 'busted' else 'accent' }}" title="{{ labels.STATUS_HELP[d.status] }}">{{ labels.STATUS[d.status] }}</span>
+    {% if chart %}<button type="button" class="show-on-chart" data-id="{{ loop.index0 }}">הצגה בגרף</button>{% endif %}
+  </div>
+  <div class="det-facts">
+    <div><span class="k">{{ "הנר" if d.family == "candle" and d.start == d.end else "תקופה" }}</span>
+      {% if d.start == d.end %}<span class="num">{{ d.end|day }}</span>{% else %}<span class="num">{{ d.start|day }}</span> עד <span class="num">{{ d.end|day }}</span>{% endif %}</div>
+    {% if d.breakout_date is not none and d.breakout_date == d.breakout_date %}
+    <div><span class="k">פריצה</span><span class="num">{{ d.breakout_date|day }}</span> במחיר <span class="num">{{ d.breakout_price|price }}</span></div>
+    {% endif %}
+    {% if ok(d.height) %}<div><span class="k">גובה התבנית</span><span class="num">{{ d.height|price }}</span></div>{% endif %}
+    {% if ok(d.target) %}<div><span class="k">יעד לפי כלל המדידה</span><span class="num">{{ d.target|price }}</span><span class="muted small"> · כלל המדידה של הספר, לא תחזית</span></div>{% endif %}
+    {% if d.volume_trend %}<div><span class="k">מגמת נפח בתבנית</span>{{ labels.VOLUME_TREND[d.volume_trend] }}</div>{% endif %}
+  </div>
+  <table class="checklist">
+    <thead><tr><th scope="col">כלל</th><th scope="col">נמדד</th><th scope="col">סף</th><th scope="col">תוצאה</th><th scope="col">מקור הסף</th></tr></thead>
+    <tbody>
+    {% for c in d.checks %}
+      <tr>
+        <td>{{ c.label_he }}</td>
+        <td class="v">{{ c.value|check_text }}</td>
+        <td class="v">{{ c.threshold|check_text }}</td>
+        <td>{% if c.passed %}<span class="chip up">עבר</span>{% elif c.value is none %}<span class="chip">טרם</span>{% elif c.threshold == "info" %}<span class="chip">לידיעה</span>{% else %}<span class="chip down">לא עבר</span>{% endif %}</td>
+        <td><span class="chip {{ 'accent' if c.origin == 'site' else '' }}" title="{{ labels.ORIGIN_HELP[c.origin] }}">{{ labels.ORIGIN[c.origin] }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if spec %}<p class="small" style="margin-top: 8px"><a href="{{ spec.url }}" target="_blank" rel="noopener">הדף של התבנית באתר של Bulkowski ↗</a> · <a href="/patterns#{{ d.pattern }}">הכללים שלנו</a></p>{% endif %}
+</article>
+{% endfor %}
+{% elif not stock.patterns_skipped %}
+<p class="panel muted">לא זוהו תבניות במניה הזו בסריקה האחרונה.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if chart %}
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/symbol.js"></script>
+{% endif %}
+{% endblock %}

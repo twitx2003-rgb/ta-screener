@@ -52,6 +52,7 @@ class Rules:
     chart: dict[str, PatternRules]
     candle: dict[str, PatternRules]
     digest: str                  # identifies the rule set a scan used
+    confirmed_from_book: bool = False   # every number checked against the books?
 
     def g(self, name: str) -> float:
         if name not in self.general:
@@ -121,4 +122,5 @@ def load_rules(path: Path = RULES_PATH) -> Rules:
         chart={k: _pattern(k, v, "chart") for k, v in (raw.get("chart") or {}).items()},
         candle={k: _pattern(k, v, "candle") for k, v in (candle.get("patterns") or {}).items()},
         digest=hashlib.sha256(text.encode("utf-8")).hexdigest()[:12],
+        confirmed_from_book=raw.get("confirmed_from_book") is True,
     )

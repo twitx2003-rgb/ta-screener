@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}מילון התבניות · סורק טכני{% endblock %}
+
+{% macro params_table(params) -%}
+  <table class="params">
+    <thead><tr><th scope="col">פרמטר</th><th scope="col">ערך</th><th scope="col">מקור המספר</th><th scope="col">הערה (מקובץ הכללים)</th></tr></thead>
+    <tbody>
+    {% for name, p in params.items() %}
+      <tr>
+        <td>{{ labels.PARAMS.get(name, name) }}<div class="mono small muted">{{ name }}</div></td>
+        <td class="n"><span class="num">{{ "%g"|format(p.value) }}</span></td>
+        <td><span class="chip {{ 'accent' if p.origin == 'site' else '' }}" title="{{ labels.ORIGIN_HELP[p.origin] }}">{{ labels.ORIGIN[p.origin] }}</span></td>
+        <td class="note">{{ p.note }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{%- endmacro %}
+
+{% macro pattern_card(key, spec) -%}
+  <article class="panel pattern-card" id="{{ key }}">
+    <h2>{{ spec.name_he }} <span class="en">{{ spec.name_en }}</span>
+      {% if spec.direction != "either" %}<span class="chip {{ 'up' if spec.direction == 'bullish' else 'down' }}">{{ labels.DIRECTION[spec.direction] }}</span>
+      {% else %}<span class="chip">הכיוון נקבע בפריצה</span>{% endif %}
+      {% if view %}<a class="chip accent" href="/?pattern={{ key }}">{{ counts.get(key, 0) }} בסריקה האחרונה</a>{% endif %}
+    </h2>
+    <ul>{% for r in spec.rules_he %}<li>{{ r }}</li>{% endfor %}</ul>
+    {% if spec.params %}{{ params_table(spec.params) }}{% endif %}
+    <p class="small" style="margin-top: 8px"><a href="{{ spec.url }}" target="_blank" rel="noopener">הדף של התבנית באתר של Bulkowski ↗</a></p>
+  </article>
+{%- endmacro %}
+
+{% block content %}
+<h1 style="margin-top: 18px">מילון התבניות</h1>
+<p class="muted" style="max-width: 75ch; margin-top: 6px">
+  כללי הזיהוי כאן הם בניסוח שלנו, לפי כללי הזיהוי ש-Thomas Bulkowski מפרסם באתר שלו (thepatternsite.com), שמלווה את הספרים
+  <i>Encyclopedia of Chart Patterns</i> ו-<i>Encyclopedia of Candlestick Charts</i>. ליד כל מספר כתוב מאיפה הוא:
+  <span class="chip accent">Bulkowski</span> אם הוא מופיע בדף של התבנית, או <span class="chip">בחירה שלנו</span> אם Bulkowski מתאר את הכלל במילים בלבד.
+  כל הספים נמצאים בקובץ <span class="mono">tascreen/patterns/rules.yaml</span>.
+</p>
+{% if not rules.confirmed_from_book %}
+<p class="caution warn">אף סף עוד לא נבדק מול הספרים עצמם, רק מול האתר.</p>
+{% endif %}
+<p class="caution">יעד המחיר של תבנית גרף הוא כלל המדידה הקלאסי: גובה התבנית מוסף לנקודת הפריצה (או מופחת ממנה). Bulkowski מתאים את הכלל לפי הסטטיסטיקות בספרים; הסטטיסטיקות לא כלולות כאן, ולכן היעד הוא הגרסה הפשוטה ולא תחזית.</p>
+
+<nav class="toc" aria-label="תוכן">
+  {% for key, spec in rules.chart.items() %}<a class="chip" href="#{{ key }}">{{ spec.name_he }}</a>{% endfor %}
+</nav>
+<nav class="toc" aria-label="נרות">
+  {% for key, spec in rules.candle.items() %}<a class="chip" href="#{{ key }}">{{ spec.name_he }}</a>{% endfor %}
+  <a class="chip accent" href="#general">פרמטרים כלליים</a>
+</nav>
+
+<h2 style="margin-top: 22px">תבניות גרף</h2>
+{% for key, spec in rules.chart.items() %}{{ pattern_card(key, spec) }}{% endfor %}
+
+<h2 style="margin-top: 22px">תבניות נרות</h2>
+<p class="muted small">האתר החינמי של Bulkowski לא נותן הגדרות מספריות לנר "גבוה", "קטן", "דוג'י" או למגמה, ולכן המספרים של הנרות כמעט כולם בחירה שלנו. הם בטבלה בסוף הדף.</p>
+<div class="grid2">
+{% for key, spec in rules.candle.items() %}{{ pattern_card(key, spec) }}{% endfor %}
+</div>
+
+<h2 style="margin-top: 22px" id="general">פרמטרים כלליים</h2>
+<section class="panel"><h3>תבניות גרף</h3>{{ params_table(rules.general) }}</section>
+<section class="panel"><h3>נרות</h3>{{ params_table(rules.candle_general) }}</section>
+{% endblock %}

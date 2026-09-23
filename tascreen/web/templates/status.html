@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}מצב הנתונים · סורק טכני{% endblock %}
+
+{% set BAR_STATUS = {"new": "הורדה ראשונה", "updated": "עודכן", "refetched": "הורד מחדש (כנראה פיצול)",
+                     "up_to_date": "כבר מעודכן", "stale": "לא התעדכן", "failed": "נכשל"} %}
+
+{% macro symbols(items, limit=40) -%}
+  {% if items %}<p class="list mono">{{ items[:limit]|join(", ") }}{% if items|length > limit %} … ועוד {{ items|length - limit }}{% endif %}</p>{% endif %}
+{%- endmacro %}
+
+{% block content %}
+<h1 style="margin-top: 18px">מצב הנתונים</h1>
+
+<div class="grid2" style="margin-top: 12px">
+  <section class="panel">
+    <h2>הסריקה</h2>
+    {% if view %}
+    {% set s = view.summary %}
+    <dl class="kv">
+      <dt>יום המסחר</dt><dd class="num">{{ view.day|day }}</dd>
+      <dt>נוצרה</dt><dd class="num">{{ s.created_at[:16]|replace("T", " ") }} UTC</dd>
+      <dt>רשימת המניות מיום</dt><dd class="num">{{ s.universe_day|day }}</dd>
+      <dt>מניות ברשימה</dt><dd class="num">{{ "{:,}".format(s.symbols_in_universe) }}</dd>
+      <dt>נסרקו</dt><dd class="num">{{ "{:,}".format(s.symbols_scanned) }}</dd>
+      <dt>בלי נרות עדיין</dt><dd class="num">{{ "{:,}".format(s.symbols_without_bars|length) }}</dd>
+      <dt>נרות לא עדכניים</dt><dd class="num">{{ s.symbols_behind_session|length }}</dd>
+      <dt>דילוג על תבניות (נתונים דלילים)</dt><dd class="num">{{ s.symbols_too_sparse_for_patterns|length }}</dd>
+      <dt>שגיאות</dt><dd class="num">{{ s.errors|length }}</dd>
+      <dt>זיהויים</dt><dd class="num">{{ "{:,}".format(s.detections) }}</dd>
+      <dt>משך</dt><dd><span class="num">{{ s.seconds|round|int }}</span> שניות</dd>
+      <dt>גרסת הכללים</dt><dd><span class="mono">{{ s.rules_digest }}</span>{% if stale_rules %} <span class="chip warn">הכללים השתנו מאז (<span class="mono">{{ rules.digest }}</span>)</span>{% endif %}</dd>
+    </dl>
+    {% if s.symbols_too_sparse_for_patterns %}<h3 style="margin-top: 12px">נתונים דלילים</h3>{{ symbols(s.symbols_too_sparse_for_patterns) }}{% endif %}
+    {% if s.symbols_behind_session %}<h3 style="margin-top: 12px">נרות לא עדכניים</h3>{{ symbols(s.symbols_behind_session) }}{% endif %}
+    {% if s.errors %}<h3 style="margin-top: 12px">שגיאות</h3>
+      <ul class="list">{% for sym, err in s.errors.items() %}<li><span class="mono">{{ sym }}</span>: <span dir="ltr">{{ err }}</span></li>{% endfor %}</ul>{% endif %}
+    {% else %}
+    <p class="muted">אין עדיין סריקה.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>האינדיקטורים שלנו מול TradingView</h2>
+    {% if view and view.summary.cross_check_vs_tradingview %}
+    <p class="muted small" style="margin-bottom: 8px">הערכים שחישבנו מהנרות, מול הערכים ש-TradingView החזיר עם רשימת המניות. ההשוואה מדויקת רק כשהרשימה נמשכה אחרי סגירת המסחר.</p>
+    <table>
+      <thead><tr><th scope="col">מדד</th><th scope="col">הושוו</th><th scope="col">תואמים</th><th scope="col">סבולת</th><th scope="col">פער חציוני</th></tr></thead>
+      <tbody>
+      {% for name, r in view.summary.cross_check_vs_tradingview.items() %}
+        <tr>
+          <td class="mono">{{ name }}</td>
+          <td class="n"><span class="num">{{ r.compared }}</span></td>
+          <td class="n">{% if r.compared %}<span class="num">{{ r.agree }}</span> <span class="muted">(<span class="num">{{ (r.agree_share * 100)|round(1) }}%</span>)</span>{% else %}—{% endif %}</td>
+          <td class="n"><span class="num">{{ (r.tolerance or "—")|replace(" points", "") }}</span>{% if r.tolerance and "points" in r.tolerance %} נקודות{% endif %}</td>
+          <td class="n"><span class="num">{{ r.median_diff|num(3) if r.compared else "—" }}</span></td>
+        </tr>
+        {% if r.worst %}<tr><td></td><td colspan="4" class="list">הפערים הגדולים: <span class="mono">{% for sym, d in r.worst.items() %}{{ sym }} {{ d }}{% if not loop.last %}, {% endif %}{% endfor %}</span></td></tr>{% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">אין נתונים.</p>{% endif %}
+  </section>
+</div>
+
+<div class="grid2">
+  <section class="panel">
+    <h2>רשימת המניות</h2>
+    {% if universe %}
+    <dl class="kv">
+      <dt>נמשכה</dt><dd class="num">{{ universe_day|day }}</dd>
+      <dt>שווי שוק מינימלי</dt><dd class="num">{{ universe.min_market_cap|money }}</dd>
+      <dt>ה-screener ספר</dt><dd class="num">{{ "{:,}".format(universe.total_including_dropped) }}</dd>
+      {% set DROP = {"OTC": "OTC", "subtype preferred": "מניות בכורה"} %}
+      {% for why, n in universe.dropped.items() %}<dt>הוסרו: {{ DROP.get(why, why) }}</dt><dd class="num">{{ "{:,}".format(n) }}</dd>{% endfor %}
+      <dt>נשארו</dt><dd class="num">{{ "{:,}".format(universe.kept) }}</dd>
+      <dt>בורסות</dt><dd class="mono small">{% for ex, n in universe.exchanges.items() %}{{ ex }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</dd>
+      <dt>רצועות שווי שוק</dt><dd class="num">{{ universe.bands|length }}</dd>
+    </dl>
+    {% else %}<p class="muted">אין עדיין רשימה. להרצה: <span class="mono">run.py --universe</span></p>{% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>הנרות</h2>
+    <dl class="kv">
+      <dt>מניות עם נרות שמורים</dt><dd class="num">{{ "{:,}".format(bar_files) }}</dd>
+      <dt>ביומן ההורדות</dt><dd class="num">{{ "{:,}".format(bar_symbols) }}</dd>
+      {% for key, n in bar_counts.items() %}<dt>{{ BAR_STATUS.get(key, key) }}</dt><dd class="num">{{ "{:,}".format(n) }}</dd>{% endfor %}
+    </dl>
+    {% if last_run %}
+    <h3 style="margin-top: 12px">ההורדה האחרונה</h3>
+    <dl class="kv">
+      <dt>יום המסחר היעד</dt><dd class="num">{{ last_run.target_session|day }}</dd>
+      <dt>מניות</dt><dd class="num">{{ "{:,}".format(last_run.symbols) }}</dd>
+      <dt>קריאות ל-TradingView</dt><dd class="num">{{ "{:,}".format(last_run.calls) }}</dd>
+      <dt>משך</dt><dd><span class="num">{{ (last_run.seconds / 60)|round(1) }}</span> דקות{% if last_run.seconds_per_call %} · <span class="num">{{ last_run.seconds_per_call }}</span> שניות לקריאה{% endif %}</dd>
+      {% if last_run.failed %}<dt>נכשלו</dt><dd class="num">{{ last_run.failed|length }}</dd>{% endif %}
+      {% if last_run.stale %}<dt>לא התעדכנו</dt><dd class="num">{{ last_run.stale|length }}</dd>{% endif %}
+    </dl>
+    {% if last_run.failed %}{{ symbols(last_run.failed|list) }}{% endif %}
+    {% endif %}
+    {% if audit %}
+    <h3 style="margin-top: 12px">בדיקת הנרות מול לוח המסחר</h3>
+    <dl class="kv">
+      <dt>נבדקו</dt><dd class="num">{{ "{:,}".format(audit.symbols_checked) }}</dd>
+      <dt>יום המסחר היעד</dt><dd class="num">{{ audit.target_session|day }}</dd>
+      <dt>ימים חסרים בכל השוק</dt><dd>{% set days = audit.market_wide_missing_days %}{% if days %}<span class="num">{{ days|length }}</span> <span class="list mono">({{ days[:5]|join(", ") }}{% if days|length > 5 %} …{% endif %})</span>{% else %}אין{% endif %}</dd>
+      <dt>מניות עם ימים חסרים</dt><dd class="num">{{ audit.symbols_with_gaps|length }}</dd>
+      {% if audit.sparse_series is defined %}<dt>סדרות דלילות</dt><dd class="num">{{ audit.sparse_series|length }}</dd>{% endif %}
+    </dl>
+    {% endif %}
+    <p class="muted small" style="margin-top: 10px">עדכון הנרות: <span class="mono">run.py --bars</span> (ממשיך מאיפה שנעצר). TradingView מאט את הקריאות אחרי כאלף קריאות רצופות.</p>
+  </section>
+</div>
+
+{% if view %}
+<section class="panel">
+  <h2>זיהויים לפי תבנית</h2>
+  <div class="table-wrap" style="border: 0">
+  <table>
+    <thead><tr><th scope="col">תבנית</th>{% for st in STATUSES %}<th scope="col">{{ labels.STATUS[st] }}</th>{% endfor %}<th scope="col">סה״כ</th></tr></thead>
+    <tbody>
+    {% for key, spec in specs.items() %}{% set c = view.summary.counts.get(key, {}) %}
+      <tr>
+        <td><a href="/?pattern={{ key }}">{{ spec.name_he }}</a></td>
+        {% for st in STATUSES %}<td class="n"><span class="num">{{ c.get(st, "") }}</span></td>{% endfor %}
+        <td class="n"><span class="num">{{ c.values()|sum }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

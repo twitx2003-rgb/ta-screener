@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel" style="margin-top: 18px">
+  <h1>אין עדיין סריקה</h1>
+  <p style="margin-top: 8px">הסורק מציג את הסריקה האחרונה שנשמרה בתיקייה <span class="mono">data/scans</span>. כדי ליצור אותה:</p>
+  <pre class="mono small" style="direction: ltr; text-align: left">.venv\Scripts\python.exe run.py --universe
+.venv\Scripts\python.exe run.py --bars
+.venv\Scripts\python.exe run.py --scan</pre>
+</section>
+{% endblock %}

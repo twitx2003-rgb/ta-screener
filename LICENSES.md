@@ -9,11 +9,10 @@ code only: no market data, and no text from the books it follows.
 | **mcp** (Python SDK) 2.2.0 | MIT | Client library only; TradingView's terms govern the data. |
 | **pandas**, **numpy**, **pyarrow**, **PyYAML** | BSD-3-Clause / BSD-3-Clause / Apache-2.0 / MIT | — |
 | **Code taken from market-research-pipeline** (TradingView client, contracts, market calendar) | Same author | Copied, not a dependency. |
+| **FastAPI**, **Starlette**, **uvicorn**, **Jinja2** / **MarkupSafe**, **httpx** (tests) | MIT / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause | The local website. |
+| **TradingView Lightweight Charts™** 5.2.1 | Apache-2.0 | Vendored unchanged in `tascreen/web/static/vendor/`, with its `LICENSE` and `NOTICE`. The licence requires the NOTICE line and a link to https://www.tradingview.com/ on the page: every page footer carries both, and the chart keeps its TradingView logo (`attributionLogo`). |
+| **Fonts**: Frank Ruhl Libre, IBM Plex Sans Hebrew, IBM Plex Mono | SIL Open Font License 1.1 | Loaded from Google Fonts by the browser, not stored in the repo. |
 
-Planned for later phases, to be recorded here when added: FastAPI (MIT), Jinja2
-(BSD-3-Clause), uvicorn (BSD-3-Clause), and TradingView **lightweight-charts**
-(Apache-2.0). lightweight-charts requires its attribution notice and a link to
-TradingView to be kept.
 
 ## Bulkowski's books
 
