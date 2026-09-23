@@ -19,6 +19,7 @@ from typing import Any
 import pandas as pd
 
 from ..indicators import sma
+from ..patterns.levels import invalidation
 
 DRAWINGS = ("pivots", "pattern_lines", "confirm_line", "breakout", "target", "trigger",
             "failure", "volume", "sma", "zone")
@@ -174,6 +175,9 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
         levels += [float(det[k]) for k in ("trigger_up", "trigger_down") if _ok(det.get(k))]
     if _ok(live_price):
         levels.append(float(live_price))
+    cancel_level = invalidation(det, bars) if "failure" in wanted else math.nan
+    if _ok(cancel_level):
+        levels.append(cancel_level)
     hi = max([float(win["high"].max()), *levels])
     lo = min([float(win["low"].min()), *levels])
     pad = (hi - lo) * 0.08 or 1.0
@@ -274,9 +278,8 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
                 ann.line(fr.x(max(first, last - 25)), y, right_x, y, color, 1.6, "5 4")
                 ann.tag(right_x, y + (-14 if key == "trigger_up" else 14),
                         f"{text} {float(det[key]):,.2f}", color, "end")
-    if "failure" in wanted and det.get("direction") in ("bullish", "bearish"):
-        seg = bars.iloc[start_i:end_i + 1]
-        level = float(seg["low"].min()) if bullish else float(seg["high"].max())
+    if _ok(cancel_level):
+        level = cancel_level
         y = fr.y(level)
         cancel = ANN["bear"] if bullish else ANN["bull"]
         ann.line(fr.x(max(start_i, first)), y, right_x, y, cancel, 1.4, "2 5")

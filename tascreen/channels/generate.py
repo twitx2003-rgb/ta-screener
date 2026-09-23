@@ -28,11 +28,13 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import pandas as pd
 import yaml
 
 from ..config import ChannelsSettings
 from ..errors import ConfigError, ProviderError
 from ..llm import LLM, UsageLimit
+from ..patterns.levels import detection_key
 from ..patterns.rules import Rules
 from ..store import Store, symbol_file_stem
 from .brief import recap_brief, topic_brief
@@ -321,6 +323,8 @@ class ChannelWriter:
             det = topics.get(topic, {})
             threads.append({"id": thread_id, "channel": channel.id, "symbol": symbol,
                             "pattern": det.get("pattern"), "status": det.get("status"),
+                            "key": detection_key(det) if det else None,
+                            "record": thread_record(det) if det else None,
                             "live": live is not None, "created_at": stamp.isoformat(timespec="seconds"),
                             "posts": [{**p, "id": f"{thread_id}-{n}"} for n, p in enumerate(posts)]})
         return {"channel": channel.id, "name": channel.name, "day": day.isoformat(),
@@ -428,6 +432,25 @@ class ChannelWriter:
         return {"session": session.isoformat(), "written": written, "budget_left": max(0, budget)}
 
 
+RECORD_KEYS = ("symbol", "family", "pattern", "direction", "status", "start", "end", "breakout_date",
+               "breakout_price", "height", "target", "trigger_up", "trigger_down", "points", "lines")
+
+
+def thread_record(record: dict[str, Any]) -> dict[str, Any]:
+    """The detection as the thread saw it (what its chart is drawn from), JSON-ready."""
+    out = {}
+    for key in RECORD_KEYS:
+        value = record.get(key)
+        if isinstance(value, pd.Timestamp):
+            value = None if pd.isna(value) else value.isoformat()
+        elif hasattr(value, "item"):
+            value = value.item()
+        if isinstance(value, float) and math.isnan(value):
+            value = None
+        out[key] = value
+    return out
+
+
 def _detection(row: dict[str, Any]) -> dict[str, Any]:
     """A detection row with its JSON columns parsed (what the chart renderer reads)."""
     out = {k: v for k, v in row.items() if not k.endswith("_json")}
@@ -439,8 +462,10 @@ def _detection(row: dict[str, Any]) -> dict[str, Any]:
 
 def redraw_charts(store: Store, view) -> dict[str, int]:
     """Draw every stored chart post again with the current renderer (after a change of
-    chart style). No model call: the drawings and captions are the ones posted. A
-    thread whose detection is no longer in the newest scan keeps its old image."""
+    chart style). No model call: the drawings and captions are the ones posted, the
+    detection is the one the thread saw (its `record`), and the bars end on the
+    thread's day. An older thread without a record uses the newest scan's detection;
+    if that is gone too, it keeps its old image."""
     counts = {"redrawn": 0, "kept": 0}
     by_key = {(r["symbol"], r["pattern"]): r for r in view.detections.to_dict("records")}
     for day in store.channel_days():
@@ -452,11 +477,14 @@ def redraw_charts(store: Store, view) -> dict[str, int]:
                 if not lead or not lead.get("chart"):
                     continue
                 row = by_key.get((thread.get("symbol"), thread.get("pattern")))
-                bars = store.read_bars(thread["symbol"]) if row else None
-                if row is None or bars is None:
+                det = thread.get("record") or (_detection(row) if row else None)
+                bars = store.read_bars(thread["symbol"]) if det else None
+                if bars is not None:
+                    bars = bars[bars["timestamp"].dt.date <= day].reset_index(drop=True)
+                if det is None or bars is None or bars.empty:
                     counts["kept"] += 1
                     continue
-                svg = render(bars, _detection(row), lead.get("drawings", []), lead.get("note", ""),
+                svg = render(bars, det, lead.get("drawings", []), lead.get("note", ""),
                              seed=thread["id"], title=thread["symbol"])
                 store.write_channel_chart(day, thread["id"], svg)
                 counts["redrawn"] += 1

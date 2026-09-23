@@ -58,6 +58,8 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --channels            # agents write today's channels (normal terminal only)
 .venv\Scripts\python.exe run.py --channels --force    # write them again
 .venv\Scripts\python.exe run.py --redraw-charts      # redraw stored chart posts after a chart_svg change
+.venv\Scripts\python.exe run.py --outcomes           # breakout ledger from the saved scans (also after every scan)
+.venv\Scripts\python.exe run.py --outcomes --rebuild # rebuild it from every saved scan
 ```
 
 For a long run from a Claude Code session, start a detached process: the tool kills
@@ -215,7 +217,9 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     - Tags never cover each other (`_Annotations._free_y` moves a tag up or down).
     - The caption goes in the emptiest corner.
     - Stored SVGs keep the look they were drawn with: after changing `chart_svg`, run
-      `--redraw-charts` (no model call; a pattern gone from the newest scan is kept).
+      `--redraw-charts` (no model call). It draws from the thread's own `record` (the
+      detection it discussed, stored with `key` since 2026-09-24) on bars cut at the
+      thread's day; older threads fall back to the newest scan's detection.
   - Storage: `data/channels/<day>/<channel>.json`, `live.json`, `charts/*.svg`. Pages
     poll `/api/stamp` and reload on new posts or quotes.
   - Post numbers are wrapped in `<bdi>` (`fmt.post_text`), so "ב-85.0" is not
@@ -234,7 +238,7 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
       and the #כללי recap counts matched exactly.
     - Qualitative claims (e.g. "the neckline is rising") are not machine-checked;
       this one was right.
-    - A unit letter after a number ("1.11x") was reordered by RTL; `post_text` now
+    - A unit letter after a number ("1.37x") was reordered by RTL; `post_text` now
       isolates it with the number.
 - **Design (owner's answers, 2026-09-24):** a social-community look.
   - Purple accent (`--accent #A78BFA`); always dark unless the visitor picks light (only
@@ -246,6 +250,34 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   - The chart fills the bubble (medium); a click opens it large in a `<dialog>`.
   - Screener: below 1700 px the sidebar leaves no room for all columns, so the columns
     52-week high, ATR% and sector (`.opt`) are hidden there.
+- **Professional agents plan (owner-approved 2026-09-24; stop for review after each
+  stage):** A1 outcome ledger, A2 backfill, A3 follow-up posts, B qualitative facts +
+  earnings + market overview, C editor (Haiku; posts wait when it cannot run) + memory,
+  D guardian (Telegram alerts) + weekly audit. All run automatically; no Claude Code
+  subagents (owner's choice). No Bulkowski statistics anywhere (book rule above).
+- **A1 — outcome ledger (built 2026-09-24).**
+  - `patterns/levels.py` is the one source for `detection_key` and `invalidation`,
+    used by the ledger, the chart's "failure" drawing and (stage B) the agents' facts.
+  - Key = symbol|pattern|first point|last point. Start alone collided: triangles and
+    wedges report two patterns from one first pivot (the first real rebuild merged 42).
+  - Invalidation = back beyond the whole pattern (lowest/highest turning point; for
+    flags, pennants and high-tight flags the consolidation's low/high after the pole's
+    top; for the cup the handle's low). The first version used the opposite trendline
+    at the breakout; near a triangle's apex that is almost the breakout level, and
+    ~90% of triangles came out "failed".
+  - `outcomes.py`: ledger `data/outcomes/ledger.parquet` (contract OUTCOMES) + meta.json.
+    Target = high/low touch; failed = close beyond invalidation; both on one bar =
+    failed; expired after `outcomes.max_sessions` (60). First-seen values are kept;
+    later differences only bump `restated`. `scale` follows splits. A changed
+    `max_sessions` re-evaluates every row.
+  - Runs after every scan (`run.py scan()`), and `--outcomes [--rebuild]`.
+  - `/scorecard` ("לוח תוצאות") + `/api/scorecard`: counts per pattern, percentages
+    only from `outcomes.min_cases` (20) decided breakouts, our definitions stated,
+    not the book's statistics.
+  - First real build (2 scans, 2026-09-22/23): 1,187 breakouts; three rows re-checked
+    by hand against the bars matched. Measure-rule targets sit far (median ~20-30%)
+    while invalidation is near (~3-10%), so failures resolve first; early rates lean
+    to "failed" until targets have time.
 - **The long average is SMA150, not SMA200 (owner's decision, 2026-09-23).**
   - Golden and death crosses are 50/150.
   - EMA200 stays only for the TradingView cross-check.

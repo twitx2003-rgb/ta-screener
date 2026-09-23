@@ -48,6 +48,10 @@ ORIGIN_HELP = {
     "": "כלל מבני של התבנית, בלי סף מספרי",
 }
 VOLUME_TREND = {"down": "יורד", "up": "עולה", "": "—"}
+OUTCOME = {"target": "הגיע ליעד", "failed": "נכשל", "expired": "ללא הכרעה", "open": "עדיין פתוח",
+           "no_data": "אין נתונים"}
+OUTCOME_CLASS = {"target": "up", "failed": "down", "expired": "", "open": "accent", "no_data": ""}
+SOURCE = {"live": "מהסריקות היומיות", "backfill": "מילוי לאחור (רטרואקטיבי)"}
 
 PARAMS = {
     # general

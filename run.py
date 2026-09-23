@@ -63,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scan-symbol", metavar="SYMBOL",
                         help="Scan one symbol from stored bars and print every detection with "
                              "its rule checklist (e.g. NASDAQ:NVDA)")
+    parser.add_argument("--outcomes", action="store_true",
+                        help="Update the breakout ledger from the saved scans: what happened after "
+                             "each chart-pattern breakout (target, failed, open) -> data/outcomes/")
+    parser.add_argument("--rebuild", action="store_true",
+                        help="With --outcomes: build the ledger again from every saved scan")
     parser.add_argument("--quotes", action="store_true",
                         help="Fetch every stock's last price once from TradingView's screener "
                              "-> data/quotes/ (the website shows them and live pattern crossings)")
@@ -310,6 +315,10 @@ def scan(settings) -> int:
           f"errors: {len(summary['errors'])}")
     for pattern, statuses in summary["counts"].items():
         print(f"    {pattern:<22} {statuses}")
+    try:
+        outcomes(settings, quiet=True)
+    except (ScreenerError, OSError) as exc:      # the scan itself is fine; the ledger waits
+        log.error("outcome ledger not updated: %s", exc)
     print("  our indicators vs TradingView's:")
     for name, result in summary["cross_check_vs_tradingview"].items():
         if result.get("compared"):
@@ -317,6 +326,21 @@ def scan(settings) -> int:
                   f"{result['tolerance']} (median diff {result['median_diff']})")
     print()
     return 1 if summary["errors"] else 0
+
+
+def outcomes(settings, rebuild: bool = False, quiet: bool = False) -> int:
+    from tascreen.outcomes import update as update_outcomes
+    from tascreen.store import Store
+
+    report = update_outcomes(Store(settings.data_dir), settings.outcomes.max_sessions,
+                             rebuild=rebuild)
+    line = (f"Outcomes: {report['rows']} breakouts tracked ({report['new']} new, "
+            f"{report['restated']} restated) {report['outcomes']}")
+    if quiet:
+        log.info("%s", line)
+    else:
+        print(line)
+    return 0
 
 
 def scan_symbol(settings, symbol: str) -> int:
@@ -567,6 +591,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.check_bars, lambda: check_bars(settings)),
         (args.scan, lambda: scan(settings)),
         (args.scan_symbol, lambda: scan_symbol(settings, args.scan_symbol.strip().upper())),
+        (args.outcomes, lambda: outcomes(settings, rebuild=args.rebuild)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),

@@ -120,6 +120,23 @@ PATTERNS = Contract(
     allow_empty=True,             # a quiet day can have no pattern anywhere
 )
 
+# One row per chart-pattern breakout and what happened after it (tascreen/outcomes.py).
+OUTCOMES = Contract(
+    name="outcomes",
+    columns={
+        "key": STRING, "symbol": STRING, "pattern": STRING, "direction": STRING,
+        "start_day": STRING, "end_day": STRING, "breakout_day": STRING,
+        "breakout_price": NUMERIC, "breakout_close": NUMERIC, "target": NUMERIC,
+        "invalidation": NUMERIC, "height": NUMERIC, "points_json": STRING, "lines_json": STRING,
+        "rules_digest": STRING, "source": STRING, "first_seen": STRING, "restated": NUMERIC,
+        "last_breakout_day": STRING, "outcome": STRING, "resolved_day": ANY, "sessions": NUMERIC,
+        "mfe_pct": NUMERIC, "mae_pct": NUMERIC, "scale": NUMERIC, "evaluated_through": ANY,
+    },
+    required_non_null=("key", "symbol", "pattern", "direction", "breakout_day", "source",
+                       "outcome"),
+    allow_empty=True,
+)
+
 QUOTES = Contract(
     name="quotes",
     columns={

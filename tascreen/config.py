@@ -223,6 +223,24 @@ class ChannelsSettings:
             raise ConfigError("channels.timeout_s must be at least 30")
 
 
+@dataclass(frozen=True)
+class OutcomesSettings:
+    # What happened after each breakout (tascreen/outcomes.py): tracked this many
+    # sessions, then "no decision" (expired).
+    max_sessions: int = 60
+    # The scorecard shows percentages only for patterns with at least this many
+    # decided breakouts; below it, counts only.
+    min_cases: int = 20
+
+    def __post_init__(self):
+        for name in ("max_sessions", "min_cases"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        if not 5 <= self.max_sessions <= 250:
+            raise ConfigError("outcomes.max_sessions must be 5..250")
+        if not 1 <= self.min_cases <= 1000:
+            raise ConfigError("outcomes.min_cases must be 1..1000")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
@@ -232,6 +250,7 @@ _SECTIONS = {
     "web": WebSettings,
     "live": LiveSettings,
     "channels": ChannelsSettings,
+    "outcomes": OutcomesSettings,
 }
 
 
@@ -246,6 +265,7 @@ class Settings:
     web: WebSettings = field(default_factory=WebSettings)
     live: LiveSettings = field(default_factory=LiveSettings)
     channels: ChannelsSettings = field(default_factory=ChannelsSettings)
+    outcomes: OutcomesSettings = field(default_factory=OutcomesSettings)
 
     @property
     def data_dir(self) -> Path:

@@ -361,3 +361,16 @@ def test_redraw_replaces_stored_charts_without_a_model(tmp_path):
     path.write_text("<svg>old</svg>", encoding="utf-8")
     counts = redraw_charts(store, view)
     assert counts["redrawn"] >= 1 and "class=\"ann" in path.read_text(encoding="utf-8")
+
+
+def test_threads_keep_the_detection_they_discussed(tmp_path):
+    _, store, view = _view(tmp_path)
+    _writer(store).daily(view, only={"head_shoulders_top"}, progress=lambda m: None)
+    thread = store.read_channel_doc(view.day, "head_shoulders_top")["threads"][0]
+    assert thread["key"].startswith("NYSE:HS|head_shoulders_top|")
+    record = thread["record"]
+    assert record["pattern"] == "head_shoulders_top" and len(record["points"]) == 5
+    assert "nan" not in json.dumps(record).lower() and "checks" not in record
+    # a later scan without that pattern: the chart is still redrawn from the thread's record
+    empty = SimpleNamespace(detections=view.detections.iloc[0:0])
+    assert redraw_charts(store, empty)["redrawn"] >= 1

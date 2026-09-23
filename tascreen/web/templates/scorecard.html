@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}לוח תוצאות · סורק טכני{% endblock %}
+
+{% macro share(count, pct, enough) -%}
+  <span class="num">{{ count }}</span>{% if enough and pct is not none %} <span class="muted small num">({{ pct|num(0) }}%)</span>{% endif %}
+{%- endmacro %}
+
+{% block content %}
+<h1 style="margin-top: 18px">לוח תוצאות</h1>
+<p class="muted" style="max-width: 75ch; margin-top: 6px">
+  מה קרה אחרי כל פריצה של תבנית גרף שהסורק זיהה. כל פריצה נבדקת מהיום שאחריה, עד <span class="num">{{ window }}</span> ימי מסחר:
+  <span class="chip up">הגיע ליעד</span> אם המחיר נגע ביעד של כלל המדידה,
+  <span class="chip down">נכשל</span> אם לפני כן נר נסגר מעבר לתבנית כולה,
+  ו<span class="chip">ללא הכרעה</span> אם עברו <span class="num">{{ window }}</span> ימים בלי אחד מהשניים. יום שבו קרו שניהם נספר ככישלון.
+</p>
+<p class="muted small" style="max-width: 75ch">"מעבר לתבנית כולה" הוא רמת הביטול: בפריצה למעלה, השפל הנמוך של התבנית (בדגל, בדגלון ובדגל גבוה וצר: השפל של ההתכנסות; בספל: השפל של הידית), ובפריצה למטה, השיא הגבוה. יעד כלל המדידה רחוק בדרך כלל יותר מרמת הביטול, ולכן כישלונות מתבררים מוקדם יותר מהגעות ליעד.</p>
+<p class="caution">אלה תוצאות של הגלאי ושל ההגדרות שלנו, לא הסטטיסטיקה מהספרים של Bulkowski. אחוזים מוצגים רק לתבנית עם לפחות <span class="num">{{ min_cases }}</span> פריצות שהוכרעו; מדגם קטן יותר לא אומר הרבה. תוצאות עבר אינן מבטיחות דבר, וזה לא ייעוץ השקעות.</p>
+
+{% if not rows %}
+<section class="panel"><p class="muted">עוד אין פריצות במעקב. היומן מתעדכן אחרי כל סריקה יומית.</p></section>
+{% else %}
+<section class="panel">
+  <dl class="kv">
+    <dt>פריצות במעקב</dt><dd class="num">{{ "{:,}".format(tracked) }}</dd>
+    <dt>עודכן</dt><dd class="num">{{ updated or "—" }}</dd>
+  </dl>
+</section>
+
+{% for source in sources %}
+<h2 style="margin-top: 22px">{{ labels.SOURCE[source] }}</h2>
+{% if source == "backfill" %}<p class="muted small">הגלאי הורץ על נרות העבר, יום אחרי יום, בלי לראות את מה שבא אחר כך. המניות הן הרשימה של היום, ולכן חסרות מניות שירדו מתחת למיליארד דולר או נמחקו: התוצאות כנראה טובות מהמציאות.</p>{% endif %}
+<div class="table-wrap">
+  <table class="score">
+    <thead><tr>
+      <th scope="col">תבנית</th><th scope="col">פריצות</th><th scope="col">פתוחות</th><th scope="col">הוכרעו</th>
+      <th scope="col">הגיעו ליעד</th><th scope="col">נכשלו</th><th scope="col">ללא הכרעה</th>
+      <th scope="col" title="חציון ימי המסחר מהפריצה ועד הנגיעה ביעד">ימים עד היעד</th>
+      <th scope="col" title="חציון התנועה הגדולה ביותר בכיוון הפריצה, מקו הפריצה, בפריצות שהוכרעו">תנועה מרבית</th>
+      <th scope="col" aria-label="התפלגות"></th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows if r.source == source %}
+      <tr>
+        <th scope="row"><a href="/c/{{ r.pattern }}">{{ specs[r.pattern].name_he if r.pattern in specs else r.pattern }}</a></th>
+        <td class="n"><span class="num">{{ r.breakouts }}</span></td>
+        <td class="n"><span class="num">{{ r.open }}</span></td>
+        <td class="n"><span class="num">{{ r.decided }}</span></td>
+        <td class="n">{% if r.has_target %}{{ share(r.target, r.target_pct, r.enough) }}{% else %}<span class="muted" title="לתבנית הזו אין יעד מדידה">—</span>{% endif %}</td>
+        <td class="n">{{ share(r.failed, r.failed_pct, r.enough) }}</td>
+        <td class="n">{{ share(r.expired, r.expired_pct, r.enough) }}</td>
+        <td class="n"><span class="num">{{ r.median_sessions_to_target|num(0) }}</span></td>
+        <td class="n"><span class="num">{{ r.median_best_move_pct|pct }}</span></td>
+        <td>{% if r.enough %}<span class="spread" role="img" aria-label="הגיעו ליעד {{ r.target_pct|num(0) }}%, נכשלו {{ r.failed_pct|num(0) }}%, ללא הכרעה {{ r.expired_pct|num(0) }}%">
+          <span class="seg up" style="width: {{ r.target_pct }}%"></span><span class="seg down" style="width: {{ r.failed_pct }}%"></span><span class="seg none" style="width: {{ r.expired_pct }}%"></span>
+        </span>{% else %}<span class="muted small">מדגם קטן</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+
+{% if recent %}
+<h2 style="margin-top: 22px">הוכרעו לאחרונה</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th scope="col">מניה</th><th scope="col">תבנית</th><th scope="col">תוצאה</th><th scope="col">ביום</th><th scope="col">אחרי</th></tr></thead>
+    <tbody>
+    {% for o in recent %}
+      <tr>
+        <td><a class="tick" href="{{ o.symbol|symbol_url }}">{{ o.symbol.split(":")[1] }}</a></td>
+        <td>{{ specs[o.pattern].name_he if o.pattern in specs else o.pattern }} · {{ labels.DIRECTION[o.direction] }}</td>
+        <td><span class="chip {{ labels.OUTCOME_CLASS[o.outcome] }}">{{ labels.OUTCOME[o.outcome] }}</span></td>
+        <td class="n"><span class="num">{{ o.resolved_day|day }}</span></td>
+        <td><span class="num">{{ o.sessions|int }}</span> ימי מסחר</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

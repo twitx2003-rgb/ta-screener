@@ -10,6 +10,7 @@
     data/quotes/live_state.json          what the live loop last did (the daily update)
     data/channels/<YYYY-MM-DD>/<channel>.json   agent threads (daily; live.json for crossings)
     data/channels/<YYYY-MM-DD>/charts/<post>.svg chart screenshots with drawings
+    data/outcomes/ledger.parquet         every breakout and its outcome (OUTCOMES), meta.json
 
 Writes go to a temporary file first and replace the target, so an interrupted
 run never leaves half a file behind.
@@ -25,7 +26,8 @@ from typing import Any
 
 import pandas as pd
 
-from .contracts import BARS, INDICATORS, PATTERNS, QUOTES, UNIVERSE, canonical_timestamps
+from .contracts import (BARS, INDICATORS, OUTCOMES, PATTERNS, QUOTES, UNIVERSE,
+                        canonical_timestamps)
 
 
 def _atomic_write_bytes(path: Path, write) -> None:
@@ -53,6 +55,22 @@ class Store:
         self.scans_dir = self.root / "scans"
         self.quotes_dir = self.root / "quotes"
         self.channels_dir = self.root / "channels"
+        self.outcomes_dir = self.root / "outcomes"
+
+    # ------------------------------------------------------------- outcomes
+    def read_ledger(self) -> pd.DataFrame | None:
+        path = self.outcomes_dir / "ledger.parquet"
+        return OUTCOMES.validate(pd.read_parquet(path)) if path.exists() else None
+
+    def write_ledger(self, frame: pd.DataFrame, meta: dict[str, Any]) -> None:
+        OUTCOMES.validate(frame)
+        _atomic_write_bytes(self.outcomes_dir / "ledger.parquet",
+                            lambda tmp: frame.to_parquet(tmp, index=False))
+        _write_json(self.outcomes_dir / "meta.json", meta)          # last: marks it complete
+
+    def read_outcomes_meta(self) -> dict[str, Any]:
+        path = self.outcomes_dir / "meta.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
     # ------------------------------------------------------------- channels
     def write_channel_doc(self, day: date, name: str, doc: dict[str, Any]) -> None:

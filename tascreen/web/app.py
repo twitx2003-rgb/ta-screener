@@ -4,9 +4,10 @@ The owner may expose it through a tunnel (VS Code port forwarding); the tunnel's
 host names are listed in `web.public_hosts`, which also turns on public mode:
 no local details (error texts, file paths) are shown.
 
-Pages:  /  (#כללי)   /c/{channel}   /screener   /symbol/{EXCHANGE:TICKER}   /patterns   /status
+Pages:  /  (#כללי)   /c/{channel}   /screener   /symbol/{EXCHANGE:TICKER}   /patterns
+        /scorecard   /status
 API:    /api/scan (same filters as /screener)   /api/symbol/{EXCHANGE:TICKER}   /api/live
-        /api/channels   /api/channels/{channel}   /api/stamp
+        /api/channels   /api/channels/{channel}   /api/scorecard   /api/stamp
 
 The discussion channels (the home page) show threads written by simulated members,
 labelled as AI agents (see tascreen/channels). Screener links from before the
@@ -40,6 +41,7 @@ from starlette.templating import Jinja2Templates
 from ..channels.select import GENERAL, Channel, channel_name, find
 from ..config import Settings
 from ..indicators import sma
+from ..outcomes import recent_decided, scorecard
 from ..patterns.rules import Rules, load_rules
 from ..store import Store
 from . import fmt, labels
@@ -257,6 +259,31 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
         view = repo.current()
         counts = view.detections["pattern"].value_counts().to_dict() if view is not None else {}
         return render(request, "patterns.html", view, counts=counts)
+
+    @app.get("/scorecard", response_class=HTMLResponse)
+    def scorecard_page(request: Request):
+        view, live = current()
+        ledger = store.read_ledger()
+        rows = scorecard(ledger, settings.outcomes.min_cases)
+        meta = store.read_outcomes_meta()
+        updated = (datetime.fromisoformat(meta["updated_at"]).astimezone(display_tz)
+                   .strftime("%d/%m/%Y %H:%M") if meta.get("updated_at") else None)
+        return render(request, "scorecard.html", view, live=live, rows=rows, updated=updated,
+                      sources=[s for s in labels.SOURCE if any(r["source"] == s for r in rows)],
+                      recent=recent_decided(ledger, 15),
+                      window=settings.outcomes.max_sessions, min_cases=settings.outcomes.min_cases,
+                      tracked=0 if ledger is None else len(ledger))
+
+    @app.get("/api/scorecard")
+    def api_scorecard():
+        ledger = store.read_ledger()
+        return JSONResponse(fmt.clean({
+            "note": NOT_ADVICE + " Outcomes use this site's own detector and definitions, not "
+                    "the book's statistics.",
+            "tracked_sessions": settings.outcomes.max_sessions,
+            "min_cases_for_percentages": settings.outcomes.min_cases,
+            "updated_at": store.read_outcomes_meta().get("updated_at"),
+            "patterns": scorecard(ledger, settings.outcomes.min_cases)}))
 
     @app.get("/status", response_class=HTMLResponse)
     def status_page(request: Request):

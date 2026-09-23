@@ -86,3 +86,10 @@ channels:
   model: "sonnet"
   effort: "medium"
   timeout_s: 600
+
+outcomes:
+  # What happened after each chart-pattern breakout (the scorecard page). Our own
+  # definitions, not the book's statistics: target = the measure-rule target was
+  # reached; failed = a close beyond the pattern's invalidation level first.
+  max_sessions: 60           # after this many sessions without either: "no decision"
+  min_cases: 20              # percentages only from this many decided breakouts
