@@ -78,9 +78,19 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 ## Claude Code integration
 
 - `.mcp.json` points the `tradingview` server at `https://mcp.tradingview.com/mcp`
-  (http, no secrets). Authenticate once with `/mcp`. **Sign in on tradingview.com in
-  the default browser first**: TradingView's CDN blocks its sign-in page when that page
-  is reached as a redirect.
+  (http, no secrets). **Sign in on tradingview.com in the default browser first**:
+  TradingView's CDN blocks its sign-in page when that page is reached as a redirect.
+- **What actually worked (2026-09-23, CLI 2.1.280):**
+  - The server from `.mcp.json` did not show up in `/mcp`, even though the folder was
+    trusted and the shared `settings.json` has `enabledMcpjsonServers`. A shared file
+    evidently cannot approve its own repo's servers.
+  - Fix: add it at local scope. Run
+    `claude mcp add --transport http --scope local tradingview https://mcp.tradingview.com/mcp`
+    in this folder, restart the session, then run `/mcp`, choose tradingview and
+    authenticate.
+  - Status is now **Connected**. Check it with `claude mcp get tradingview`.
+- When typing `/mcp`, add a space before Enter, or autocomplete may pick a skill whose
+  name contains "mcp".
 - Skills live in `.claude/skills/` and agents in `.claude/agents/`.
   - Built: `tradingview-rules` (not named `*-mcp`: the /mcp autocomplete picked a skill with "mcp" in its name instead of the built-in command).
   - Planned: `bulkowski-patterns`, `daily-update`, `add-pattern` (skills);
