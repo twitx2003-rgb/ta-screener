@@ -324,8 +324,10 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     - a full scan once all bars are in.
 
 - **Phases 1+2 approved by the user 2026-09-23** ("מאשר").
-  - At that point the `get-ohlcv` throttle had not lifted: a single call took 56 s,
-    about 2 hours after the heavy run.
+  - At that point the `get-ohlcv` throttle had not lifted. A single call (with its own
+    session) took 56 s about 2 hours after the heavy run, and 89 s about 3 hours
+    after it. So the throttle lasts hours, not minutes. Before resuming, time one
+    call: about 3 s means it is clear.
   - So bars are still 1,008 of ~2,370; resuming with pacing is pending.
 - **Phase 3 (website): BUILT 2026-09-23. Review is pending.**
   - Code: `tascreen/web/{app,data,filters,fmt,labels}.py`, templates and static files.
