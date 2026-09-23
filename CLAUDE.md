@@ -43,6 +43,7 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --tradingview-tools   # list tools -> logs/tradingview_tools.json
 .venv\Scripts\python.exe run.py --tradingview-call TOOL key=value ...
 .venv\Scripts\python.exe run.py --discover            # probe screener/columns/ohlcv -> logs/discover/
+.venv\Scripts\python.exe run.py --discover screener_top5 screener_band   # retry just those
 .venv\Scripts\python.exe run.py --tradingview-diagnose
 ```
 
@@ -104,15 +105,56 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   - the SDK forgets a stored token's expiry;
   - a refresh made before discovery guesses the token endpoint.
 - The access token lasts 900 s, and TradingView issues refresh tokens.
-- Unknown until `--discover` runs: the response shapes of `run-screener` and
-  `get-screener-columns`, and whether candlestick (`Candle.*`), RSI or SMA columns exist.
+## Live `--discover` results (2026-09-23, this project's first run)
+
+- Sign-in with a separate OAuth client and tokens in `~/.ta-screener` worked on the
+  first attempt.
+- **`get-screener-columns` is not rate limited.**
+  - With no group, it returns `{success, count, hint, groups: [{group, count, columns: [names]}]}`
+    across 17 groups.
+  - With a group or search, it returns `{success, count, columns: [{name, description, group, markets}]}`.
+  - A search with no match is `success: false`, with the error "no columns matched".
+- **The catalogue has no candlestick, chart-pattern or moving-average columns.** Candles,
+  patterns and SMA/EMA are therefore computed from our own bars. Do not assume TradingView
+  scanner names (such as `Candle.*` or `SMA50`) exist: they are not in the catalogue.
+- Technicals group:
+  - Present: `RSI`, `ATRP`, `ADX`, `AO`, `Aroon`, `BB`, `BBPower`, `CCI`, `MACD.macd`,
+    `Mom`, `Stoch`, `ADRP`, `TechRating_1D`, `MARating_1D`, `OsRating_1D` and `AnalystRating`.
+  - 1D is the default; other timeframes take a `|` suffix (`|1W`, `|60`, and so on).
+  - `RSI` and `ATRP` are the cross-check candidates for our own indicators.
+- Other columns:
+  - Exchange: `exchange` (group price).
+  - Issuer country: `country` (group identity).
+  - There is **no type, subtype or ADR column**. `symbol_types` is the only stock filter.
+  - Liquidity: `average_volume_10d_calc`, `relative_volume_10d_calc`, `Value.Traded`
+    and `AvgValue.Traded_10d`.
+  - Market cap: `market_cap_basic`.
+- **`run-screener` is still unmapped.** It returned 429 on every attempt of this run: 4
+  attempts over about 65 s, on `scanner.tradingview.com/america/scan`. Retry later; its
+  response shape stays unknown until then.
+- The `get-ohlcv` notice says:
+  - bars are delayed 15 minutes or more, and the last bar may still change;
+  - there are **no pre- or post-market bars**;
+  - prices are **split-adjusted only** (no dividend adjustment);
+  - some exchanges come from an alternative or end-of-day feed.
+- The `get-ohlcv` `summary` block holds avg_volume, period high/low, net change and
+  similar values; we compute our own from the bars.
 
 ## Status
 
-- **Phase 0 (skeleton + connection): BUILT 2026-09-23, awaiting the live sign-in and
-  `--discover`.** The TradingView client and its tests are copied and adapted, with
-  `session()` added. Also built: config, contracts, the market calendar, `run.py`,
-  `.mcp.json`, `.claude/settings.json` and the `tradingview-mcp` skill.
+- **Phase 0 (skeleton + connection): BUILT 2026-09-23.**
+  - Built: the TradingView client and its tests (copied and adapted, with `session()`
+    added), config, contracts, the market calendar, `run.py`, `.mcp.json`,
+    `.claude/settings.json` and the `tradingview-mcp` skill.
+  - `--auth-tradingview` and `--discover` ran live; see above.
+  - Open items:
+    - map the `run-screener` shape once the scanner stops answering 429;
+    - the user authenticates Claude Code's own MCP connection (`/mcp` in a session
+      opened in this folder);
+    - the user creates the public GitHub repo (`gh` is not installed).
+  - Git identity for this repo only: `Claude <noreply@anthropic.com>`, the same
+    identity as the sister project's commits, so no personal e-mail goes into a
+    public history.
 
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 

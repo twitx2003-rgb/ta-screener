@@ -78,9 +78,28 @@ The Python side does the same with `tradingview.rate_limit_delays` in `config.ya
   `{success, data: {close, market_cap_basic}}`.
 - **`get-earnings-calendar`** returns `{success, data: {count, from, to, earnings: [{symbol, release_date, release_next_date, ...}]}}`.
   A next date that falls on a weekend is a placeholder estimate, not a confirmed date.
-- **`run-screener` and `get-screener-columns`** are not mapped yet. Their shapes come from
-  `logs/discover/*.json`, written by `run.py --discover`. If that folder is empty, say
-  so; do not describe the shapes from memory.
+- **`get-screener-columns`** (not rate limited):
+  - With no group, it returns `{success, count, hint, groups: [{group, count, columns: [names]}]}`
+    across 17 groups.
+  - With a group or search, it returns `{success, count, columns: [{name, description, group, markets}]}`.
+  - A search with no match is `success: false`, "no columns matched".
+- **What the catalogue has, and lacks:**
+  - There are **no candlestick, chart-pattern or SMA/EMA columns**. This project computes
+    those from bars. Do not use scanner names such as `Candle.*` or `SMA50`; they are
+    not in the catalogue.
+  - Technicals: `RSI`, `ATRP`, `ADX`, `MACD.macd`, `Stoch`, `BB`, `CCI`, `Mom`, `AO`,
+    `Aroon`, `TechRating_1D`, `MARating_1D`, `OsRating_1D`, `AnalystRating`. These are 1D
+    by default; other timeframes take a `|1W`-style suffix.
+  - Other columns: `exchange`, `country`, `sector`, `average_volume_10d_calc`,
+    `relative_volume_10d_calc`, `Value.Traded`.
+  - There is **no type or ADR column**.
+- **`run-screener`** is not mapped yet: every probe so far answered 429. Its shape will
+  come from `logs/discover/screener_*.json`, written by `run.py --discover`. Until that
+  file exists, say the shape is unknown; do not describe it from memory.
+- **`get-ohlcv` notice** (live):
+  - bars are delayed 15 minutes or more, and the last bar may still change;
+  - there are no pre- or post-market bars;
+  - prices are **split-adjusted only**.
 
 ## When the MCP tools are missing or ask to sign in
 

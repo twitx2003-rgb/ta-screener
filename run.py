@@ -42,9 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tradingview-call", nargs="+", metavar=("TOOL", "KEY=VALUE"),
                         help="Call one read-only TradingView tool and print the raw result, e.g. "
                              "--tradingview-call mcp-tv-get-ohlcv symbol=NASDAQ:AAPL count=5")
-    parser.add_argument("--discover", action="store_true",
+    parser.add_argument("--discover", nargs="*", metavar="PROBE", default=None,
                         help="Probe the screener, its column catalogue and get-ohlcv; save the "
-                             "payloads to logs/discover/ so their shapes can be mapped")
+                             "payloads to logs/discover/ so their shapes can be mapped. "
+                             "Name probes to run only those (e.g. --discover screener_top5)")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -125,12 +126,18 @@ def tradingview_call(settings, spec: list[str]) -> int:
     return 0
 
 
-def discover(settings) -> int:
-    from tascreen.discover import print_report, run_probes
+def discover(settings, names: list[str]) -> int:
+    from tascreen.discover import PROBES, print_report, run_probes
 
+    known = {p.name for p in PROBES}
+    unknown = sorted(set(names) - known)
+    if unknown:
+        log.error("unknown probe(s) %s; known: %s", unknown, sorted(known))
+        return 2
+    probes = tuple(p for p in PROBES if not names or p.name in names)
     out_dir = settings.log_dir / "discover"
     report = run_probes(make_tradingview(settings), out_dir,
-                        delays=settings.tradingview.rate_limit_delays)
+                        delays=settings.tradingview.rate_limit_delays, probes=probes)
     print_report(report, out_dir)
     return 0 if all(e["status"] == "ok" for e in report) else 1
 
@@ -147,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.tradingview_probe, lambda: tradingview_probe(args.tradingview_probe)),
         (args.tradingview_tools, lambda: tradingview_tools(settings)),
         (args.tradingview_call, lambda: tradingview_call(settings, args.tradingview_call)),
-        (args.discover, lambda: discover(settings)),
+        (args.discover is not None, lambda: discover(settings, args.discover)),
     )
     for requested, command in commands:
         if requested:
