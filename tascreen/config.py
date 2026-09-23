@@ -5,6 +5,7 @@ config.yaml is otherwise a silent bug.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -127,21 +128,37 @@ class BarsSettings:
             raise ConfigError("bars.session_batch and bars.concurrency must be >= 1")
 
 
+_HOST_NAME = re.compile(r"^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$")
+
+
 @dataclass(frozen=True)
 class WebSettings:
-    # The site always binds to 127.0.0.1 (TradingView data may not be served to
-    # others); the host is deliberately not a setting.
+    # The server always binds to 127.0.0.1; the bind address is deliberately not a
+    # setting. Reaching it from outside goes through a tunnel the owner opens.
     port: int = 8050
     open_browser: bool = True
     rows_per_page: int = 100
+    # Host names the site also answers to, beyond 127.0.0.1/localhost: the address
+    # of a tunnel such as VS Code port forwarding ("*.devtunnels.ms"). Empty means
+    # this computer only. Non-empty turns on public mode (no local details shown).
+    public_hosts: tuple[str, ...] = ()
 
     def __post_init__(self):
         object.__setattr__(self, "port", int(self.port))
         object.__setattr__(self, "rows_per_page", int(self.rows_per_page))
+        object.__setattr__(self, "public_hosts", tuple(str(h).strip().lower() for h in self.public_hosts))
         if not 1024 <= self.port <= 65535:
             raise ConfigError("web.port must be 1024..65535")
         if not 10 <= self.rows_per_page <= 1000:
             raise ConfigError("web.rows_per_page must be 10..1000")
+        for host in self.public_hosts:
+            if not _HOST_NAME.match(host) or host.rsplit(".", 1)[-1].isdigit():   # no IPs
+                raise ConfigError(f"web.public_hosts: '{host}' is not a host name "
+                                  "(a leading '*.' wildcard is allowed; no IPs, ports or '*')")
+
+    @property
+    def public(self) -> bool:
+        return bool(self.public_hosts)
 
 
 _SECTIONS = {

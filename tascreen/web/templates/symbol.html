@@ -11,7 +11,7 @@
     <h1>{{ stock.symbol }}</h1>
     <p class="meta">{{ stock.description or "" }} · {{ stock.sector|sector }}{% if stock.industry %} · <span dir="ltr">{{ stock.industry }}</span>{% endif %}</p>
     <div class="links">
-      {% if back and "/symbol/" not in back %}<a href="{{ back }}">→ חזרה לתוצאות</a>{% else %}<a href="/">→ לסורק</a>{% endif %}
+      {% if back %}<a href="{{ back }}">→ חזרה לתוצאות</a>{% else %}<a href="/">→ לסורק</a>{% endif %}
       <a href="{{ stock.symbol|tradingview_url }}" target="_blank" rel="noopener">פתיחה ב-TradingView ↗</a>
     </div>
   </div>

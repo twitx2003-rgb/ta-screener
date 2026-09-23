@@ -1,4 +1,8 @@
-"""The website: FastAPI + Jinja2, Hebrew and right-to-left, on 127.0.0.1 only.
+"""The website: FastAPI + Jinja2, Hebrew and right-to-left, bound to 127.0.0.1.
+
+The owner may expose it through a tunnel (VS Code port forwarding); the tunnel's
+host names are listed in `web.public_hosts`, which also turns on public mode:
+no local details (error texts, file paths) are shown.
 
 Pages:  /  (screener)   /symbol/{EXCHANGE:TICKER}   /patterns   /status
 API:    /api/scan (same filters as /)   /api/symbol/{EXCHANGE:TICKER}
@@ -13,7 +17,7 @@ import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import pandas as pd
 from fastapi import FastAPI, Request
@@ -30,7 +34,7 @@ from . import fmt, labels
 from .data import ScanRepository, ScanView
 from .filters import SORTS, STATUSES, Query, apply, parse_query
 
-HOST = "127.0.0.1"          # never configurable: TradingView data is for the account holder
+HOST = "127.0.0.1"          # the bind address is never configurable; tunnels connect here
 WEB_DIR = Path(__file__).resolve().parent
 SYMBOL = re.compile(r"^[A-Z]{1,12}:[A-Z0-9.\-_]{1,20}$")
 NOT_ADVICE = ("Mechanical readings of past prices, not investment advice. A target is the "
@@ -50,6 +54,18 @@ def symbol_url(symbol: str) -> str:
 
 def tradingview_url(symbol: str) -> str:
     return "https://www.tradingview.com/chart/?symbol=" + quote(symbol, safe="")
+
+
+def back_link(request: Request) -> str:
+    """The screener page the visitor came from, as a path on this site, or ''.
+
+    Only a referer from this same host counts, so another site can never place
+    its own link on the page."""
+    parts = urlsplit(request.headers.get("referer", ""))
+    if parts.netloc != request.headers.get("host") or not parts.path.startswith("/") \
+            or parts.path.startswith(("//", "/symbol/")):
+        return ""
+    return parts.path + (f"?{parts.query}" if parts.query else "")
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -101,13 +117,25 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
         num=fmt.num, price=fmt.price, pct=fmt.pct, money=fmt.money, day=fmt.day,
         sign=fmt.sign_class, check_text=labels.check_text, sector=labels.sector,
         symbol_url=symbol_url, tradingview_url=tradingview_url)
+    public = settings.web.public
     templates.env.globals.update(labels=labels, rules=rules, specs=specs, SORTS=SORTS,
-                                 STATUSES=STATUSES, ok=fmt.ok)
+                                 STATUSES=STATUSES, ok=fmt.ok, public=public)
 
     app = FastAPI(title="ta-screener", docs_url=None, redoc_url=None, openapi_url=None)
-    # Only local names: a page on another site cannot reach this server through a
-    # rebinding DNS name.
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=[HOST, "localhost"])
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+        return response
+
+    # Only these names: a page on another site cannot reach this server through a
+    # rebinding DNS name. public_hosts adds the tunnel's address when the owner
+    # exposes the site (the server itself still binds to 127.0.0.1).
+    app.add_middleware(TrustedHostMiddleware,
+                       allowed_hosts=[HOST, "localhost", *settings.web.public_hosts])
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
     def render(request: Request, name: str, view: ScanView | None, status_code: int = 200,
@@ -147,7 +175,7 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
         bars = store.read_bars(symbol)
         chart = fmt.script_json(chart_payload(bars, detections)) if bars is not None else None
         return render(request, "symbol.html", view, stock=stock, detections=detections,
-                      chart=chart, back=request.headers.get("referer", ""))
+                      chart=chart, back=back_link(request))
 
     @app.get("/patterns", response_class=HTMLResponse)
     def patterns_page(request: Request):

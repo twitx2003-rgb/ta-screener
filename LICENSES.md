@@ -5,11 +5,11 @@ code only: no market data, and no text from the books it follows.
 
 | Component | Licence | Practical limits |
 |---|---|---|
-| **TradingView MCP** (hosted service) | TradingView Terms of Use | Requires a paid TradingView plan (Essential or higher). Public beta: tool names and schemas may change. OAuth 2.1, no API key. The data it returns is for the account holder's own use and is **not redistributed here**: `data/` and `logs/` are gitignored, and the website binds to 127.0.0.1 only. |
+| **TradingView MCP** (hosted service) | TradingView Terms of Use | Requires a paid TradingView plan (Essential or higher). Public beta: tool names and schemas may change. OAuth 2.1, no API key. The data it returns is for the account holder's own use. This repository holds none of it: `data/` and `logs/` are gitignored. The website binds to 127.0.0.1. **The owner chose (2026-09-23) to expose the site publicly through a VS Code tunnel, knowing this conflicts with that limit and puts the TradingView account at risk**; closing the tunnel ends it. |
 | **mcp** (Python SDK) 2.2.0 | MIT | Client library only; TradingView's terms govern the data. |
 | **pandas**, **numpy**, **pyarrow**, **PyYAML** | BSD-3-Clause / BSD-3-Clause / Apache-2.0 / MIT | — |
 | **Code taken from market-research-pipeline** (TradingView client, contracts, market calendar) | Same author | Copied, not a dependency. |
-| **FastAPI**, **Starlette**, **uvicorn**, **Jinja2** / **MarkupSafe**, **httpx** (tests) | MIT / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause | The local website. |
+| **FastAPI**, **Starlette**, **uvicorn**, **Jinja2** / **MarkupSafe**, **httpx** (tests) | MIT / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause | The website. |
 | **TradingView Lightweight Charts™** 5.2.1 | Apache-2.0 | Vendored unchanged in `tascreen/web/static/vendor/`, with its `LICENSE` and `NOTICE`. The licence requires the NOTICE line and a link to https://www.tradingview.com/ on the page: every page footer carries both, and the chart keeps its TradingView logo (`attributionLogo`). |
 | **Fonts**: Frank Ruhl Libre, IBM Plex Sans Hebrew, IBM Plex Mono | SIL Open Font License 1.1 | Loaded from Google Fonts by the browser, not stored in the repo. |
 

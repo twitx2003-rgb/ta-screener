@@ -97,8 +97,24 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 - Config is in `config.yaml`. Unknown sections and keys are rejected.
 - **The website (`tascreen/web/`) only reads** data/ and logs/; it never calls
   TradingView, so it can stay open during `--bars`.
-  - It binds to `web.app.HOST` = 127.0.0.1. The host is deliberately not a setting,
-    and `TrustedHostMiddleware` refuses other Host names (DNS rebinding).
+  - It binds to `web.app.HOST` = 127.0.0.1; the bind address is deliberately not a
+    setting. `TrustedHostMiddleware` refuses Host names other than 127.0.0.1,
+    localhost and `web.public_hosts` (DNS rebinding).
+  - **Public through a tunnel (owner's decision, 2026-09-23).** The owner chose twice
+    to make the site public with its data, after being told that TradingView's terms
+    limit the data to the account holder and the account could be blocked.
+    - The owner opens the tunnel themselves: VS Code port forwarding, port 8050,
+      visibility Public. `web.public_hosts: ["*.devtunnels.ms"]` lets the site
+      answer there.
+    - Claude Code's auto-mode permission check blocked Claude from opening a tunnel
+      and from some edits toward it ("data exfiltration"). Do not work around it:
+      the owner does those steps.
+    - A non-empty `public_hosts` turns on public mode: scan error texts (file paths,
+      the Windows user name) are not shown.
+    - Other headers: nosniff, Referrer-Policy same-origin, and frame-ancestors 'none'.
+    - The "back" link only uses a same-host referer.
+    - Tests cover all of it.
+    - To close the site: Stop Forwarding Port in VS Code, or `public_hosts: []`.
   - `ScanRepository` reloads when a newer `scan.json` appears.
   - `/` and `/api/scan` share one filter model (`web/filters.py`), and filters live in
     the URL. A bad value is dropped and reported in Hebrew, never guessed.
@@ -365,7 +381,8 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 
 **Decisions:** Bulkowski is the book. v1 filters on chart patterns, candlesticks and
-indicators. The site is local only (127.0.0.1). This is a separate project in a new
+indicators. The site started local only (127.0.0.1); on 2026-09-23 the owner made it
+public through a VS Code tunnel (see the website rules above). This is a separate project in a new
 **public** repo. Updates are manual at first; decide on scheduling after measuring.
 
 **Phase 0 — skeleton + connection.**
@@ -430,6 +447,8 @@ run times.
 ## Safety
 
 - Never print, log or commit tokens (`~/.ta-screener/tv_tokens.json`) or `.env`.
-- Never publish `data/` or `logs/`, and never serve the site beyond 127.0.0.1.
+- Never commit or upload `data/` or `logs/`. The server binds to 127.0.0.1 only.
+  Exposing it is the owner's own step, through their VS Code tunnel; Claude does not
+  open tunnels.
 - Nothing here is investment advice. Pattern targets are the book's measure rule, not
   forecasts.

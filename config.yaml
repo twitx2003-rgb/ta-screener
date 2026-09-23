@@ -54,7 +54,12 @@ market:
   session_close: "16:15"
 
 web:
-  # The site listens on 127.0.0.1 only (not configurable: the data is for your own use).
+  # The server listens on 127.0.0.1 only (not configurable).
   port: 8050
   open_browser: true         # --serve opens the screener in the default browser
   rows_per_page: 100
+  # Host names the site also answers to when you expose it through a tunnel.
+  # Owner's decision (2026-09-23): make the site public through VS Code port
+  # forwarding (Ports view, visibility Public), knowing that TradingView's terms
+  # limit its data to the account holder. Set to [] to go back to this computer only.
+  public_hosts: ["*.devtunnels.ms"]

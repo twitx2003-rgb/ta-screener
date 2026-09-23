@@ -33,7 +33,8 @@
     {% if s.symbols_too_sparse_for_patterns %}<h3 style="margin-top: 12px">נתונים דלילים</h3>{{ symbols(s.symbols_too_sparse_for_patterns) }}{% endif %}
     {% if s.symbols_behind_session %}<h3 style="margin-top: 12px">נרות לא עדכניים</h3>{{ symbols(s.symbols_behind_session) }}{% endif %}
     {% if s.errors %}<h3 style="margin-top: 12px">שגיאות</h3>
-      <ul class="list">{% for sym, err in s.errors.items() %}<li><span class="mono">{{ sym }}</span>: <span dir="ltr">{{ err }}</span></li>{% endfor %}</ul>{% endif %}
+      {% if public %}{{ symbols(s.errors|list) }}{% else %}
+      <ul class="list">{% for sym, err in s.errors.items() %}<li><span class="mono">{{ sym }}</span>: <span dir="ltr">{{ err }}</span></li>{% endfor %}</ul>{% endif %}{% endif %}
     {% else %}
     <p class="muted">אין עדיין סריקה.</p>
     {% endif %}

@@ -289,3 +289,60 @@ def test_the_host_is_not_a_setting(tmp_path):
     (tmp_path / "config.yaml").write_text("web:\n  host: 0.0.0.0\n", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_settings(tmp_path / "config.yaml", root=tmp_path)
+
+
+# ------------------------------------------------------------ public mode
+def _public_client(tmp_path, hosts=("*.devtunnels.ms",)):
+    settings = _scan(tmp_path)
+    settings = Settings(root=settings.root, web=WebSettings(public_hosts=hosts))
+    return TestClient(create_app(settings, rules=RULES), base_url=f"http://{HOST}")
+
+
+def test_public_hosts_are_answered_and_others_still_refused(tmp_path):
+    client = _public_client(tmp_path)
+    assert client.get("/", headers={"host": "abc-8050.euw.devtunnels.ms"}).status_code == 200
+    assert client.get("/", headers={"host": "example.com"}).status_code == 400
+    assert client.get("/").status_code == 200                       # 127.0.0.1 still works
+
+
+@pytest.mark.parametrize("host", ["*", "0.0.0.0", "1.2.3.4", "x.devtunnels.ms:443", "bad host"])
+def test_public_hosts_must_be_host_names(host):
+    with pytest.raises(ConfigError):
+        WebSettings(public_hosts=(host,))
+
+
+def test_public_mode_hides_error_texts(tmp_path):
+    client = _public_client(tmp_path)
+    store = Store(tmp_path / "data")
+    indicators, patterns, summary = store.read_scan(store.scan_days()[-1])
+    secret = r"C:\Users\someone\data\bars\X.parquet"
+    store.write_scan(store.scan_days()[-1], indicators, patterns,
+                     {**summary, "errors": {"NYSE:ERR": f"OSError: {secret}"}})
+    html = _html_ok(client.get("/status"))
+    assert "NYSE:ERR" in html and "someone" not in html
+    local = TestClient(create_app(Settings(root=tmp_path), rules=RULES), base_url=f"http://{HOST}")
+    assert "someone" in local.get("/status").text
+
+
+def test_security_headers(client):
+    headers = client.get("/").headers
+    assert headers["x-content-type-options"] == "nosniff"
+    assert headers["referrer-policy"] == "same-origin"
+    assert "frame-ancestors 'none'" in headers["content-security-policy"]
+
+
+def test_search_text_is_escaped(client):
+    html = client.get("/", params={"q": '<script>alert(1)</script>"'}).text
+    assert "<script>alert(1)" not in html and "&lt;script&gt;alert(1)" in html
+
+
+@pytest.mark.parametrize("referer, expected", [
+    (f"http://{HOST}/?family=chart&sort=age", "/?family=chart&amp;sort=age"),
+    ("https://evil.example/?x=1", None),
+    (f"http://{HOST}/symbol/NASDAQ:DB", None),
+])
+def test_back_link_only_leads_back_into_this_site(client, referer, expected):
+    html = client.get("/symbol/NYSE:HS", headers={"referer": referer}).text
+    back = re.search(r'<a href="([^"]*)">→ חזרה לתוצאות</a>', html)
+    assert (back.group(1) if back else None) == expected
+    assert "evil.example" not in html
