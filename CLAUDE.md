@@ -50,6 +50,8 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --bars                # all symbols (~55 min first time; resumable)
 .venv\Scripts\python.exe run.py --update              # --universe (saved one if 429) + --bars
 .venv\Scripts\python.exe run.py --check-bars          # bars vs trading calendar -> logs/bars_audit.json
+.venv\Scripts\python.exe run.py --scan                # indicators + patterns -> data/scans/<session>/ (~3 min)
+.venv\Scripts\python.exe run.py --scan-symbol NASDAQ:NVDA   # one symbol's detections with checklists
 ```
 
 For a long run from a Claude Code session, start a detached process: the tool kills
@@ -115,9 +117,12 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 - When typing `/mcp`, add a space before Enter, or autocomplete may pick a skill whose
   name contains "mcp".
 - Skills live in `.claude/skills/` and agents in `.claude/agents/`.
-  - Built: `tradingview-rules` (not named `*-mcp`: the /mcp autocomplete picked a skill with "mcp" in its name instead of the built-in command).
-  - Planned: `bulkowski-patterns`, `daily-update`, `add-pattern` (skills);
-    `pattern-verifier`, `setup-analyst`, `screener-scout` (agents).
+  - Built:
+    - skills: `tradingview-rules` (not named `*-mcp`: the /mcp autocomplete picked a
+      skill with "mcp" in its name over the built-in command) and `bulkowski-patterns`;
+    - agent: `pattern-verifier`.
+  - Planned: the skills `daily-update` and `add-pattern`, and the agents
+    `setup-analyst` and `screener-scout`.
 
 ## Verified facts (from market-research-pipeline's live runs, 2026-09)
 
@@ -206,9 +211,27 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   - Git identity for this repo only: `Claude <noreply@anthropic.com>`, the same
     identity as the sister project's commits, so no personal e-mail goes into a
     public history.
-- **Phase 1 (universe + bars): BUILT 2026-09-23.**
+- **Phase 1 (universe + bars): BUILT 2026-09-23. Bars are partial: 1,008 of ~2,370**,
+  the largest by market cap. Review is pending.
   - Code: `tascreen/universe.py`, `tascreen/bars.py` and `tascreen/store.py`.
-  - The first full `--bars` run was started. Review is pending.
+  - **TradingView throttles `get-ohlcv` after heavy use.**
+    - ~1,000 calls ran at 1.4 s each (about 25 minutes).
+    - Then every call took 20-50 s. That included a separate session and 10-bar calls,
+      so it is account- or server-side and not payload size, and it was still slow
+      20 minutes later.
+    - The run was stopped (it resumes: `--bars` skips up-to-date symbols).
+    - Next: resume later with pacing (`bars.min_interval_s`), and measure the quota
+      before deciding the daily schedule. A daily update is one call per symbol
+      (~2,370 calls), so it may need to be spread out.
+  - **Data quality (`--check-bars`):**
+    - A few series are sparse, covering 20-93% of their sessions: thinly traded
+      B-class shares and stocks uplisted from OTC or relisted. The scan skips patterns
+      when recent coverage is < 0.95.
+    - 66 NYSE symbols (none on NASDAQ) lack 2024-11-07, an ordinary session. It is a
+      TradingView data hole: one bar, not a closure.
+    - The audit counts a day as market-wide only when at least 20 symbols (or 5%)
+      span it. A single sparse series reaching back to 2014 had turned each of its
+      holes into a "market-wide" day.
   - What the live runs taught:
     - **The MCP server refuses results over 1,000,000 bytes.** The error is "Result
       size N exceeds limit of 1000000 bytes", it arrives as an MCP-level `is_error`,
@@ -246,6 +269,38 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
       mourning, President Carter). It was added to
       `market_hours.UNSCHEDULED_CLOSURES`. `--check-bars` reports any future
       market-wide missing day.
+- **Phase 2 (scan): BUILT 2026-09-23, run in parallel with phase 1 (user's choice).
+  Review is pending.**
+  - Rules:
+    - `tascreen/patterns/rules.yaml` holds every threshold, each with `origin` (site or
+      ours) and a note. It was written from thepatternsite.com, read the same day. The
+      free site has no numeric candle definitions (tall, small, doji, trend), so those
+      numbers are all ours.
+    - Bulkowski's measure rule multiplies by his statistics; we use the classic full
+      height and never ship his statistics.
+  - Code: `indicators.py`, `patterns/{pivots,detection,candles,chart,rules}.py`, `scan.py`.
+    `--scan` writes `data/scans/<session>/`. `--scan-symbol X` prints detections with
+    their checklists.
+  - First live scan (1,008 symbols, 160 s):
+    - Our RSI14, EMA50 and EMA200 agree with TradingView's own values for 99.9%,
+      99.3% and 98.8% of symbols (median difference about 0).
+  - Tightened after looking at live output, with each change in rules.yaml:
+    - `pole_min_atr_per_session` 1.0: the median flag pole moved 0.5 ATR/session, and
+      483 "flags" became 27.
+    - `touch_tolerance_height` 0.1 of the pattern height.
+    - `converge_max_end_width` 0.75: near-parallel rising channels had passed as
+      wedges; wedges dropped by about a third.
+    - Each fix has a synthetic test, including "a rising channel is not a wedge" and
+      "a V is not a cup".
+  - Claude Code: the `bulkowski-patterns` skill, and the `pattern-verifier` agent
+    (read-only, re-derives rules from raw bars).
+    `tests/test_claude_config.py` checks that agents list explicit tools, that none
+    edits files, and that none gets a TradingView write tool.
+  - Open items:
+    - a QA sample per pattern with `pattern-verifier` (run from a Claude Code session
+      in this folder, where the MCP is connected);
+    - the user reviews rules.yaml;
+    - a full scan once all bars are in.
 
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 

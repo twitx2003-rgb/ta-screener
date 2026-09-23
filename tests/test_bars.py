@@ -133,11 +133,24 @@ def test_audit_separates_market_wide_closures_from_single_symbol_gaps(tmp_path):
         job.store.write_bars(symbol, frame[~drop].reset_index(drop=True))
 
     from tascreen.bars import audit_bars
-    report = audit_bars(job.store, symbols + ["A:NONE"], DAY)
+    report = audit_bars(job.store, symbols + ["A:NONE"], DAY, min_spanning=2)
     assert report["market_wide_missing_days"] == [closed.isoformat()]
     assert report["symbols_with_gaps"] == {"A:3": [halted.isoformat()]}
     assert report["absent"] == ["A:NONE"] and report["behind_target"] == []
     assert report["bars_on_non_trading_days"] == {}
+    # too few symbols span the day for it to count as market-wide
+    assert audit_bars(job.store, symbols, DAY)["market_wide_missing_days"] == []
+
+
+def test_sparse_series_are_reported(tmp_path):
+    job, source = _job(tmp_path), FakeOhlcv(DAY)
+    _run(job, source, ["A:1"])
+    frame = job.store.read_bars("A:1")
+    job.store.write_bars("A:1", frame.iloc[::3].reset_index(drop=True))    # every third bar
+    from tascreen.bars import audit_bars, coverage
+    assert coverage(list(frame["timestamp"].dt.date)) == pytest.approx(1.0)
+    report = audit_bars(job.store, ["A:1"], DAY)
+    assert 0.3 < report["sparse_series"]["A:1"] < 0.37
 
 
 @pytest.mark.parametrize("value", [100, 10_000])

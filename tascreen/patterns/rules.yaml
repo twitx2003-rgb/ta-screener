@@ -1,0 +1,339 @@
+# Pattern rules: the single source of every parameter the detectors use.
+#
+# Our own wording of Thomas N. Bulkowski's identification guidelines, from his free
+# site thepatternsite.com (read 2026-09-23). The books themselves:
+#   Encyclopedia of Chart Patterns, 3rd ed. (Wiley, 2021)
+#   Encyclopedia of Candlestick Charts (Wiley, 2008)
+# No text is quoted and none of his performance statistics are included (this
+# repository is public). In particular his measure rule multiplies the pattern
+# height by a "percentage meeting price target" from his statistics; here the
+# classic full-height measure rule is used and labelled as such.
+#
+# Every parameter says where its number comes from:
+#   origin: site  - the number is stated on Bulkowski's page for that pattern
+#   origin: ours  - his guideline is qualitative ("near the same price", "allow
+#                   variations"); the number is our choice and is shown as such
+# `confirmed_from_book` is false everywhere until checked against the books.
+
+version: 1
+confirmed_from_book: false
+
+general:
+  atr_period: {value: 14, origin: ours, note: "Average True Range length used to scale pivots and touch tolerance"}
+  pivot_atr_multiple: {value: 2.0, origin: ours, note: "a swing must reverse by this many ATRs to count as a minor high/low"}
+  trend_lookback_sessions: {value: 63, origin: site, note: "glossary: the prevailing trend is the intermediate-term (3-6 month) trend; 63 sessions = 3 months"}
+  lookback_sessions: {value: 400, origin: ours, note: "patterns must start within this many sessions (cups can last 65 weeks)"}
+  recent_breakout_sessions: {value: 20, origin: ours, note: "a pattern that broke out is reported for this many sessions after the breakout"}
+  forming_max_age_sessions: {value: 30, origin: ours, note: "a pattern still forming is reported only if its last turning point is this recent"}
+  touch_tolerance_atr: {value: 1.0, origin: ours, note: "a turning point within this many ATRs of a trendline touches it"}
+  touch_tolerance_height: {value: 0.1, origin: ours, note: "...and within this share of the pattern's height (whichever is tighter); first live scan: 1 ATR alone let 43% of symbols show a triangle/wedge/rectangle"}
+  inside_tolerance_atr: {value: 0.5, origin: ours, note: "inside a pattern, closes may poke this many ATRs past a trendline"}
+  coverage_sessions: {value: 250, origin: ours, note: "data-quality window: the last this many bars"}
+  min_recent_coverage: {value: 0.95, origin: ours, note: "no patterns on a series whose last bars cover fewer than this share of the trading sessions they span (TradingView serves some listings from a sparse feed)"}
+  flat_line_max_drift: {value: 0.25, origin: ours, note: "a trendline is horizontal if it drifts less than this share of the pattern height over the pattern"}
+  converge_max_end_width: {value: 0.75, origin: ours, note: "site: triangles and wedges have converging trendlines; at its last turning point the pattern is at most this share of its starting width (first live scan: near-parallel rising channels passed as wedges)"}
+
+chart:
+  double_bottom:
+    name_he: "תחתית כפולה"
+    name_en: "Double bottom"
+    direction: bullish
+    url: "https://thepatternsite.com/aadb.html"
+    rules_he:
+      - "מגמה יורדת לפני התבנית"
+      - "שני שפלים באותו אזור מחיר"
+      - "עלייה משמעותית בין שני השפלים"
+      - "השפלים מופרדים בכמה שבועות"
+      - "אישור: סגירה מעל השיא שבין שני השפלים"
+    params:
+      max_bottom_diff_pct: {value: 3.0, origin: site, note: "site: bottoms average about 1% apart, variations allowed; tops usually under 3%"}
+      min_rise_between_pct: {value: 10.0, origin: site, note: "site: the rise between the bottoms is at least 10%, allow variations"}
+      min_separation_sessions: {value: 10, origin: ours, note: "site: usually several weeks apart (median 16 days)"}
+      max_separation_sessions: {value: 120, origin: ours}
+
+  double_top:
+    name_he: "פסגה כפולה"
+    name_en: "Double top"
+    direction: bearish
+    url: "https://thepatternsite.com/aadt.html"
+    rules_he:
+      - "מגמה עולה לפני התבנית"
+      - "שתי פסגות באותו אזור מחיר"
+      - "ירידה משמעותית בין שתי הפסגות"
+      - "הפסגות מופרדות בכמה שבועות"
+      - "אישור: סגירה מתחת לשפל שבין שתי הפסגות"
+    params:
+      max_top_diff_pct: {value: 3.0, origin: site, note: "site: peak variation usually less than 3%"}
+      min_decline_between_pct: {value: 10.0, origin: site, note: "site: the decline between the peaks is at least 10%, allow exceptions"}
+      min_separation_sessions: {value: 10, origin: ours, note: "site: usually several weeks apart"}
+      max_separation_sessions: {value: 120, origin: ours}
+
+  triple_bottom:
+    name_he: "תחתית משולשת"
+    name_en: "Triple bottom"
+    direction: bullish
+    url: "https://thepatternsite.com/tb.html"
+    rules_he:
+      - "מגמה יורדת לפני התבנית"
+      - "שלושה שפלים באותו אזור מחיר"
+      - "אישור: סגירה מעל השיא הגבוה שבין השפלים"
+    params:
+      max_bottom_diff_pct: {value: 3.0, origin: ours, note: "site: small variation, the valleys bottom near the same price"}
+      min_swing_pct: {value: 5.0, origin: ours, note: "each rise between valleys, so the valleys are distinct"}
+
+  triple_top:
+    name_he: "פסגה משולשת"
+    name_en: "Triple top"
+    direction: bearish
+    url: "https://thepatternsite.com/tt.html"
+    rules_he:
+      - "מגמה עולה לפני התבנית"
+      - "שלוש פסגות באותו אזור מחיר"
+      - "אישור: סגירה מתחת לשפל הנמוך שבין הפסגות"
+    params:
+      max_top_diff_pct: {value: 3.0, origin: ours, note: "site: three peaks near the same price"}
+      min_swing_pct: {value: 5.0, origin: ours}
+
+  head_shoulders_top:
+    name_he: "ראש וכתפיים"
+    name_en: "Head-and-shoulders top"
+    direction: bearish
+    url: "https://thepatternsite.com/hst.html"
+    rules_he:
+      - "מגמה עולה לפני התבנית"
+      - "שלוש פסגות, האמצעית (הראש) הגבוהה מכולן"
+      - "הכתפיים באותו אזור מחיר ובמרחק דומה מהראש"
+      - "קו הצוואר מחבר את שני השפלים (בתי השחי)"
+      - "אישור: סגירה מתחת לקו צוואר עולה, או מתחת לבית השחי הימני כשהקו יורד"
+    params:
+      max_shoulder_diff_pct: {value: 5.0, origin: ours, note: "site: shoulders peak near the same price"}
+      min_head_excess_pct: {value: 2.0, origin: ours, note: "site: the middle peak is above the others"}
+      max_time_asymmetry: {value: 2.0, origin: ours, note: "site: shoulders nearly the same distance from the head; ratio of the two distances"}
+
+  head_shoulders_bottom:
+    name_he: "ראש וכתפיים הפוך"
+    name_en: "Head-and-shoulders bottom"
+    direction: bullish
+    url: "https://thepatternsite.com/hsb.html"
+    rules_he:
+      - "מגמה יורדת לפני התבנית"
+      - "שלושה שפלים, האמצעי (הראש) הנמוך מכולם"
+      - "הכתפיים באותו אזור מחיר ובמרחק דומה מהראש"
+      - "קו הצוואר מחבר את שתי הפסגות שביניהם"
+      - "אישור: סגירה מעל קו צוואר יורד, או מעל בית השחי הימני כשהקו עולה"
+    params:
+      max_shoulder_diff_pct: {value: 5.0, origin: ours, note: "site: shoulders bottom near the same price"}
+      min_head_excess_pct: {value: 2.0, origin: ours, note: "site: the middle valley is below the others"}
+      max_time_asymmetry: {value: 2.0, origin: ours}
+
+  ascending_triangle:
+    name_he: "משולש עולה"
+    name_en: "Ascending triangle"
+    direction: either
+    url: "https://thepatternsite.com/at.html"
+    rules_he:
+      - "קו עליון אופקי וקו תחתון עולה, מתכנסים"
+      - "מגע בקו אחד 3 פעמים לפחות ובשני 2 לפחות"
+      - "המחיר חוצה את התבנית מצד לצד"
+      - "פריצה: סגירה מחוץ לאחד הקווים, לפני הקודקוד"
+    params:
+      min_touches_major: {value: 3, origin: site}
+      min_touches_minor: {value: 2, origin: site}
+      min_duration_sessions: {value: 15, origin: ours, note: "shorter than 3 weeks is a pennant (site, wedges/pennants)"}
+
+  descending_triangle:
+    name_he: "משולש יורד"
+    name_en: "Descending triangle"
+    direction: either
+    url: "https://thepatternsite.com/dt.html"
+    rules_he:
+      - "קו תחתון אופקי וקו עליון יורד, מתכנסים"
+      - "מגע בקו אחד 3 פעמים לפחות ובשני 2 לפחות"
+      - "פריצה: סגירה מחוץ לאחד הקווים, לפני הקודקוד"
+    params:
+      min_touches_major: {value: 3, origin: site}
+      min_touches_minor: {value: 2, origin: site}
+      min_duration_sessions: {value: 15, origin: ours}
+
+  symmetrical_triangle:
+    name_he: "משולש סימטרי"
+    name_en: "Symmetrical triangle"
+    direction: either
+    url: "https://thepatternsite.com/st.html"
+    rules_he:
+      - "קו עליון יורד וקו תחתון עולה, מתכנסים"
+      - "מגע בקו אחד 3 פעמים לפחות ובשני 2 לפחות"
+      - "פריצה: סגירה מחוץ לאחד הקווים, לפני הקודקוד"
+    params:
+      min_touches_major: {value: 3, origin: site}
+      min_touches_minor: {value: 2, origin: site}
+      min_duration_sessions: {value: 15, origin: ours}
+
+  rectangle:
+    name_he: "מלבן"
+    name_en: "Rectangle"
+    direction: either
+    url: "https://thepatternsite.com/rectbots.html"
+    rules_he:
+      - "שני קווים אופקיים ומקבילים"
+      - "5 מגעים לפחות: 3 בקו אחד ו-2 בשני"
+      - "מלבן תחתית אחרי מגמה יורדת, מלבן פסגה אחרי מגמה עולה"
+      - "פריצה: סגירה מחוץ לאחד הקווים"
+    params:
+      min_touches_major: {value: 3, origin: site}
+      min_touches_minor: {value: 2, origin: site}
+      min_duration_sessions: {value: 15, origin: ours}
+
+  rising_wedge:
+    name_he: "טריז עולה"
+    name_en: "Rising wedge"
+    direction: either
+    url: "https://thepatternsite.com/risewedge.html"
+    rules_he:
+      - "שני קווים עולים ומתכנסים"
+      - "מגע בקו אחד 3 פעמים לפחות ובשני 2 לפחות"
+      - "משך מינימלי 3 שבועות"
+      - "פריצה: סגירה מחוץ לאחד הקווים"
+    params:
+      min_touches_major: {value: 3, origin: site}
+      min_touches_minor: {value: 2, origin: site}
+      min_duration_sessions: {value: 15, origin: site, note: "site: 3 weeks minimum, otherwise it is a pennant"}
+
+  falling_wedge:
+    name_he: "טריז יורד"
+    name_en: "Falling wedge"
+    direction: either
+    url: "https://thepatternsite.com/fallwedge.html"
+    rules_he:
+      - "שני קווים יורדים ומתכנסים"
+      - "מגע בקו אחד 3 פעמים לפחות ובשני 2 לפחות"
+      - "משך מינימלי 3 שבועות"
+      - "פריצה: סגירה מחוץ לאחד הקווים"
+    params:
+      min_touches_major: {value: 3, origin: site}
+      min_touches_minor: {value: 2, origin: site}
+      min_duration_sessions: {value: 15, origin: site, note: "site: 3 weeks minimum"}
+
+  flag:
+    name_he: "דגל"
+    name_en: "Flag"
+    direction: either
+    url: "https://thepatternsite.com/flags.html"
+    rules_he:
+      - "תורן: תנועה תלולה במיוחד שנמשכת כמה ימים"
+      - "מלבן קטן בין שני קווים מקבילים, לרוב נוטה נגד כיוון התורן"
+      - "קצר משלושה שבועות"
+      - "פריצה: סגירה מחוץ לדגל"
+    params:
+      min_duration_sessions: {value: 5, origin: ours}
+      max_duration_sessions: {value: 14, origin: site, note: "site: flags are less than 3 weeks long"}
+      pole_min_move_pct: {value: 10.0, origin: ours, note: "site: the flagpole is unusually steep"}
+      pole_max_sessions: {value: 12, origin: ours, note: "site: the flagpole lasts several days"}
+      pole_min_atr_per_session: {value: 1.0, origin: ours, note: "site: unusually steep; the pole's net move per session, in ATRs measured before the pole (first live scan: the median pole moved 0.5 ATR/session, an ordinary trend)"}
+      max_retrace_of_pole: {value: 0.5, origin: ours}
+      max_width_change: {value: 0.35, origin: ours, note: "site: parallel or near-parallel lines; the flag's width may change by at most this share"}
+
+  pennant:
+    name_he: "דגלון"
+    name_en: "Pennant"
+    direction: either
+    url: "https://thepatternsite.com/pennants.html"
+    rules_he:
+      - "תורן: תנועה תלולה במיוחד שנמשכת כמה ימים"
+      - "משולש סימטרי קטן: שני קווים מתכנסים"
+      - "שלושה שבועות או פחות"
+      - "פריצה: סגירה מחוץ לדגלון"
+    params:
+      min_duration_sessions: {value: 5, origin: ours}
+      max_duration_sessions: {value: 15, origin: site, note: "site: 3 weeks long or less"}
+      pole_min_move_pct: {value: 10.0, origin: ours}
+      pole_max_sessions: {value: 12, origin: ours}
+      pole_min_atr_per_session: {value: 1.0, origin: ours, note: "site: unusually steep"}
+      max_retrace_of_pole: {value: 0.5, origin: ours}
+      max_end_width_share: {value: 0.6, origin: ours, note: "site: converging lines; at its end the pennant is at most this share of its starting width"}
+
+  high_tight_flag:
+    name_he: "דגל גבוה וצר"
+    name_en: "High and tight flag"
+    direction: bullish
+    url: "https://thepatternsite.com/htf.html"
+    rules_he:
+      - "המחיר כמעט מוכפל (עלייה של 90% לפחות) בחודשיים או פחות"
+      - "אחר כך התכנסות קצרה"
+      - "אישור: סגירה מעל השיא הגבוה בתבנית"
+    params:
+      min_rise_pct: {value: 90.0, origin: site}
+      max_rise_sessions: {value: 42, origin: site, note: "site: 2 months or less"}
+      max_retrace_pct: {value: 25.0, origin: ours, note: "site: a pause after price doubles; no number given"}
+      max_consolidation_sessions: {value: 30, origin: ours}
+
+  cup_with_handle:
+    name_he: "ספל וידית"
+    name_en: "Cup with handle"
+    direction: bullish
+    url: "https://thepatternsite.com/cup.html"
+    rules_he:
+      - "ספל מעוגל בצורת U ולא V"
+      - "משך הספל 7 עד 65 שבועות"
+      - "שתי שפות הספל באותו אזור מחיר"
+      - "ידית של שבוע לפחות, בחצי העליון של הספל"
+      - "אישור: סגירה מעל השפה הימנית של הספל"
+    params:
+      min_cup_sessions: {value: 35, origin: site, note: "site: 7 weeks"}
+      max_cup_sessions: {value: 325, origin: site, note: "site: 65 weeks"}
+      max_lip_diff_pct: {value: 5.0, origin: ours, note: "site: rims near the same price, be flexible"}
+      min_depth_pct: {value: 12.0, origin: ours}
+      max_depth_pct: {value: 50.0, origin: ours}
+      min_bottom_share: {value: 0.4, origin: ours, note: "U, not V: share of cup sessions spent in the lower third (a straight V spends exactly 1/3 there)"}
+      min_handle_sessions: {value: 5, origin: site, note: "site: 1 week minimum"}
+
+candle:
+  general:
+    avg_body_sessions: {value: 22, origin: ours, note: "a candle is tall or short relative to the average body of this many prior sessions"}
+    tall_body_factor: {value: 1.3, origin: ours}
+    small_body_factor: {value: 0.5, origin: ours}
+    doji_max_body_frac: {value: 0.05, origin: ours, note: "site: open and close within pennies; here: body at most 5% of the day's range"}
+    long_shadow_body_multiple: {value: 2.0, origin: site, note: "site: hammer lower shadow 2-3x the body; shooting star upper shadow at least 2x"}
+    little_shadow_max_frac: {value: 0.1, origin: ours, note: "site: little or no shadow; here: at most 10% of the range"}
+    near_extreme_frac: {value: 0.25, origin: ours, note: "a close 'near the high/low' is within 25% of the range from it"}
+    marubozu_max_shadow_frac: {value: 0.02, origin: ours, note: "site: no shadows; allows 2% of the range for tick noise"}
+    trend_sessions: {value: 10, origin: ours, note: "prior trend: close before the pattern vs this many sessions earlier"}
+    recent_sessions: {value: 3, origin: ours, note: "candle patterns are reported if they end within this many sessions"}
+
+  patterns:
+    hammer: {name_he: "פטיש", name_en: "Hammer", direction: bullish, url: "https://thepatternsite.com/Hammer.html",
+             rules_he: ["מגמה יורדת", "גוף קטן", "צל תחתון לפחות פי 2 מהגוף", "כמעט ללא צל עליון"]}
+    hanging_man: {name_he: "איש תלוי", name_en: "Hanging man", direction: bearish, url: "https://thepatternsite.com/HangingMan.html",
+                  rules_he: ["מגמה עולה", "גוף קטן מעל צל תחתון ארוך"]}
+    inverted_hammer: {name_he: "פטיש הפוך", name_en: "Inverted hammer", direction: bullish, url: "https://thepatternsite.com/HammerInv.html",
+                      rules_he: ["מגמה יורדת", "נר שחור גבוה שנסגר ליד השפל", "נר קצר שנפתח מתחת לסגירה הקודמת", "צל עליון ארוך, כמעט ללא צל תחתון, לא דוג'י"]}
+    shooting_star: {name_he: "כוכב נופל", name_en: "Shooting star", direction: bearish, url: "https://thepatternsite.com/ShootingStar.html",
+                    rules_he: ["מגמה עולה", "גוף קטן (לא דוג'י)", "צל עליון לפחות פי 2 מהגוף", "כמעט ללא צל תחתון"]}
+    bullish_engulfing: {name_he: "בליעה שורית", name_en: "Bullish engulfing", direction: bullish, url: "https://thepatternsite.com/BullEngulfing.html",
+                        rules_he: ["מגמה יורדת", "נר שחור ואחריו נר לבן גבוה ממנו", "גוף הלבן בולע את גוף השחור (הצללים לא נחשבים)"]}
+    bearish_engulfing: {name_he: "בליעה דובית", name_en: "Bearish engulfing", direction: bearish, url: "https://thepatternsite.com/BearEngulfing.html",
+                        rules_he: ["מגמה עולה", "נר לבן ואחריו נר שחור גבוה ממנו", "גוף השחור בולע את גוף הלבן (הצללים לא נחשבים)"]}
+    piercing: {name_he: "חדירה", name_en: "Piercing pattern", direction: bullish, url: "https://thepatternsite.com/Piercing.html",
+               rules_he: ["מגמה יורדת", "נר שחור", "נר לבן שנפתח מתחת לשפל של השחור", "ונסגר בין אמצע גוף השחור לפתיחתו"]}
+    dark_cloud_cover: {name_he: "ענן כהה", name_en: "Dark cloud cover", direction: bearish, url: "https://thepatternsite.com/DarkCloudCover.html",
+                       rules_he: ["מגמה עולה", "נר לבן גבוה", "נר שחור שנפתח מעל השיא של הלבן", "ונסגר מתחת לאמצע גוף הלבן"]}
+    morning_star: {name_he: "כוכב בוקר", name_en: "Morning star", direction: bullish, url: "https://thepatternsite.com/MorningStar.html",
+                   rules_he: ["מגמה יורדת", "נר שחור גבוה", "נר עם גוף קטן בפער מתחת לגוף הקודם", "נר לבן גבוה בפער מעל הגוף הקטן, שנסגר לפחות באמצע גוף הנר הראשון"]}
+    evening_star: {name_he: "כוכב ערב", name_en: "Evening star", direction: bearish, url: "https://thepatternsite.com/EveningStar.html",
+                   rules_he: ["מגמה עולה", "נר לבן גבוה", "נר עם גוף קטן בפער מעל שני הגופים הסמוכים", "נר שחור גבוה שנפתח מתחתיו ונסגר לפחות באמצע גוף הנר הראשון"]}
+    bullish_harami: {name_he: "הראמי שורי", name_en: "Bullish harami", direction: bullish, url: "https://thepatternsite.com/HaramiBull.html",
+                     rules_he: ["מגמה יורדת", "נר שחור גבוה", "נר לבן שגופו בתוך גוף השחור (קצה אחד יכול להשתוות, לא שניהם)"]}
+    bearish_harami: {name_he: "הראמי דובי", name_en: "Bearish harami", direction: bearish, url: "https://thepatternsite.com/HaramiBear.html",
+                     rules_he: ["מגמה עולה", "נר לבן גבוה", "נר שחור קטן שגופו בתוך גוף הלבן (קצה אחד יכול להשתוות, לא שניהם)"]}
+    three_white_soldiers: {name_he: "שלושה חיילים לבנים", name_en: "Three white soldiers", direction: bullish, url: "https://thepatternsite.com/ThreeWhiteSoldiers.html",
+                           rules_he: ["מגמה יורדת", "שלושה נרות לבנים גבוהים", "כל אחד נסגר ליד השיא ובסגירה גבוהה יותר", "כל אחד נפתח בתוך גוף הנר הקודם"]}
+    three_black_crows: {name_he: "שלושה עורבים שחורים", name_en: "Three black crows", direction: bearish, url: "https://thepatternsite.com/ThreeBlackCrows.html",
+                        rules_he: ["מגמה עולה", "שלושה נרות שחורים גבוהים", "הנר השני והשלישי נפתחים בתוך גוף הנר הקודם", "כולם נסגרים ליד השפל, בשפלים חדשים"]}
+    northern_doji: {name_he: "דוג'י צפוני", name_en: "Northern doji", direction: bearish, url: "https://thepatternsite.com/NorthernDoji.html",
+                    rules_he: ["מגמה עולה", "פתיחה וסגירה כמעט באותו מחיר"]}
+    southern_doji: {name_he: "דוג'י דרומי", name_en: "Southern doji", direction: bullish, url: "https://thepatternsite.com/SouthernDoji.html",
+                    rules_he: ["מגמה יורדת", "פתיחה וסגירה כמעט באותו מחיר"]}
+    white_marubozu: {name_he: "מרובוזו לבן", name_en: "White marubozu", direction: bullish, url: "https://thepatternsite.com/WhiteMarubozu.html",
+                     rules_he: ["נר לבן גבוה ללא צללים", "אין דרישת מגמה"]}
+    black_marubozu: {name_he: "מרובוזו שחור", name_en: "Black marubozu", direction: bearish, url: "https://thepatternsite.com/BlackMarubozu.html",
+                     rules_he: ["נר שחור גבוה ללא צללים", "אין דרישת מגמה"]}

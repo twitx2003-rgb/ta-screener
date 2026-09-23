@@ -52,11 +52,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bars", action="store_true",
                         help="Fetch or update daily bars for the newest universe -> data/bars/")
     parser.add_argument("--update", action="store_true",
-                        help="--universe, then --bars (a rate-limited screener falls back to "
-                             "the newest saved universe up to universe.max_age_days old)")
+                        help="--universe, --bars, then --scan (a rate-limited screener falls back "
+                             "to the newest saved universe up to universe.max_age_days old)")
     parser.add_argument("--check-bars", action="store_true",
                         help="Check stored bars against the trading calendar: market-wide "
                              "missing days, per-symbol gaps, symbols behind the last session")
+    parser.add_argument("--scan", action="store_true",
+                        help="Indicators, candlestick and chart patterns for every symbol with "
+                             "bars -> data/scans/<last session>/ (no TradingView calls)")
+    parser.add_argument("--scan-symbol", metavar="SYMBOL",
+                        help="Scan one symbol from stored bars and print every detection with "
+                             "its rule checklist (e.g. NASDAQ:NVDA)")
     parser.add_argument("--limit", type=int, metavar="N",
                         help="With --bars/--update: only the N largest symbols (a pilot run)")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -251,9 +257,74 @@ def check_bars(settings) -> int:
     for symbol, gaps in list(report["symbols_with_gaps"].items())[:10]:
         print(f"    {symbol}: {gaps[:5]}{' ...' if len(gaps) > 5 else ''}")
     print(f"  bars on non-trading days: {len(report['bars_on_non_trading_days'])}")
+    print(f"  sparse series (<95% of sessions): {report['sparse_series'] or 'none'}")
     print(f"  full report: {settings.log_dir / 'bars_audit.json'}\n")
     bad = report["market_wide_missing_days"] or report["bars_on_non_trading_days"]
     return 1 if bad else 0
+
+
+def _target(settings):
+    from datetime import datetime, timezone
+
+    from tascreen.market_hours import last_completed_session
+
+    return last_completed_session(datetime.now(timezone.utc), market_tz=settings.market.timezone,
+                                  session_close=settings.market.session_close)
+
+
+def scan(settings) -> int:
+    from tascreen.patterns.rules import load_rules
+    from tascreen.scan import run_scan
+    from tascreen.store import Store
+
+    found = usable_universe(settings)
+    if found is None:
+        return 1
+    day, frame = found
+    target = _target(settings)
+    print(f"\nScanning {len(frame)} symbols (universe of {day}) for session {target}\n")
+    summary = run_scan(Store(settings.data_dir), frame, day, load_rules(), target)
+    print(f"\nScan done in {summary['seconds']:.0f} s: {summary['symbols_scanned']} symbols, "
+          f"{summary['detections']} detections")
+    print(f"  without bars: {len(summary['symbols_without_bars'])}, "
+          f"behind the session: {len(summary['symbols_behind_session'])}, "
+          f"errors: {len(summary['errors'])}")
+    for pattern, statuses in summary["counts"].items():
+        print(f"    {pattern:<22} {statuses}")
+    print("  our indicators vs TradingView's:")
+    for name, result in summary["cross_check_vs_tradingview"].items():
+        if result.get("compared"):
+            print(f"    {name:<8} {result['agree']}/{result['compared']} agree within "
+                  f"{result['tolerance']} (median diff {result['median_diff']})")
+    print()
+    return 1 if summary["errors"] else 0
+
+
+def scan_symbol(settings, symbol: str) -> int:
+    from tascreen.patterns.rules import load_rules
+    from tascreen.scan import scan_symbol as scan_one
+    from tascreen.store import Store
+
+    bars = Store(settings.data_dir).read_bars(symbol)
+    if bars is None:
+        log.error("no stored bars for %s (run --bars first)", symbol)
+        return 1
+    rules = load_rules()
+    values, found = scan_one(bars, symbol, rules)
+    print(f"\n{symbol}: {values['bars']} bars to {values['last_date']}")
+    for key in ("close", "rsi14", "sma50", "sma200", "atr_pct", "rel_volume", "pct_from_52w_high"):
+        print(f"  {key:<18} {values[key]:.4g}" if values[key] == values[key] else f"  {key:<18} n/a")
+    print(f"\n{len(found)} detection(s):")
+    for det in found:
+        spec = rules.pattern(det.pattern)
+        print(f"\n  {spec.name_en} [{det.status}, {det.direction}] "
+              f"{det.start.date()} -> {det.end.date()}"
+              + (f", breakout {det.breakout_date.date()}" if det.breakout_date is not None else ""))
+        for check in det.checks:
+            mark = "ok " if check.passed else "NO "
+            print(f"     {mark} {check.rule:<26} {check.value!s:<22} {check.threshold!s:<14} {check.origin}")
+    print()
+    return 0
 
 
 def update(settings, limit: int | None) -> int:
@@ -265,7 +336,8 @@ def update(settings, limit: int | None) -> int:
         log.warning("screener rate limited (%s); trying the newest saved universe", exc)
         if usable_universe(settings, max_age_days=settings.universe.max_age_days) is None:
             return 1
-    return bars(settings, limit)
+    bars_code = bars(settings, limit)        # a few failed symbols do not stop the scan
+    return max(bars_code, scan(settings))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -285,6 +357,8 @@ def main(argv: list[str] | None = None) -> int:
         (args.bars, lambda: bars(settings, args.limit)),
         (args.update, lambda: update(settings, args.limit)),
         (args.check_bars, lambda: check_bars(settings)),
+        (args.scan, lambda: scan(settings)),
+        (args.scan_symbol, lambda: scan_symbol(settings, args.scan_symbol.strip().upper())),
     )
     for requested, command in commands:
         if requested:

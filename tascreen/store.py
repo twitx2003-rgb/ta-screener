@@ -4,6 +4,8 @@
     data/universe/<YYYY-MM-DD>.json      how it was fetched (bands, counts)
     data/bars/<EXCHANGE_TICKER>.parquet  daily bars per symbol (contract BARS)
     data/bars/status.json                last outcome per symbol
+    data/scans/<YYYY-MM-DD>/             one scan per last completed session:
+        indicators.parquet (INDICATORS), patterns.parquet (PATTERNS), scan.json
 
 Writes go to a temporary file first and replace the target, so an interrupted
 run never leaves half a file behind.
@@ -19,7 +21,7 @@ from typing import Any
 
 import pandas as pd
 
-from .contracts import BARS, UNIVERSE, canonical_timestamps
+from .contracts import BARS, INDICATORS, PATTERNS, UNIVERSE, canonical_timestamps
 
 
 def _atomic_write_bytes(path: Path, write) -> None:
@@ -44,6 +46,7 @@ class Store:
         self.root = Path(root)
         self.universe_dir = self.root / "universe"
         self.bars_dir = self.root / "bars"
+        self.scans_dir = self.root / "scans"
 
     # ------------------------------------------------------------- universe
     def write_universe(self, day: date, frame: pd.DataFrame, summary: dict[str, Any]) -> Path:
@@ -96,3 +99,36 @@ class Store:
 
     def write_status(self, status: dict[str, dict[str, Any]]) -> None:
         _write_json(self.bars_dir / "status.json", status)
+
+    # ---------------------------------------------------------------- scans
+    def write_scan(self, day: date, indicators: pd.DataFrame, patterns: pd.DataFrame,
+                   summary: dict[str, Any]) -> Path:
+        INDICATORS.validate(indicators)
+        PATTERNS.validate(patterns)
+        folder = self.scans_dir / day.isoformat()
+        _atomic_write_bytes(folder / "indicators.parquet",
+                            lambda tmp: indicators.to_parquet(tmp, index=False))
+        _atomic_write_bytes(folder / "patterns.parquet",
+                            lambda tmp: patterns.to_parquet(tmp, index=False))
+        _write_json(folder / "scan.json", summary)       # last: marks the scan complete
+        return folder
+
+    def scan_days(self) -> list[date]:
+        if not self.scans_dir.exists():
+            return []
+        days = []
+        for folder in self.scans_dir.iterdir():
+            try:
+                day = date.fromisoformat(folder.name)
+            except ValueError:
+                continue
+            if (folder / "scan.json").exists():
+                days.append(day)
+        return sorted(days)
+
+    def read_scan(self, day: date) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+        folder = self.scans_dir / day.isoformat()
+        indicators = INDICATORS.validate(pd.read_parquet(folder / "indicators.parquet"))
+        patterns = PATTERNS.validate(pd.read_parquet(folder / "patterns.parquet"))
+        summary = json.loads((folder / "scan.json").read_text(encoding="utf-8"))
+        return indicators, patterns, summary

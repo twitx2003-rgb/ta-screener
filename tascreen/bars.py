@@ -204,6 +204,18 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
     }
 
 
+def coverage(days: list[date]) -> float:
+    """Bars held / trading sessions between the first and the last bar.
+
+    Live: a few thinly traded share classes and recently uplisted stocks came back
+    with 600 bars spread over many years (coverage 0.2-0.9) — TradingView serves
+    some listings from a sparser feed. Patterns on such series are meaningless.
+    """
+    if len(days) < 2:
+        return 1.0
+    return len(days) / (sessions_between(days[0], days[-1]) + 1)
+
+
 def missing_sessions(days: list[date]) -> list[date]:
     """Scheduled trading days between the first and last bar that have no bar."""
     have, out = set(days), []
@@ -216,7 +228,7 @@ def missing_sessions(days: list[date]) -> list[date]:
 
 
 def audit_bars(store: Store, symbols: Iterable[str], target: date,
-               market_wide_share: float = 0.5) -> dict[str, Any]:
+               market_wide_share: float = 0.5, min_spanning: int = 20) -> dict[str, Any]:
     """Stored bars against the trading calendar.
 
     - a day missing for most symbols that span it is a closure the calendar does
@@ -228,6 +240,7 @@ def audit_bars(store: Store, symbols: Iterable[str], target: date,
     off_calendar: dict[str, list[str]] = {}
     spans: list[tuple[date, date]] = []
     behind, absent, rows = [], [], []
+    sparse: dict[str, float] = {}
     for symbol in symbols:
         stored = store.read_bars(symbol)
         if stored is None:
@@ -236,6 +249,9 @@ def audit_bars(store: Store, symbols: Iterable[str], target: date,
         days = list(stored["timestamp"].dt.date)
         rows.append(len(days))
         spans.append((days[0], days[-1]))
+        share = coverage(days)
+        if share < 0.95:
+            sparse[symbol] = round(share, 3)
         if days[-1] < target:
             behind.append(symbol)
         gaps = missing_sessions(days)
@@ -249,10 +265,13 @@ def audit_bars(store: Store, symbols: Iterable[str], target: date,
     for gaps in per_symbol.values():
         for day in gaps:
             missing_count[day] = missing_count.get(day, 0) + 1
+    # A day only counts as market-wide if enough symbols span it: a single sparse
+    # series reaching back years would otherwise make each of its holes "100%".
+    min_spanning = max(min_spanning, int(0.05 * len(spans)))
     market_wide = set()
     for day, n in missing_count.items():
         spanning = sum(1 for first, last in spans if first <= day <= last)
-        if spanning and n / spanning >= market_wide_share:
+        if spanning >= min_spanning and n / spanning >= market_wide_share:
             market_wide.add(day)
     return {
         "target_session": target.isoformat(),
@@ -263,6 +282,7 @@ def audit_bars(store: Store, symbols: Iterable[str], target: date,
         "symbols_with_gaps": {s: [d.isoformat() for d in g if d not in market_wide]
                               for s, g in per_symbol.items() if set(g) - market_wide},
         "bars_on_non_trading_days": off_calendar,
+        "sparse_series": dict(sorted(sparse.items(), key=lambda kv: kv[1])),
         "rows_min": min(rows) if rows else 0,
         "rows_max": max(rows) if rows else 0,
     }

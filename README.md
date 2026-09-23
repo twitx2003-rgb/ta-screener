@@ -24,10 +24,8 @@ py -3.14 -m venv .venv
 
 ## Status
 
-Phase 0 is done: the project skeleton and the TradingView connection. Still to come:
+Built: the TradingView connection, the stock universe with daily bars, and the scan (indicators, candlesticks, chart patterns). Still to come:
 
-- the stock universe and daily bars;
-- the pattern scan;
 - the website.
 
 ## Not financial advice

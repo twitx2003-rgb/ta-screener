@@ -106,6 +106,31 @@ UNIVERSE = Contract(
 )
 
 
+PATTERNS = Contract(
+    name="patterns",
+    columns={
+        "symbol": STRING, "family": STRING, "pattern": STRING, "direction": STRING,
+        "status": STRING, "start": DATETIME, "end": DATETIME, "breakout_date": ANY,
+        "breakout_price": NUMERIC, "height": NUMERIC, "target": NUMERIC,
+        "volume_trend": STRING, "points_json": STRING, "lines_json": STRING,
+        "checks_json": STRING,
+    },
+    required_non_null=("symbol", "family", "pattern", "direction", "status", "start", "end",
+                       "checks_json"),
+    allow_empty=True,             # a quiet day can have no pattern anywhere
+)
+
+INDICATORS = Contract(
+    name="indicators",
+    columns={
+        "symbol": STRING, "last_date": STRING, "close": NUMERIC, "rsi14": NUMERIC,
+        "sma50": NUMERIC, "sma200": NUMERIC, "atr_pct": NUMERIC, "rel_volume": NUMERIC,
+        "pct_from_52w_high": NUMERIC, "market_cap": NUMERIC,
+    },
+    required_non_null=("symbol", "last_date", "close", "market_cap"),
+)
+
+
 def ohlcv_problem_masks(df: pd.DataFrame) -> dict[str, pd.Series]:
     """Bar rules as one boolean mask per rule (True = the bar breaks it)."""
     body_high = df[["open", "close"]].max(axis=1)
