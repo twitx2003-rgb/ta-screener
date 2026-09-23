@@ -57,7 +57,8 @@ class FakeAuthServer:
 
     TOKEN = "access-token-1"
 
-    def __init__(self, dcr: bool = True, waf: bool = False):
+    def __init__(self, dcr: bool = True, waf: bool = False, expires_in: int = 3600):
+        self.expires_in = expires_in          # lifetime of every access token issued
         self.dcr = dcr                       # False: no registration endpoint at all
         self.waf = waf                       # True: 403 for requests without a known User-Agent
         self.user_agents: list[str] = []
@@ -135,7 +136,7 @@ class FakeAuthServer:
             else:
                 self.valid_token = self.TOKEN
             resp = JSONResponse({"access_token": self.valid_token, "token_type": "Bearer",
-                                 "expires_in": 3600, "refresh_token": "refresh-1"})
+                                 "expires_in": self.expires_in, "refresh_token": "refresh-1"})
         elif path.startswith("/mcp"):
             auth = dict(scope["headers"]).get(b"authorization", b"").decode()
             if auth != f"Bearer {self.valid_token}":
@@ -547,6 +548,32 @@ def test_session_makes_many_calls_over_one_connection(auth_server, tmp_path):
     assert [json.loads(r.content[0].text)["symbol"] for r in results] == list(symbols)
     assert in_session < per_call
     assert len(auth_server.token_requests) == 1          # still no second sign-in
+
+
+def test_token_expiring_in_the_middle_of_a_session_is_refreshed_at_the_real_endpoint(tmp_path):
+    """The first live universe run: the token was valid when the session opened (so
+    nothing was discovered), expired mid-run, and the SDK refreshed at its guessed
+    <MCP host>/token -> 404 -> 'sign in again'. The token here lives 62 s; with the
+    60 s safety margin it counts as expired about 2 s into the session."""
+    server = FakeAuthServer(waf=True, expires_in=62)
+    server.start()
+    try:
+        _sign_in(server, tmp_path)
+        client = _client(server, tmp_path, interactive=False)
+
+        async def slow(session):
+            first = await session.call_tool("get_quote", {"symbol": "NASDAQ:AAA"})
+            await asyncio.sleep(3)
+            second = await session.call_tool("get_quote", {"symbol": "NASDAQ:BBB"})
+            return first, second
+
+        first, second = client.with_session(slow)
+        assert not first.is_error and not second.is_error
+        grants = [r["grant_type"] for r in server.token_requests]
+        assert grants[0] == "authorization_code" and "refresh_token" in grants[1:]
+        assert not any(path == "/token" for path, _ in server.user_agents)   # never guessed
+    finally:
+        server.stop()
 
 
 def test_session_refuses_write_tools():

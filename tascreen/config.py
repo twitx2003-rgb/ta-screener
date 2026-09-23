@@ -57,10 +57,82 @@ class MarketSettings:
             raise ConfigError(f"market.session_close out of range: '{self.session_close}'")
 
 
+@dataclass(frozen=True)
+class UniverseSettings:
+    market: str = "america"
+    min_market_cap: float = 1e9
+    # Starting market-cap bands (USD). Each call returns at most `row_cap` rows and
+    # there is no offset, so each band must hold fewer; a band that holds more is
+    # split in two automatically. The last band is open-ended.
+    band_edges: tuple[float, ...] = (1e9, 1.5e9, 2e9, 3e9, 5e9, 1e10, 3e10, 1e11)
+    # The tool caps rows at 1000, but the MCP server also refuses results over
+    # 1,000,000 bytes, which live came to roughly 430 default rows. A band whose
+    # answer is too big is split as well, so this only avoids wasted calls.
+    row_cap: int = 400
+    # Symbol prefixes (exchanges) dropped after the fetch; the screener cannot
+    # filter on them. Its $1B "stock" results include OTC listings.
+    drop_exchanges: tuple[str, ...] = ("OTC",)
+    # `subtype` values dropped after the fetch. Live subtypes above $1B were
+    # "common" and "preferred"; a preferred issue carries its parent's market cap
+    # and trades like a bond, so chart patterns on it mean little.
+    drop_subtypes: tuple[str, ...] = ("preferred",)
+    # When the screener is rate limited, `--update` may go on with the newest saved
+    # universe if it is at most this many days old.
+    max_age_days: float = 7
+
+    def __post_init__(self):
+        # PyYAML (YAML 1.1) reads `1.0e9` without a sign as a *string*; sent as the
+        # filter floor, the screener silently ignored it (live: 11803 rows instead
+        # of ~4000). Every number here is converted explicitly.
+        object.__setattr__(self, "min_market_cap", float(self.min_market_cap))
+        object.__setattr__(self, "max_age_days", float(self.max_age_days))
+        object.__setattr__(self, "row_cap", int(self.row_cap))
+        object.__setattr__(self, "band_edges", tuple(float(e) for e in self.band_edges))
+        object.__setattr__(self, "drop_exchanges", tuple(self.drop_exchanges))
+        object.__setattr__(self, "drop_subtypes", tuple(self.drop_subtypes))
+        edges = self.band_edges
+        if not edges or edges[0] != float(self.min_market_cap):
+            raise ConfigError("universe.band_edges must start at universe.min_market_cap")
+        if any(b <= a for a, b in zip(edges, edges[1:])):
+            raise ConfigError("universe.band_edges must be strictly increasing")
+        if not 1 <= self.row_cap <= 1000:
+            raise ConfigError("universe.row_cap must be 1..1000 (the screener's cap)")
+
+
+@dataclass(frozen=True)
+class BarsSettings:
+    # Daily bars fetched for a symbol seen for the first time (~2.4 years:
+    # enough for a 200-day average and patterns that take up to a year).
+    history: int = 600
+    # Bars re-fetched on top of what is stored; they must match what is stored,
+    # or the whole history is fetched again (a split changes every past price).
+    overlap: int = 5
+    overlap_tolerance_pct: float = 0.05
+    # A new MCP session every this many symbols (access tokens last 900 s).
+    session_batch: int = 100
+    # Calls in flight at once inside a session, and a pause after each call.
+    concurrency: int = 1
+    min_interval_s: float = 0.0
+
+    def __post_init__(self):
+        for name in ("history", "overlap", "session_batch", "concurrency"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        for name in ("overlap_tolerance_pct", "min_interval_s"):
+            object.__setattr__(self, name, float(getattr(self, name)))
+        if self.history < 250 or self.history > 5000:
+            raise ConfigError("bars.history must be 250..5000 (get-ohlcv's cap is 5000)")
+        if self.overlap < 2:
+            raise ConfigError("bars.overlap must be at least 2")
+        if self.session_batch < 1 or self.concurrency < 1:
+            raise ConfigError("bars.session_batch and bars.concurrency must be >= 1")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
     "market": MarketSettings,
+    "universe": UniverseSettings,
+    "bars": BarsSettings,
 }
 
 
@@ -70,6 +142,8 @@ class Settings:
     paths: PathSettings = field(default_factory=PathSettings)
     tradingview: TradingViewSettings = field(default_factory=TradingViewSettings)
     market: MarketSettings = field(default_factory=MarketSettings)
+    universe: UniverseSettings = field(default_factory=UniverseSettings)
+    bars: BarsSettings = field(default_factory=BarsSettings)
 
     @property
     def data_dir(self) -> Path:

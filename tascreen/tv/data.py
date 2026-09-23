@@ -32,7 +32,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from ..contracts import BARS, assert_ohlcv_sane
+from ..contracts import BARS, assert_ohlcv_sane, canonical_timestamps
 from ..errors import ProviderError
 from ..fields import pick
 
@@ -121,6 +121,7 @@ def bars_frame(payload: dict[str, Any], symbol: str) -> pd.DataFrame:
         "volume": float(pick(b, ["v"], context=context)),
     } for b in bars]
     df = pd.DataFrame(rows)
+    df["timestamp"] = canonical_timestamps(df["timestamp"])
 
     # Oldest first is what the live server sends; verify instead of assuming.
     if not df["timestamp"].is_monotonic_increasing:

@@ -59,6 +59,7 @@ DEFAULT_URL = "https://mcp.tradingview.com/mcp"
 USER_AGENT = "ta-screener/0.1 (personal research)"
 _CALLBACK_PATH = "/callback"
 _SIGN_IN_TIMEOUT_S = 300
+_EXPIRY_MARGIN_S = 60.0     # refresh this long before the access token (900 s) expires
 
 
 class AuthorizationRequired(ScreenerError):
@@ -428,7 +429,14 @@ def _stored_expiry_auth():
     2. A refresh that happens before any 401 runs before metadata discovery, so
        the SDK guesses the token endpoint as <MCP host>/token (404 on TradingView,
        whose endpoint is www.tradingview.com/mcp/oauth/token). Fixed by
-       discovering the metadata first whenever a refresh is about to happen.
+       discovering the metadata first whenever a refresh is about to happen —
+       at the start of a session *and in the middle of one*: a scan outlives the
+       15-minute token, and the first live universe run failed exactly there
+       (valid token at the start, so nothing was discovered; expired mid-run).
+
+    The expiry is also moved `_EXPIRY_MARGIN_S` earlier, so a request is never
+    sent on a token that expires in flight: a 401 mid-run sends the SDK to a full
+    browser sign-in, which a headless run cannot do.
     """
     from mcp.client.auth import OAuthClientProvider
 
@@ -439,10 +447,18 @@ def _stored_expiry_auth():
             if self.context.current_tokens is not None and expires_at is not None:
                 when = expires_at()
                 if when is not None:
-                    self.context.token_expiry_time = when
-            if (not self.context.is_token_valid() and self.context.can_refresh_token()
-                    and self.context.oauth_metadata is None):
+                    self.context.token_expiry_time = when - _EXPIRY_MARGIN_S
+
+        async def _refresh_token(self):
+            if self.context.oauth_metadata is None:
                 await self._discover_for_refresh()
+            return await super()._refresh_token()
+
+        async def _handle_refresh_response(self, response) -> bool:
+            ok = await super()._handle_refresh_response(response)
+            if ok and self.context.token_expiry_time is not None:
+                self.context.token_expiry_time -= _EXPIRY_MARGIN_S
+            return ok
 
         async def _discover_for_refresh(self) -> None:
             """The SDK's own discovery sequence, run ahead of the refresh."""

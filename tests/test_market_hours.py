@@ -1,9 +1,20 @@
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 
-from tascreen.market_hours import (is_trading_day, next_sessions, sessions_between,
-                                   us_early_close, us_market_holidays)
+from tascreen.market_hours import (is_trading_day, last_completed_session, next_sessions,
+                                   sessions_between, us_early_close, us_market_holidays)
+
+
+def test_last_completed_session():
+    def at(y, m, d, hh, mm):
+        return last_completed_session(datetime(y, m, d, hh, mm, tzinfo=timezone.utc),
+                                      market_tz="America/New_York", session_close="16:15")
+
+    assert at(2026, 9, 23, 20, 30) == date(2026, 9, 23)    # 16:30 New York: done
+    assert at(2026, 9, 23, 20, 0) == date(2026, 9, 22)     # 16:00 New York: not yet
+    assert at(2026, 9, 26, 12, 0) == date(2026, 9, 25)     # Saturday -> Friday
+    assert at(2026, 9, 8, 12, 0) == date(2026, 9, 4)       # Tuesday morning after Labor Day
 
 
 def test_2026_holidays_by_rule():
@@ -13,6 +24,11 @@ def test_2026_holidays_by_rule():
     assert date(2026, 7, 3) in days          # July 4 is a Saturday -> observed Friday
     assert date(2026, 11, 26) in days        # Thanksgiving
     assert date(2026, 12, 25) in days
+
+
+def test_unscheduled_closures_are_not_trading_days():
+    assert not is_trading_day(date(2025, 1, 9))      # every live symbol lacked this day
+    assert is_trading_day(date(2025, 1, 10))
 
 
 def test_saturday_new_year_is_not_moved_back():

@@ -64,6 +64,12 @@ The Python side does the same with `tradingview.rate_limit_delays` in `config.ya
 - `limit` is **capped at 1000** and there is **no offset**. To get every US stock above
   $1B (thousands of rows), split `market_cap_basic` into bands. Check that each band
   returned all of its `totalCount`, and that the bands add up to the unsplit total.
+- **The MCP server refuses any result over 1,000,000 bytes.** The error is "Result size
+  N exceeds limit of 1000000 bytes", and it arrives as an MCP-level error. With the
+  default columns that is about 430 screener rows. Keep `limit` ≤ 400, or pass a
+  short `columns` list.
+- Numbers in `filters` must be JSON numbers. A string floor such as `"1.0e9"` is
+  silently ignored and the screener counts every stock.
 - The market-cap column is `market_cap_basic`, in raw USD. That name is confirmed by a
   live `get-symbol-data` answer.
 

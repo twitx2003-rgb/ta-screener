@@ -6,8 +6,9 @@ is the last trade so far and its volume covers part of the day. A pattern that
 until the session has ended. TradingView's `get-ohlcv` does return the live
 session's bar (seen in market-research-pipeline, 2026-09).
 
-The holiday calendar is rule-based: unscheduled closures (a national day of
-mourning, a storm) cannot be known in advance and are not here.
+The holiday calendar is rule-based, plus a short list of past unscheduled
+closures (a national day of mourning, a storm). Future ones cannot be known in
+advance; a bar check that finds a whole-market missing day should add it here.
 """
 from __future__ import annotations
 
@@ -135,8 +136,18 @@ def us_market_holidays(year: int) -> set[date]:
     return days
 
 
+# Closures no rule can produce. Found by comparing live bars with the calendar:
+# every symbol lacked 2025-01-09 (national day of mourning for President Carter).
+UNSCHEDULED_CLOSURES = frozenset({
+    date(2012, 10, 29), date(2012, 10, 30),     # Hurricane Sandy
+    date(2018, 12, 5),                          # mourning, President G. H. W. Bush
+    date(2025, 1, 9),                           # mourning, President Carter
+})
+
+
 def is_trading_day(day: date) -> bool:
-    return day.weekday() < 5 and day not in us_market_holidays(day.year)
+    return (day.weekday() < 5 and day not in us_market_holidays(day.year)
+            and day not in UNSCHEDULED_CLOSURES)
 
 
 def sessions_between(after: date, until: date) -> int:
@@ -147,6 +158,19 @@ def sessions_between(after: date, until: date) -> int:
         if is_trading_day(day):
             count += 1
     return count
+
+
+def last_completed_session(now: datetime, *, market_tz: str, session_close: str) -> date:
+    """The newest trading day whose bar is a close at `now` (see drop_incomplete_session)."""
+    local = now.astimezone(ZoneInfo(market_tz))
+    close_h, close_m = (int(part) for part in session_close.split(":"))
+    day = local.date()
+    if is_trading_day(day) and local.time() >= time(close_h, close_m):
+        return day
+    day -= timedelta(days=1)
+    while not is_trading_day(day):
+        day -= timedelta(days=1)
+    return day
 
 
 def next_sessions(after: date, count: int) -> list[date]:

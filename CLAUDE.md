@@ -45,6 +45,18 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --discover            # probe screener/columns/ohlcv -> logs/discover/
 .venv\Scripts\python.exe run.py --discover screener_top5 screener_band   # retry just those
 .venv\Scripts\python.exe run.py --tradingview-diagnose
+.venv\Scripts\python.exe run.py --universe            # screener in market-cap bands -> data/universe/<date>
+.venv\Scripts\python.exe run.py --bars --limit 50     # pilot: bars for the 50 largest
+.venv\Scripts\python.exe run.py --bars                # all symbols (~55 min first time; resumable)
+.venv\Scripts\python.exe run.py --update              # --universe (saved one if 429) + --bars
+.venv\Scripts\python.exe run.py --check-bars          # bars vs trading calendar -> logs/bars_audit.json
+```
+
+For a long run from a Claude Code session, start a detached process: the tool kills
+background commands after about 10 minutes. `--bars` resumes where it stopped.
+
+```
+Start-Process .venv\Scripts\python.exe -ArgumentList "run.py","--bars" -WorkingDirectory C:\dev\ta-screener -RedirectStandardOutput logs\bars_full_stdout.txt -RedirectStandardError logs\bars_full_stderr.txt -WindowStyle Hidden
 ```
 
 Exit codes: 0 ok, 1 failed, 2 bad args.
@@ -56,6 +68,17 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     from market-research-pipeline so one project's token refresh never signs the other out.
   - The callback is `localhost:8766`.
   - `session()` / `with_session()` make many calls over one connection.
+- `tascreen/universe.py` accepts a universe only if it is provably complete:
+  - bands split on the row cap or the size limit;
+  - every row lies inside its band;
+  - the distinct symbols equal the unsplit `totalCount` (with one retry for caps
+    moving across edges).
+- `tascreen/bars.py` is incremental. The overlap must match what is stored (within
+  0.05% on OHLC); a mismatch, such as a split, triggers a full refetch. Up-to-date
+  symbols make no call. One symbol failing does not stop the run.
+- Data layout lives in `tascreen/store.py`, with atomic writes. Timestamps are
+  normalized by `contracts.canonical_timestamps`: Parquet round-trips turn them into
+  ms/ZoneInfo, which pandas concatenates as `object`.
 - `tascreen/tv/data.py` checks payloads:
   - `tool_payload` turns `{"success": false}` into ToolFailed or RateLimited.
   - `bars_frame` checks bars.
@@ -169,22 +192,60 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 
 ## Status
 
-- **Phase 0 (skeleton + connection): BUILT 2026-09-23.**
+- **Phase 0 (skeleton + connection): DONE and approved 2026-09-23.**
   - Built: the TradingView client and its tests (copied and adapted, with `session()`
     added), config, contracts, the market calendar, `run.py`, `.mcp.json`,
     `.claude/settings.json` and the `tradingview-rules` skill.
-  - `--auth-tradingview` and `--discover` ran live; see above.
-  - The `run-screener` shape is mapped from a live answer (see above).
+  - `--auth-tradingview` and `--discover` ran live; the `run-screener` shape is mapped
+    from a live answer (see above).
   - Claude Code's own MCP connection is **Connected**: a test `get-ohlcv` call ran
     without a permission prompt, so the allow rules match the real tool names.
-  - Open items:
-    - the user creates the public GitHub repo (`gh` is not installed), then we push;
-    - the user reviews phase 0.
+  - Pushed to https://github.com/twitx2003-rgb/ta-screener (public, branch `main`).
   - Display note: the Windows terminal shows Hebrew reversed (no RTL support). The
     Claude Code panel inside VS Code renders it correctly.
   - Git identity for this repo only: `Claude <noreply@anthropic.com>`, the same
     identity as the sister project's commits, so no personal e-mail goes into a
     public history.
+- **Phase 1 (universe + bars): BUILT 2026-09-23.**
+  - Code: `tascreen/universe.py`, `tascreen/bars.py` and `tascreen/store.py`.
+  - The first full `--bars` run was started. Review is pending.
+  - What the live runs taught:
+    - **The MCP server refuses results over 1,000,000 bytes.** The error is "Result
+      size N exceeds limit of 1000000 bytes", it arrives as an MCP-level `is_error`,
+      and it hits at about 430 default screener rows (1000 rows came to ~1.07 MB).
+      So `universe.row_cap` is 400, and a too-big answer splits its band like one
+      over the row cap.
+    - **PyYAML reads `1.0e9` (no sign) as a string.** Sent as the filter floor, the
+      screener ignored it and counted ~12,000 stocks instead of ~4,000. The
+      completeness check caught it. Every numeric setting is now converted
+      explicitly in its dataclass.
+    - **The token expired mid-run and the refresh 404'd.** The token was valid when
+      the session opened, so nothing was discovered, and the SDK guessed
+      `mcp.tradingview.com/token`. Fix: `_StoredExpiryAuth._refresh_token` discovers
+      the endpoint before every refresh, and the expiry is taken 60 s early (a 401
+      mid-run would send the SDK to a browser sign-in).
+      `tests/test_mcp_client.py::test_token_expiring_in_the_middle_of_a_session...`
+      fails without the fix.
+    - **The universe for 2026-09-23:**
+      - The screener counts ~4,000 "stock" rows above $1B.
+      - About 1,300 OTC and 300 `subtype: preferred` are dropped after the completeness
+        check (`universe.drop_subtypes`; a preferred issue carries the parent's
+        market cap). That leaves **~2,370 common stocks**, mostly NYSE and NASDAQ, a few AMEX,
+        one CBOE.
+      - The fetch took 14 bands.
+      - Subtypes seen: only `common` and `preferred`. ADRs are not separate.
+    - **Bars speed:** 1.39 s per `get-ohlcv` call, sequential, one session per 100
+      symbols. That is ~55 min for a first fill of ~2,370 symbols, and the same for a
+      daily update (one call per symbol). MCP responses carry
+      `x-ratelimit-limit: 100` (the window is unknown), so concurrency stays 1 until
+      it is measured.
+    - **Bar details:**
+      - Timestamps are 13:30 or 14:30 UTC (the session open; DST shifts it).
+      - Most symbols have the full 600 bars; recent IPOs have fewer.
+    - **Unscheduled closure:** every symbol lacked 2025-01-09 (national day of
+      mourning, President Carter). It was added to
+      `market_hours.UNSCHEDULED_CLOSURES`. `--check-bars` reports any future
+      market-wide missing day.
 
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 

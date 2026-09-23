@@ -20,6 +20,33 @@ tradingview:
   # Seconds to wait between retries when TradingView answers 429 (rate limit).
   rate_limit_delays: [5, 15, 45]
 
+universe:
+  # US stocks above this market cap (USD), from TradingView's screener.
+  market: "america"
+  min_market_cap: 1.0e9
+  # The screener has no paging, so the universe is fetched in market-cap bands;
+  # a band holding more than row_cap is split automatically. The last band is
+  # open-ended.
+  band_edges: [1.0e9, 1.5e9, 2.0e9, 3.0e9, 5.0e9, 1.0e10, 3.0e10, 1.0e11]
+  # Rows per call. The tool allows 1000, but the MCP server refuses results over
+  # 1 MB (live: roughly 430 rows). An answer that is too big splits its band too.
+  row_cap: 400
+  # The screener's "stock" results include OTC listings; these prefixes are dropped.
+  drop_exchanges: ["OTC"]
+  # Preferred issues carry the parent's market cap and trade like bonds.
+  drop_subtypes: ["preferred"]
+  # If the screener is rate limited (429), --update goes on with the newest saved
+  # universe when it is at most this many days old.
+  max_age_days: 7
+
+bars:
+  history: 600               # daily bars on first fetch (~2.4 years)
+  overlap: 5                 # bars re-fetched on update; must match what is stored
+  overlap_tolerance_pct: 0.05
+  session_batch: 100         # new MCP session every N symbols (tokens last 15 min)
+  concurrency: 1             # calls in flight at once
+  min_interval_s: 0.0        # pause after each call
+
 market:
   timezone: "America/New_York"
   # Today's daily bar is used only after this New York time (after the close

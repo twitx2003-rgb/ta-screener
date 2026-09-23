@@ -40,6 +40,22 @@ def test_bad_session_close_is_refused(tmp_path, value):
         _load(tmp_path, f"market:\n  session_close: '{value}'\n")
 
 
+def test_yaml_exponent_without_sign_still_becomes_a_number(tmp_path):
+    """PyYAML reads 1.0e9 as the string '1.0e9'; sent as a filter, the live screener
+    ignored it and counted every stock."""
+    settings = _load(tmp_path, "universe:\n  min_market_cap: 1.0e9\n"
+                               "  band_edges: [1.0e9, 5.0e9]\n")
+    assert settings.universe.min_market_cap == 1e9
+    assert isinstance(settings.universe.min_market_cap, float)
+    assert all(isinstance(e, float) for e in settings.universe.band_edges)
+
+
+def test_the_shipped_numbers_are_numbers():
+    settings = load_settings(ROOT / "config.yaml", root=ROOT)
+    assert isinstance(settings.universe.min_market_cap, float)
+    assert isinstance(settings.bars.overlap_tolerance_pct, float)
+
+
 def test_rate_limit_delays_become_a_tuple_of_floats(tmp_path):
     settings = _load(tmp_path, "tradingview:\n  rate_limit_delays: [1, 2]\n")
     assert settings.tradingview.rate_limit_delays == (1.0, 2.0)

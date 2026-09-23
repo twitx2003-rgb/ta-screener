@@ -72,6 +72,40 @@ BARS = Contract(
 )
 
 
+def canonical_timestamps(series: pd.Series) -> pd.Series:
+    """One timestamp dtype everywhere: datetime64[ns, UTC].
+
+    Fresh bars come as seconds with datetime.timezone.utc, Parquet gives back
+    milliseconds with ZoneInfo("UTC"); pandas concatenates the two as `object`,
+    which the BARS contract then refuses."""
+    return pd.to_datetime(series, utc=True).dt.tz_convert("UTC").astype("datetime64[ns, UTC]")
+
+
+UNIVERSE = Contract(
+    name="universe",
+    columns={
+        "symbol": STRING,          # EXCHANGE:TICKER, as TradingView names it
+        "exchange": STRING,
+        "ticker": STRING,
+        "description": ANY,
+        "subtype": ANY,
+        "sector": ANY,
+        "industry": ANY,
+        "currency": ANY,
+        "market_cap": NUMERIC,
+        "close": NUMERIC,
+        "volume": NUMERIC,
+        "avg_volume_10d": NUMERIC,
+        "tv_rsi": NUMERIC,         # TradingView's own values, kept for cross-checks
+        "tv_ema50": NUMERIC,
+        "tv_ema200": NUMERIC,
+        "tv_rating": NUMERIC,      # Recommend.All
+        "next_earnings": ANY,
+    },
+    required_non_null=("symbol", "exchange", "ticker", "market_cap"),
+)
+
+
 def ohlcv_problem_masks(df: pd.DataFrame) -> dict[str, pd.Series]:
     """Bar rules as one boolean mask per rule (True = the bar breaks it)."""
     body_high = df[["open", "close"]].max(axis=1)
