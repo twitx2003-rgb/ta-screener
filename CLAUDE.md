@@ -82,7 +82,7 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   the default browser first**: TradingView's CDN blocks its sign-in page when that page
   is reached as a redirect.
 - Skills live in `.claude/skills/` and agents in `.claude/agents/`.
-  - Built: `tradingview-mcp`.
+  - Built: `tradingview-rules` (not named `*-mcp`: the /mcp autocomplete picked a skill with "mcp" in its name instead of the built-in command).
   - Planned: `bulkowski-patterns`, `daily-update`, `add-pattern` (skills);
     `pattern-verifier`, `setup-analyst`, `screener-scout` (agents).
 
@@ -145,7 +145,7 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 - **Phase 0 (skeleton + connection): BUILT 2026-09-23.**
   - Built: the TradingView client and its tests (copied and adapted, with `session()`
     added), config, contracts, the market calendar, `run.py`, `.mcp.json`,
-    `.claude/settings.json` and the `tradingview-mcp` skill.
+    `.claude/settings.json` and the `tradingview-rules` skill.
   - `--auth-tradingview` and `--discover` ran live; see above.
   - Open items:
     - map the `run-screener` shape once the scanner stops answering 429;

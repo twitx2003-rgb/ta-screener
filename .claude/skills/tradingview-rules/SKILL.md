@@ -1,5 +1,5 @@
 ---
-name: tradingview-mcp
+name: tradingview-rules
 description: Rules for using TradingView's MCP tools in ta-screener — read-only calls only, EXCHANGE:TICKER symbols, the screener's filter syntax and 1000-row cap, 429 rate limits reported inside a "success" payload, the response shapes already mapped, and what must never be committed. Use it before calling any mcp__tradingview__* tool, and before writing or changing code under tascreen/tv/ or anything that reads TradingView data.
 ---
 
