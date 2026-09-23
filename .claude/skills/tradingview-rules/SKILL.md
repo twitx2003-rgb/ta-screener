@@ -93,9 +93,18 @@ The Python side does the same with `tradingview.rate_limit_delays` in `config.ya
   - Other columns: `exchange`, `country`, `sector`, `average_volume_10d_calc`,
     `relative_volume_10d_calc`, `Value.Traded`.
   - There is **no type or ADR column**.
-- **`run-screener`** is not mapped yet: every probe so far answered 429. Its shape will
-  come from `logs/discover/screener_*.json`, written by `run.py --discover`. Until that
-  file exists, say the shape is unknown; do not describe it from memory.
+- **`run-screener`** (live, 2026-09-23):
+  - Shape: `{success, data: {rows: [...], totalCount}}`.
+  - Default rows carry `symbol` ("EXCHANGE:TICKER"), `name` (ticker), `description`,
+    `type`, `subtype`, `sector`, `industry`, `market_cap_basic`, `close`, `volume`,
+    `RSI`, `EMA50`, `EMA200`, `Recommend.All`, `BB.*`, `Perf.*`, earnings dates, and a
+    few more.
+  - There is **no `exchange` key**: the exchange is the symbol prefix.
+  - Values can be null.
+  - **Results include OTC symbols** (`OTC:...`). There is no filter for that, so drop
+    them by prefix.
+  - More than $1B is roughly 4,000 rows including OTC, so the 1000-row cap means
+    splitting `market_cap_basic` into bands.
 - **`get-ohlcv` notice** (live):
   - bars are delayed 15 minutes or more, and the last bar may still change;
   - there are no pre- or post-market bars;

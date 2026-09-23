@@ -139,9 +139,26 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   - Liquidity: `average_volume_10d_calc`, `relative_volume_10d_calc`, `Value.Traded`
     and `AvgValue.Traded_10d`.
   - Market cap: `market_cap_basic`.
-- **`run-screener` is still unmapped.** It returned 429 on every attempt of this run: 4
-  attempts over about 65 s, on `scanner.tradingview.com/america/scan`. Retry later; its
-  response shape stays unknown until then.
+- **`run-screener`** returned 429 on the first run (4 attempts over about 65 s). It
+  answered about an hour later (`--discover screener_top5 screener_band`).
+  - Shape: `{success, data: {rows: [...], totalCount}}`.
+  - Default rows have 40 keys: `symbol` ("EXCHANGE:TICKER"), `name` (the ticker),
+    `description`, `type`, `subtype` (e.g. "common"), `currency`, `sector`,
+    `industry`, `market_cap_basic`, `close`, `volume`, `RSI`, `EMA50`, `EMA200`,
+    `Recommend.All`, `recommendation`, `BB.lower`/`BB.upper`, `High.3M`/`Low.3M`,
+    `Perf.*`, `earnings_release_next_date`, `days_to_earnings`, and similar.
+  - There is **no `exchange` key in the default rows**; the exchange is the
+    `symbol` prefix.
+  - Any value may be null (e.g. `Perf.W`), so read values with
+    `pick(..., allow_null=True)` where a gap is legitimate.
+  - `subtype` exists in rows even though the column catalogue has no type column. The
+    set of its values (preferred, ADR, ...) is still to be listed from the full universe.
+- **`totalCount` for `market_cap_basic >= 1e9` with `symbol_types: ["stock"]` is about
+  4,000, and includes OTC** (e.g. `OTC:...` symbols). Filters only take numeric ranges
+  plus index/sector/industry, so OTC is dropped on our side by the symbol prefix, after
+  fetching.
+  - The 1-2B band alone is about 700 rows.
+  - With the 1000-row cap, the bands must be narrow at the low end.
 - The `get-ohlcv` notice says:
   - bars are delayed 15 minutes or more, and the last bar may still change;
   - there are **no pre- or post-market bars**;
@@ -157,11 +174,14 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     added), config, contracts, the market calendar, `run.py`, `.mcp.json`,
     `.claude/settings.json` and the `tradingview-rules` skill.
   - `--auth-tradingview` and `--discover` ran live; see above.
+  - The `run-screener` shape is mapped from a live answer (see above).
+  - Claude Code's own MCP connection is **Connected**: a test `get-ohlcv` call ran
+    without a permission prompt, so the allow rules match the real tool names.
   - Open items:
-    - map the `run-screener` shape once the scanner stops answering 429;
-    - the user authenticates Claude Code's own MCP connection (`/mcp` in a session
-      opened in this folder);
-    - the user creates the public GitHub repo (`gh` is not installed).
+    - the user creates the public GitHub repo (`gh` is not installed), then we push;
+    - the user reviews phase 0.
+  - Display note: the Windows terminal shows Hebrew reversed (no RTL support). The
+    Claude Code panel inside VS Code renders it correctly.
   - Git identity for this repo only: `Claude <noreply@anthropic.com>`, the same
     identity as the sister project's commits, so no personal e-mail goes into a
     public history.
