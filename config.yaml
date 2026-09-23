@@ -1,0 +1,27 @@
+# ta-screener settings. Unknown keys are rejected (typos would be silent bugs).
+
+paths:
+  # Both are gitignored: TradingView data may not be redistributed.
+  data: data
+  logs: logs
+
+tradingview:
+  # TradingView's official MCP server (OAuth 2.1, needs a paid TradingView plan).
+  # Sign in once with:  .venv\Scripts\python.exe run.py --auth-tradingview
+  # Sign in on tradingview.com in your default browser FIRST: TradingView's CDN
+  # blocks its sign-in page when it is reached as a redirect from the approval URL.
+  url: "https://mcp.tradingview.com/mcp"
+  # Holds a refresh token — kept in your user folder, outside the project.
+  token_path: "~/.ta-screener/tv_tokens.json"
+  # Where the browser is sent back after sign-in. The port is registered with
+  # TradingView on the first sign-in; 8765 belongs to market-research-pipeline.
+  callback_host: "localhost"
+  callback_port: 8766
+  # Seconds to wait between retries when TradingView answers 429 (rate limit).
+  rate_limit_delays: [5, 15, 45]
+
+market:
+  timezone: "America/New_York"
+  # Today's daily bar is used only after this New York time (after the close
+  # auction has printed); before it, the bar is a partial session and is dropped.
+  session_close: "16:15"

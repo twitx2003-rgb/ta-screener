@@ -1,0 +1,32 @@
+{
+  "enabledMcpjsonServers": ["tradingview"],
+  "permissions": {
+    "allow": [
+      "mcp__tradingview__mcp-tv-get-ohlcv",
+      "mcp__tradingview__mcp-tv-get-symbol-data",
+      "mcp__tradingview__mcp-tv-get-symbol-data-batch",
+      "mcp__tradingview__mcp-tv-get-technicals-rating",
+      "mcp__tradingview__mcp-tv-get-screener-columns",
+      "mcp__tradingview__mcp-tv-run-screener",
+      "mcp__tradingview__mcp-tv-search-symbols",
+      "mcp__tradingview__mcp-tv-get-news",
+      "mcp__tradingview__mcp-tv-get-news-story",
+      "mcp__tradingview__mcp-tv-get-earnings-calendar",
+      "mcp__tradingview__mcp-tv-get-financials",
+      "mcp__tradingview__mcp-tv-get-financial-history",
+      "mcp__tradingview__mcp-tv-get-forecasts"
+    ],
+    "deny": [
+      "mcp__tradingview__mcp-tv-create-alert",
+      "mcp__tradingview__mcp-tv-update-alert",
+      "mcp__tradingview__mcp-tv-delete-alert",
+      "mcp__tradingview__mcp-tv-restart-alerts",
+      "mcp__tradingview__mcp-tv-stop-alerts",
+      "mcp__tradingview__mcp-watchlist-create-watchlist",
+      "mcp__tradingview__mcp-watchlist-update-watchlist",
+      "mcp__tradingview__mcp-watchlist-add-to-watchlist",
+      "mcp__tradingview__mcp-watchlist-remove-from-watchlist",
+      "mcp__tradingview__mcp-watchlist-delete-watchlist"
+    ]
+  }
+}

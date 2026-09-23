@@ -1,0 +1,10 @@
+# Pinned exactly: tascreen/tv/mcp_client.py subclasses the SDK's OAuth provider
+# and calls its discovery helpers (two SDK gaps, see that module). A new mcp
+# version must be re-read before it is allowed in.
+mcp==2.2.0
+pandas>=2.2
+pyarrow>=16
+numpy>=2
+PyYAML>=6
+tzdata
+pytest>=8

@@ -1,0 +1,21 @@
+# Secrets
+.env
+
+# Vendor data: TradingView data may not be redistributed, and this repo is public.
+data/
+logs/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Claude Code: personal settings stay local; .claude/settings.json is shared
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
