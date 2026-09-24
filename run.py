@@ -95,11 +95,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="GitHub Actions: send the owner a Telegram summary of this run "
                              "(STATUS = the job's status)")
     parser.add_argument("--analyze", metavar="SYMBOL",
-                        help="Technical analysis of one stock from its stored bars: zones, "
-                             "trendlines, Fibonacci, indicators, volume profile, patterns "
-                             "-> an SVG chart and the facts in --out (default logs/analyses/)")
+                        help="Technical analysis of one stock (NVDA or NASDAQ:NVDA) from its stored "
+                             "bars: the facts, a chart, a Pine Script and a Hebrew text written by "
+                             "Claude Code (normal terminal only) -> --out (default logs/analyses/)")
     parser.add_argument("--no-llm", action="store_true",
-                        help="With --analyze: facts and chart only, no written analysis")
+                        help="With --analyze: facts, chart and Pine Script only, no written analysis")
+    parser.add_argument("--telegram", action="store_true",
+                        help="With --analyze: also send the chart, the text and the Pine Script "
+                             "to your Telegram bot")
     parser.add_argument("--out", metavar="DIR", help="With --analyze: where to write the files")
     parser.add_argument("--quotes", action="store_true",
                         help="Fetch every stock's last price once from TradingView's screener "
@@ -542,30 +545,56 @@ def ci_notify(settings, status: str) -> int:
     return 0
 
 
-def analyze(settings, symbol: str, out: str | None, with_llm: bool) -> int:
+def analyze(settings, text: str, out: str | None, with_llm: bool, to_telegram: bool) -> int:
+    from tascreen import notify
+    from tascreen.analyst import find_symbol
     from tascreen.analyst.chart import render
     from tascreen.analyst.facts import analyse
     from tascreen.analyst.pine import pine_script
     from tascreen.store import Store, symbol_file_stem
 
     store = Store(settings.data_dir)
+    symbol = find_symbol(store.bars_dir, text)
     bars = store.read_bars(symbol)
-    if bars is None:
-        log.error("no stored bars for %s", symbol)
-        return 1
     analysis = analyse(bars, symbol)
     folder = Path(out) if out else settings.log_dir / "analyses"
     folder.mkdir(parents=True, exist_ok=True)
     stem = f"{symbol_file_stem(symbol)}-{analysis.last_day}"
-    (folder / f"{stem}.svg").write_text(render(bars, analysis), encoding="utf-8")
+    svg_path, pine_path = folder / f"{stem}.svg", folder / f"{stem}.pine"
+    svg_path.write_text(render(bars, analysis), encoding="utf-8")
     (folder / f"{stem}.json").write_text(analysis.as_json(), encoding="utf-8")
-    (folder / f"{stem}.pine").write_text(pine_script(analysis, bars), encoding="utf-8")
-    print(f"\n{symbol}, {analysis.last_day}: {len(analysis.facts)} facts, "
-          f"{len(analysis.drawings)} drawings -> {folder / stem}.svg\n")
-    for key, fact in analysis.facts.items():
-        print(f"  {key:<24} {fact['value']}{fact['unit']}   {fact['label']}")
-    if with_llm:
-        print("\n(the written analysis comes in a later stage)")
+    pine_path.write_text(pine_script(analysis, bars), encoding="utf-8")
+    print(f"\n{symbol}, {analysis.last_day}: {len(analysis.facts)} facts -> {folder / stem}.*\n")
+    if not with_llm:
+        for key, fact in analysis.facts.items():
+            print(f"  {key:<24} {fact['value']}{fact['unit']}   {fact['label']}")
+        return 0
+
+    from tascreen.analyst import writer
+    from tascreen.analyst.png import svg_to_png
+    from tascreen.llm import ClaudeCodeLLM
+
+    bot = notify.from_environment() if to_telegram else None
+    if to_telegram and bot is None:
+        log.error("telegram is not set up (run.py --setup-telegram)")
+        return 1
+    cfg = settings.channels
+    llm = ClaudeCodeLLM(model=cfg.model, effort=writer.EFFORT, timeout_s=cfg.timeout_s)
+    print(f"writing the analysis with {llm.name} (a minute or two)...")
+    written = writer.write(analysis, llm)
+    message = writer.telegram_html(written)
+    (folder / f"{stem}.written.json").write_text(json.dumps(written, ensure_ascii=False, indent=1),
+                                                 encoding="utf-8")
+    (folder / f"{stem}.telegram.html").write_text(message, encoding="utf-8")
+    print(f"{len(written['parts'])} sections kept, {len(written['dropped'])} dropped"
+          + (f", left out: {', '.join(written['omitted'])}" if written["omitted"] else "")
+          + f" ({written['seconds']}s) -> {folder / stem}.written.json")
+    if bot is not None:
+        png = svg_to_png(svg_path, folder / f"{stem}.png")
+        bot.send_photo(png.read_bytes(), writer.photo_caption(analysis), f"{stem}.png")
+        bot.send(message, html=True)
+        bot.send_document(pine_path.read_bytes(), pine_path.name, writer.pine_caption(analysis))
+        print("telegram: sent (chart, text, Pine Script)")
     return 0
 
 
@@ -831,8 +860,8 @@ def main(argv: list[str] | None = None) -> int:
         (args.export_site, lambda: export_site(settings, args.export_site)),
         (args.setup_telegram, lambda: setup_telegram(settings)),
         (args.ci_notify, lambda: ci_notify(settings, args.ci_notify)),
-        (args.analyze, lambda: analyze(settings, args.analyze.strip().upper(), args.out,
-                                       with_llm=not args.no_llm)),
+        (args.analyze, lambda: analyze(settings, args.analyze, args.out, with_llm=not args.no_llm,
+                                       to_telegram=args.telegram)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),

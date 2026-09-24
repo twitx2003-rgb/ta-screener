@@ -1,0 +1,27 @@
+# Trend: moving averages and trendlines (facts sma*, vs_sma*, ma.stack, tl_N.*, change_20d_pct)
+
+Sources (ideas, in our own words): StockCharts ChartSchool, "Moving Averages - Simple and
+Exponential",
+https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-overlays/moving-averages-simple-and-exponential ;
+"Trend Lines", https://chartschool.stockcharts.com/table-of-contents/chart-analysis/trend-lines
+
+What the engine computes:
+- Simple moving averages of the close over 50, 150 and 200 sessions (sma50, sma150,
+  sma200) and the price's distance from each in percent (vs_sma50_pct, ...).
+- ma.stack: bullish when price > 50 > 150 > 200, bearish when price < 50 < 150 < 200,
+  otherwise mixed.
+- Trendlines through at least 3 turning points, unbroken (no close beyond by more than
+  0.5 ATR), last touched in the last 40 sessions, and within 6 ATR of the price.
+  tl_N.value is the line's value on the last day, tl_N.direction rising / falling / flat.
+- change_20d_pct: the price change over the last 20 sessions.
+
+How to read it:
+- The order of the averages describes the trend: all stacked upward is an uptrend, all
+  downward a downtrend, mixed is a transition or a range.
+- A long average (150/200) is slow: the price above or below it describes the longer-term
+  trend; the 50 describes the recent one.
+- A trendline with more touches is more established; a close through it is a warning
+  sign, not a certain reversal.
+- Describe a trend only as the cited facts show it (ma.stack, tl_N.direction).
+
+Hebrew terms: מגמה עולה, מגמה יורדת, דשדוש, ממוצע נע, קו מגמה.

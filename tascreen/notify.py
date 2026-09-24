@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -34,15 +35,32 @@ def redact(text: str) -> str:
 
 class Telegram:
     def __init__(self, token: str, chat_id: str | int | None = None, *,
-                 post: Callable[[str, dict], dict] | None = None):
+                 post: Callable[[str, dict], dict] | None = None,
+                 upload: Callable[[str, dict, tuple[str, str, bytes, str]], dict] | None = None):
         self.token, self.chat_id = token.strip(), chat_id
         self._post = post or self._http
+        self._upload = upload or self._http_upload
 
     def _http(self, method: str, params: dict) -> dict:
-        data = urllib.parse.urlencode(params).encode()
-        request = urllib.request.Request(f"{API}/bot{self.token}/{method}", data=data)
+        return self._request(method, urllib.parse.urlencode(params).encode(), {}, 30)
+
+    def _http_upload(self, method: str, params: dict, file: tuple[str, str, bytes, str]) -> dict:
+        """multipart/form-data: the fields, then one file (field, filename, content, type)."""
+        field, filename, content, content_type = file
+        boundary = uuid.uuid4().hex
+        crlf = "\r\n"
+        body = b"".join(
+            f'--{boundary}{crlf}Content-Disposition: form-data; name="{k}"{crlf}{crlf}{v}{crlf}'.encode()
+            for k, v in params.items())
+        body += (f'--{boundary}{crlf}Content-Disposition: form-data; name="{field}"; '
+                 f'filename="{filename}"{crlf}Content-Type: {content_type}{crlf}{crlf}').encode()
+        body += content + f"{crlf}--{boundary}--{crlf}".encode()
+        return self._request(method, body, {"Content-Type": f"multipart/form-data; boundary={boundary}"}, 90)
+
+    def _request(self, method: str, data: bytes, headers: dict, timeout: float) -> dict:
+        request = urllib.request.Request(f"{API}/bot{self.token}/{method}", data=data, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             try:
@@ -55,7 +73,9 @@ class Telegram:
             raise ProviderError(redact(f"Telegram {method}: {type(exc).__name__}: {exc}")) from None
 
     def call(self, method: str, **params: Any) -> Any:
-        answer = self._post(method, params)
+        return self._answer(method, self._post(method, params))
+
+    def _answer(self, method: str, answer: dict) -> Any:
         if not answer.get("ok"):
             raise ProviderError(redact(f"Telegram {method}: {answer.get('description', 'not ok')}"))
         return answer.get("result")
@@ -75,10 +95,25 @@ class Telegram:
                 return None
             sleep(3)
 
-    def send(self, text: str) -> None:
+    def _chat(self) -> str | int:
         if self.chat_id is None:
             raise ProviderError("Telegram: no chat to send to")
-        self.call("sendMessage", chat_id=self.chat_id, text=text, disable_web_page_preview="true")
+        return self.chat_id
+
+    def send(self, text: str, *, html: bool = False) -> None:
+        params = {"chat_id": self._chat(), "text": text, "disable_web_page_preview": "true"}
+        if html:
+            params["parse_mode"] = "HTML"
+        self.call("sendMessage", **params)
+
+    def send_photo(self, content: bytes, caption: str = "", filename: str = "chart.png") -> None:
+        params = {"chat_id": self._chat(), "caption": caption[:1024]}
+        self._answer("sendPhoto", self._upload("sendPhoto", params, ("photo", filename, content, "image/png")))
+
+    def send_document(self, content: bytes, filename: str, caption: str = "") -> None:
+        params = {"chat_id": self._chat(), "caption": caption[:1024]}
+        self._answer("sendDocument", self._upload("sendDocument", params,
+                                                  ("document", filename, content, "text/plain")))
 
 
 def from_environment() -> Telegram | None:

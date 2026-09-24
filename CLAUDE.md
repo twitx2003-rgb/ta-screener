@@ -61,6 +61,8 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --outcomes           # breakout ledger from the saved scans (also after every scan)
 .venv\Scripts\python.exe run.py --outcomes --rebuild # rebuild it from every saved scan (+ saved backfill)
 .venv\Scripts\python.exe run.py --backfill-outcomes [--limit N]  # past breakouts, no look-ahead (~1.5 h, resumable)
+.venv\Scripts\python.exe run.py --analyze NVDA --no-llm    # facts, chart, Pine Script -> logs/analyses/
+.venv\Scripts\python.exe run.py --analyze NVDA --telegram  # + Hebrew text, sent to the bot (normal terminal only)
 ```
 
 For a long run from a Claude Code session, start a detached process: the tool kills
@@ -592,6 +594,26 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     - Hebrew placeholders in numeric inputs came out reversed;
     - on phones, the grid column must be `minmax(0, 1fr)`, or the table widens the page;
     - candle detections sorted before chart patterns.
+- **Chart analyst (owner's idea 2026-09-24; plan T1-T6, stop after each).** The owner
+  sends a symbol and gets a Hebrew analysis, a chart and a Pine Script. Code: `tascreen/analyst/`.
+  - T1 engine (`facts.py`, `zones.py`, `signals.py`, thresholds in `rules.yaml`): zones,
+    trendlines, Fibonacci, RSI/MACD/divergences, averages, volume profile, the scanner's
+    patterns -> facts `{value, label, unit}` + drawings with ids.
+  - **Owner decision: a simple picture** ("clean, to the point"). `view.py` = the 2 nearest
+    zones each side; Fibonacci 38.2/50/61.8 only while the price is inside a pullback;
+    the volume profile only when its POC is within 3 ATR; a Fibonacci level or the POC on a
+    zone joins that zone's label. The SVG and the Pine Script both draw this view.
+  - T2 Pine (`pine.py`): v6, one switch per part in the settings; anchors by
+    year/month/day; warns (middle of the chart) on another symbol, a non-daily chart, or
+    closes >0.5% off (dividend-adjusted chart). Verified by the owner in TradingView: it
+    compiles and draws. A script is for ONE symbol (the owner first added NVDA's to TMC).
+  - T3 text (`writer.py`, `knowledge/*.md` with sources): one `claude -p` call (Sonnet,
+    effort high), sections by name with cited fact keys; the channels' number/advice
+    checks plus dates (DD/MM/YYYY, fact dates only) and bullish/bearish/trend words
+    (a cited fact must say so); one retry with reasons; what still fails is left out and
+    the message says so. `--analyze NVDA [--telegram]` (short names are resolved against
+    the stored bars): chart PNG (`png.py`: rsvg-convert, else headless Edge; Edge writes
+    nothing when started from Git Bash here, fine from PowerShell), HTML text, .pine.
 
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 

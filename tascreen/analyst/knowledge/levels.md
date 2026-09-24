@@ -1,0 +1,25 @@
+# Support and resistance zones (facts zone_N.*)
+
+Sources (ideas, in our own words): StockCharts ChartSchool, "Support & Resistance",
+https://chartschool.stockcharts.com/table-of-contents/chart-analysis/support-and-resistance
+
+What the engine computes:
+- Turning points: a zigzag over the daily bars that flips after a move of 1.5 ATR
+  (ATR = the average daily range of the last 14 sessions).
+- A zone is a cluster of at least 2 turning points whose prices lie within 0.6 ATR of
+  each other; a zone is never wider than 1 ATR. zone_N.low / zone_N.high are its edges,
+  zone_N.touches the number of turning points in it.
+- A zone above the last close is resistance (התנגדות), one below is support (תמיכה).
+  Only the 3 nearest on each side are kept; the chart draws the 2 nearest.
+- zone_N.distance_pct: how far the zone's middle is from the close, in percent.
+
+How to read it:
+- A zone is an area, not an exact line: give its range ("בין X ל-Y").
+- More touches means the level was tested more times, not that it is certain to hold.
+- A level that breaks often switches role: broken support can act as resistance later and
+  broken resistance as support. Say this as a possibility ("עשויה"), never as a certainty.
+- A close beyond a zone matters more than an intraday wick through it.
+- The nearest zones matter most for the coming sessions; far zones are context.
+
+Hebrew terms: תמיכה, התנגדות, אזור, נגיעות, פריצה (a close above resistance),
+שבירה (a close below support).
