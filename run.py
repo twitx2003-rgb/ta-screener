@@ -88,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--export-site", metavar="DIR",
                         help="Write the website as static files to DIR (for Vercel): every page, "
                              "no live data")
+    parser.add_argument("--setup-telegram", action="store_true",
+                        help="Connect your private Telegram bot (made with @BotFather): asks for "
+                             "its token (hidden), finds your chat, sends a test message")
+    parser.add_argument("--ci-notify", metavar="STATUS",
+                        help="GitHub Actions: send the owner a Telegram summary of this run "
+                             "(STATUS = the job's status)")
     parser.add_argument("--quotes", action="store_true",
                         help="Fetch every stock's last price once from TradingView's screener "
                              "-> data/quotes/ (the website shows them and live pattern crossings)")
@@ -473,6 +479,62 @@ def export_site(settings, out: str) -> int:
     return 0
 
 
+def setup_telegram(settings) -> int:
+    import getpass
+
+    from tascreen.notify import Telegram, save_credentials
+
+    print("\nחיבור בוט הטלגרם. הדבק את המפתח (token) שקיבלת מ-BotFather ולחץ Enter.")
+    print("המפתח לא יוצג על המסך בזמן ההדבקה, וזה תקין.\n")
+    token = getpass.getpass("Token: ").strip()
+    bot = Telegram(token)
+    try:
+        name = bot.bot_name()
+    except ScreenerError as exc:
+        print(f"\nהמפתח לא עובד: {exc}\n")
+        return 1
+    print(f"\nהבוט @{name} מחובר. אם עוד לא שלחת לו הודעה בטלגרם, שלח עכשיו (מחכה עד 2 דקות)...")
+    chat = bot.find_private_chat(wait_s=120)
+    if chat is None:
+        print("\nלא הגיעה לבוט הודעה. שלח לו הודעה כלשהי בטלגרם והרץ את הפקודה שוב.\n")
+        return 1
+    bot.chat_id = chat
+    bot.send("✅ הבוט של הסורק הטכני מחובר. מכאן יגיעו התראות על העדכונים.")
+    path = save_credentials(token, chat)
+    print(f"\nנשלחה אליך הודעת בדיקה בטלגרם. הפרטים נשמרו במחשב: {path}")
+    print("\nעכשיו שמור ב-GitHub שני סודות (Settings > Secrets and variables > Actions):")
+    print("  TELEGRAM_BOT_TOKEN  = אותו מפתח שהדבקת עכשיו")
+    print(f"  TELEGRAM_CHAT_ID    = {chat}\n")
+    return 0
+
+
+def ci_notify(settings, status: str) -> int:
+    import os
+
+    from tascreen.notify import from_environment, run_message
+
+    bot = from_environment()
+    if bot is None:
+        print("telegram: not configured")
+        return 0
+    run_url = ""
+    if os.environ.get("GITHUB_RUN_ID"):
+        run_url = (f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
+                   f"{os.environ.get('GITHUB_REPOSITORY', '')}/actions/runs/{os.environ['GITHUB_RUN_ID']}")
+    site_file = settings.log_dir / "site-url.txt"
+    site = site_file.read_text(encoding="utf-8").strip() if site_file.exists() else ""
+    text = run_message(_read_log_json(settings, "ci_summary.json"), status, run_url, site)
+    if not text:
+        print("telegram: nothing to report")
+        return 0
+    try:
+        bot.send(text)
+        print("telegram: sent")
+    except ScreenerError as exc:
+        print(f"telegram: {exc}")
+    return 0
+
+
 def scan_symbol(settings, symbol: str) -> int:
     from tascreen.patterns.rules import load_rules
     from tascreen.scan import scan_symbol as scan_one
@@ -733,6 +795,8 @@ def main(argv: list[str] | None = None) -> int:
         (args.ci_tick, lambda: ci_tick(settings, args.limit, args.max_minutes,
                                        with_channels=not args.no_channels)),
         (args.export_site, lambda: export_site(settings, args.export_site)),
+        (args.setup_telegram, lambda: setup_telegram(settings)),
+        (args.ci_notify, lambda: ci_notify(settings, args.ci_notify)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),

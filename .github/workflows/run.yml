@@ -67,6 +67,7 @@ jobs:
           args=(--ci-tick --max-minutes 300)
           if [ -n "$LIMIT" ]; then args+=(--limit "$LIMIT"); fi
           if [ "$CHANNELS" != "true" ]; then args+=(--no-channels); fi
+          rm -f state/logs/ci_summary.json state/logs/site-url.txt
           python -u run.py "${args[@]}" > "state/logs/tick-$(date -u +%Y%m%dT%H%M).log" 2>&1
           code=$?
           python .github/mask_tokens.py state/tv_tokens.json
@@ -90,8 +91,16 @@ jobs:
           code=$?
           echo "deploy exit $code after $(( $(date +%s) - started )) s"
           npx --yes "$VERCEL_CLI" inspect "$(tail -n 1 deploy-url.txt)" --token "$VERCEL_TOKEN" > "$logs/vercel-inspect.txt" 2>&1 || true
-          grep -ho 'https://[a-z0-9.-]*\.vercel\.app' "$logs/vercel-inspect.txt" deploy-url.txt | awk '{ print length, $0 }' | sort -n | head -n 1 | cut -d' ' -f2
+          grep -ho 'https://[a-z0-9.-]*\.vercel\.app' "$logs/vercel-inspect.txt" deploy-url.txt | awk '{ print length, $0 }' | sort -n | head -n 1 | cut -d' ' -f2 | tee "$logs/site-url.txt"
           exit $code
+
+      - name: Tell the owner (Telegram)
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STATUS: ${{ job.status }}
+        run: python run.py --ci-notify "$STATUS" 2> /dev/null || true
 
       - name: Save the state
         if: always()
