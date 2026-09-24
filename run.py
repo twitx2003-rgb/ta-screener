@@ -545,6 +545,7 @@ def ci_notify(settings, status: str) -> int:
 def analyze(settings, symbol: str, out: str | None, with_llm: bool) -> int:
     from tascreen.analyst.chart import render
     from tascreen.analyst.facts import analyse
+    from tascreen.analyst.pine import pine_script
     from tascreen.store import Store, symbol_file_stem
 
     store = Store(settings.data_dir)
@@ -558,6 +559,7 @@ def analyze(settings, symbol: str, out: str | None, with_llm: bool) -> int:
     stem = f"{symbol_file_stem(symbol)}-{analysis.last_day}"
     (folder / f"{stem}.svg").write_text(render(bars, analysis), encoding="utf-8")
     (folder / f"{stem}.json").write_text(analysis.as_json(), encoding="utf-8")
+    (folder / f"{stem}.pine").write_text(pine_script(analysis, bars), encoding="utf-8")
     print(f"\n{symbol}, {analysis.last_day}: {len(analysis.facts)} facts, "
           f"{len(analysis.drawings)} drawings -> {folder / stem}.svg\n")
     for key, fact in analysis.facts.items():

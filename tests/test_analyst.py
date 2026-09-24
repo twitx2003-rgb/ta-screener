@@ -96,3 +96,22 @@ def test_the_whole_analysis_is_clean_and_drawable():
     xml.dom.minidom.parseString(svg)
     assert not re.search(r"(?<![a-z])nan(?![a-z])", svg.lower())
     assert render(bars, result, ["ma"]).count('class="ann"') < svg.count('class="ann"')
+
+
+# ------------------------------------------------------------------ Pine Script
+def test_the_pine_script_draws_only_data_it_was_given():
+    from tascreen.analyst.pine import _pine_string, pine_script
+
+    knots = [(0, 60)] + [(k, 60 + 0.12 * k + (8 if (k // 20) % 2 else -8)) for k in range(20, 400, 20)]
+    bars = from_knots(knots)
+    result = analyse(bars, "NYSE:SYN")
+    script = pine_script(result, bars)
+    assert script.startswith("//@version=6\n") and 'string SYMBOL = "NYSE:SYN"' in script
+    days = re.search(r"anchorDays = array\.from\(([^)]*)\)", script).group(1).split(", ")
+    closes = re.search(r"anchorCloses = array\.from\(([^)]*)\)", script).group(1).split(", ")
+    assert len(days) == len(closes) and all(re.fullmatch(r"20\d{6}", d) for d in days)
+    used = {int(n) for n in re.findall(r"array\.get\(anchorBars, (\d+)\)", script)}
+    assert used and max(used) < len(days)
+    assert "nan" not in script.lower() and script.count("(") == script.count(")")
+    assert "box.new" in script and "line.new" in script and "label.new" in script
+    assert _pine_string('a "b" \\ c\nd') == '"a \\"b\\" \\\\ c d"'
