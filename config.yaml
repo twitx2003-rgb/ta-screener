@@ -93,3 +93,8 @@ outcomes:
   # reached; failed = a close beyond the pattern's invalidation level first.
   max_sessions: 60           # after this many sessions without either: "no decision"
   min_cases: 20              # percentages only from this many decided breakouts
+  # run.py --backfill-outcomes: the detector on past bars, one session at a time
+  # (step 1 = what the daily scans would have seen), without looking ahead.
+  backfill_step: 1
+  backfill_min_bars: 150     # start once a stock has this much history
+  backfill_workers: 4        # parallel processes (this computer has 8 cores)

@@ -125,6 +125,20 @@ def merge(ledger: pd.DataFrame, rows: list[dict]) -> tuple[pd.DataFrame, dict[st
     return ledger, counts
 
 
+def add_new(ledger: pd.DataFrame, rows: list[dict]) -> tuple[pd.DataFrame, int]:
+    """Append only the rows whose key the ledger does not have (backfilled rows never
+    change a row the daily scans recorded)."""
+    known = set(ledger["key"])
+    fresh: dict[str, dict] = {}
+    for row in rows:
+        if row["key"] not in known and row["key"] not in fresh:
+            fresh[row["key"]] = row
+    if not fresh:
+        return ledger, 0
+    added = pd.DataFrame(list(fresh.values()), columns=list(OUTCOMES.columns))
+    return (added if ledger.empty else pd.concat([ledger, added], ignore_index=True)), len(fresh)
+
+
 def evaluate_row(row: dict[str, Any], bars: pd.DataFrame | None, max_sessions: int) -> dict[str, Any]:
     """The outcome fields for one ledger row, from today's stored bars."""
     none = {"outcome": "no_data", "resolved_day": None, "sessions": 0.0, "mfe_pct": math.nan,
@@ -185,7 +199,20 @@ def evaluate(ledger: pd.DataFrame, bars_of: Callable[[str], pd.DataFrame | None]
 
 def update(store: Store, max_sessions: int, *, rebuild: bool = False,
            now: datetime | None = None) -> dict[str, Any]:
-    """Take in the scans not read yet, then evaluate. Rebuild starts from the scans alone."""
+    """Take in the scans not read yet, then evaluate. Rebuild starts from the saved scans,
+    then adds the saved backfill (the scans' rows win)."""
+    with store.ledger_lock():
+        return _update(store, max_sessions, rebuild=rebuild, now=now)
+
+
+def merge_backfill(store: Store, max_sessions: int, now: datetime | None = None) -> dict[str, Any]:
+    """Add the saved backfill rows the ledger does not have yet, and evaluate them."""
+    with store.ledger_lock():
+        return _update(store, max_sessions, rebuild=False, now=now, backfill=True)
+
+
+def _update(store: Store, max_sessions: int, *, rebuild: bool, now: datetime | None,
+            backfill: bool = False) -> dict[str, Any]:
     meta = {} if rebuild else store.read_outcomes_meta()
     ledger = None if rebuild else store.read_ledger()
     if ledger is None:
@@ -206,6 +233,10 @@ def update(store: Store, max_sessions: int, *, rebuild: bool = False,
                                                    bars_of))
         counts = {k: counts[k] + got[k] for k in counts}
         done.add(day.isoformat())
+    if rebuild or backfill:
+        saved = store.read_backfill_rows()
+        if saved is not None:
+            ledger, counts["backfill"] = add_new(ledger, saved.to_dict("records"))
     # a changed tracking window changes what "expired" means: evaluate every row again
     ledger = evaluate(ledger, bars_of, max_sessions,
                       everything=meta.get("max_sessions") not in (None, max_sessions))

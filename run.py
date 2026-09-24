@@ -66,6 +66,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outcomes", action="store_true",
                         help="Update the breakout ledger from the saved scans: what happened after "
                              "each chart-pattern breakout (target, failed, open) -> data/outcomes/")
+    parser.add_argument("--backfill-outcomes", action="store_true",
+                        help="Find past breakouts: the chart detector on stored bars, one past "
+                             "session at a time without looking ahead (hours; resumable; "
+                             "--limit N for the N largest stocks) -> the outcome ledger")
     parser.add_argument("--rebuild", action="store_true",
                         help="With --outcomes: build the ledger again from every saved scan")
     parser.add_argument("--quotes", action="store_true",
@@ -86,7 +90,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Open the website on http://127.0.0.1:<web.port>/ (this computer only; "
                              "reads the newest scan, never calls TradingView)")
     parser.add_argument("--limit", type=int, metavar="N",
-                        help="With --bars/--update: only the N largest symbols (a pilot run)")
+                        help="With --bars/--update/--backfill-outcomes: only the N largest "
+                             "symbols (a pilot run)")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -343,6 +348,31 @@ def outcomes(settings, rebuild: bool = False, quiet: bool = False) -> int:
     return 0
 
 
+def backfill_outcomes(settings, limit: int | None) -> int:
+    from tascreen.backfill import run_backfill
+    from tascreen.patterns.rules import load_rules
+    from tascreen.store import Store
+
+    store = Store(settings.data_dir)
+    found = store.latest_universe()
+    if found is None:
+        log.error("no universe yet; run --universe first")
+        return 1
+    _, frame = found
+    symbols = [s for s in frame.sort_values("market_cap", ascending=False)["symbol"]
+               if store.bars_path(s).exists()][:limit]
+    report = run_backfill(store, load_rules(), settings.outcomes, symbols,
+                          max_sessions=settings.outcomes.max_sessions,
+                          report_path=settings.log_dir / "backfill_last_run.json")
+    print(f"\nBackfill done in {report['seconds'] / 60:.1f} min "
+          f"({report['seconds_per_symbol']} s per symbol in one process): "
+          f"{report['breakouts_found']} breakouts found, {report['added_to_ledger']} added to the "
+          f"ledger ({report['ledger_rows']} rows) {report['outcomes']}")
+    if report["failed"]:
+        print(f"  failed: {len(report['failed'])} symbol(s), see logs/backfill_last_run.json")
+    return 1 if report["failed"] else 0
+
+
 def scan_symbol(settings, symbol: str) -> int:
     from tascreen.patterns.rules import load_rules
     from tascreen.scan import scan_symbol as scan_one
@@ -592,6 +622,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.scan, lambda: scan(settings)),
         (args.scan_symbol, lambda: scan_symbol(settings, args.scan_symbol.strip().upper())),
         (args.outcomes, lambda: outcomes(settings, rebuild=args.rebuild)),
+        (args.backfill_outcomes, lambda: backfill_outcomes(settings, args.limit)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),

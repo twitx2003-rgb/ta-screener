@@ -70,7 +70,7 @@
       <tr>
         <td><a class="tick" href="{{ o.symbol|symbol_url }}">{{ o.symbol.split(":")[1] }}</a></td>
         <td>{{ specs[o.pattern].name_he if o.pattern in specs else o.pattern }} · {{ labels.DIRECTION[o.direction] }}</td>
-        <td><span class="chip {{ labels.OUTCOME_CLASS[o.outcome] }}">{{ labels.OUTCOME[o.outcome] }}</span></td>
+        <td><span class="chip {{ labels.OUTCOME_CLASS[o.outcome] }}">{{ labels.OUTCOME[o.outcome] }}</span>{% if o.source == "backfill" %} <span class="chip" title="{{ labels.SOURCE.backfill }}">רטרו</span>{% endif %}</td>
         <td class="n"><span class="num">{{ o.resolved_day|day }}</span></td>
         <td><span class="num">{{ o.sessions|int }}</span> ימי מסחר</td>
       </tr>

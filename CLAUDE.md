@@ -59,7 +59,8 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --channels --force    # write them again
 .venv\Scripts\python.exe run.py --redraw-charts      # redraw stored chart posts after a chart_svg change
 .venv\Scripts\python.exe run.py --outcomes           # breakout ledger from the saved scans (also after every scan)
-.venv\Scripts\python.exe run.py --outcomes --rebuild # rebuild it from every saved scan
+.venv\Scripts\python.exe run.py --outcomes --rebuild # rebuild it from every saved scan (+ saved backfill)
+.venv\Scripts\python.exe run.py --backfill-outcomes [--limit N]  # past breakouts, no look-ahead (~1.5 h, resumable)
 ```
 
 For a long run from a Claude Code session, start a detached process: the tool kills
@@ -278,6 +279,20 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     by hand against the bars matched. Measure-rule targets sit far (median ~20-30%)
     while invalidation is near (~3-10%), so failures resolve first; early rates lean
     to "failed" until targets have time.
+- **A2 — backfill (built 2026-09-24).** `tascreen/backfill.py`: `detect_chart` on the
+  stored bars cut at every session (`outcomes.backfill_step: 1`) from
+  `backfill_min_bars` (150) up to the day before the first saved scan, behind the
+  scan's own coverage gate (`scan.patterns_allowed`); a breakout is kept the first
+  time a cut reports it, exactly as the daily ingest would (source "backfill").
+  - `tests/test_backfill.py` proves the no-look-ahead claim: run_scan + update day by
+    day on synthetic bars gives the same rows as `backfill_symbol` (incl. a flag).
+  - Per-symbol checkpoints in `data/outcomes/backfill/` + manifest (rules digest, step,
+    start); a change starts over. `ProcessPool` of `backfill_workers` (4 of 8 cores).
+  - Merge only adds unknown keys (`outcomes.add_new`): the daily scans' rows win.
+    `--outcomes --rebuild` re-adds the saved backfill. Ledger writes take
+    `store.ledger_lock()` (the live loop and a backfill may finish together).
+  - Pilot on the 50 largest: ~9 s per symbol per process -> ~1.5 h for all with 4.
+  - Survivorship: today's universe only; the scorecard says so.
 - **The long average is SMA150, not SMA200 (owner's decision, 2026-09-23).**
   - Golden and death crosses are 50/150.
   - EMA200 stays only for the TradingView cross-check.

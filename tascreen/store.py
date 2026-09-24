@@ -11,6 +11,8 @@
     data/channels/<YYYY-MM-DD>/<channel>.json   agent threads (daily; live.json for crossings)
     data/channels/<YYYY-MM-DD>/charts/<post>.svg chart screenshots with drawings
     data/outcomes/ledger.parquet         every breakout and its outcome (OUTCOMES), meta.json
+    data/outcomes/backfill/<SYMBOL>.parquet  breakouts found in past bars (run.py --backfill-outcomes),
+        manifest.json (the rules and step they were found with)
 
 Writes go to a temporary file first and replace the target, so an interrupted
 run never leaves half a file behind.
@@ -20,6 +22,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -71,6 +75,65 @@ class Store:
     def read_outcomes_meta(self) -> dict[str, Any]:
         path = self.outcomes_dir / "meta.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    @contextmanager
+    def ledger_lock(self, wait_s: float = 120.0, stale_s: float = 900.0):
+        """One writer of the ledger at a time (the live loop and a backfill run may
+        both finish at once). A lock older than `stale_s` is left from a crash."""
+        path = self.outcomes_dir / ".lock"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + wait_s
+        while True:
+            try:
+                os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - path.stat().st_mtime > stale_s:
+                        path.unlink(missing_ok=True)
+                        continue
+                except FileNotFoundError:
+                    continue
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"the outcome ledger is locked ({path})") from None
+                time.sleep(0.5)
+        try:
+            yield
+        finally:
+            path.unlink(missing_ok=True)
+
+    @property
+    def backfill_dir(self) -> Path:
+        return self.outcomes_dir / "backfill"
+
+    def write_backfill_rows(self, symbol: str, frame: pd.DataFrame) -> None:
+        OUTCOMES.validate(frame)
+        _atomic_write_bytes(self.backfill_dir / f"{symbol_file_stem(symbol)}.parquet",
+                            lambda tmp: frame.to_parquet(tmp, index=False))
+
+    def backfill_done(self) -> set[str]:
+        """File stems of the symbols already backfilled."""
+        if not self.backfill_dir.exists():
+            return set()
+        return {p.stem for p in self.backfill_dir.glob("*.parquet")}
+
+    def read_backfill_rows(self) -> pd.DataFrame | None:
+        if not self.backfill_dir.exists():
+            return None
+        frames = [pd.read_parquet(p) for p in sorted(self.backfill_dir.glob("*.parquet"))]
+        frames = [f for f in frames if not f.empty]
+        return OUTCOMES.validate(pd.concat(frames, ignore_index=True)) if frames else None
+
+    def read_backfill_manifest(self) -> dict[str, Any]:
+        path = self.backfill_dir / "manifest.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    def reset_backfill(self, manifest: dict[str, Any]) -> None:
+        """Start the backfill over (the rules or the step changed)."""
+        if self.backfill_dir.exists():
+            for path in self.backfill_dir.glob("*.parquet"):
+                path.unlink()
+        _write_json(self.backfill_dir / "manifest.json", manifest)
 
     # ------------------------------------------------------------- channels
     def write_channel_doc(self, day: date, name: str, doc: dict[str, Any]) -> None:

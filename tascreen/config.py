@@ -231,14 +231,27 @@ class OutcomesSettings:
     # The scorecard shows percentages only for patterns with at least this many
     # decided breakouts; below it, counts only.
     min_cases: int = 20
+    # run.py --backfill-outcomes: the detector run on past bars, cut at every
+    # `backfill_step`-th session (1 = exactly what daily scans would have seen), from
+    # the first session with `backfill_min_bars` of history, in this many processes.
+    backfill_step: int = 1
+    backfill_min_bars: int = 150
+    backfill_workers: int = 4
 
     def __post_init__(self):
-        for name in ("max_sessions", "min_cases"):
+        for name in ("max_sessions", "min_cases", "backfill_step", "backfill_min_bars",
+                     "backfill_workers"):
             object.__setattr__(self, name, int(getattr(self, name)))
         if not 5 <= self.max_sessions <= 250:
             raise ConfigError("outcomes.max_sessions must be 5..250")
         if not 1 <= self.min_cases <= 1000:
             raise ConfigError("outcomes.min_cases must be 1..1000")
+        if not 1 <= self.backfill_step <= 20:
+            raise ConfigError("outcomes.backfill_step must be 1..20")
+        if not 60 <= self.backfill_min_bars <= 500:
+            raise ConfigError("outcomes.backfill_min_bars must be 60..500")
+        if not 1 <= self.backfill_workers <= 32:
+            raise ConfigError("outcomes.backfill_workers must be 1..32")
 
 
 _SECTIONS = {

@@ -33,13 +33,30 @@ UNIVERSE_COLUMNS = ["symbol", "exchange", "ticker", "description", "sector", "in
                     "market_cap", "tv_rsi", "tv_ema50", "tv_ema200", "tv_rating", "next_earnings"]
 
 
+def patterns_allowed(bars: pd.DataFrame, rules: Rules) -> tuple[float, bool]:
+    """(coverage of the recent bars, whether patterns may be looked for): holes in the
+    series would fake the shapes."""
+    recent = bars["timestamp"].dt.date.iloc[-int(rules.g("coverage_sessions")):].tolist()
+    share = round(coverage(recent), 4)
+    return share, share >= rules.g("min_recent_coverage")
+
+
+def patterns_frame(detections: list) -> pd.DataFrame:
+    """Detections as a PATTERNS frame (typed columns)."""
+    patterns = pd.DataFrame([d.row() for d in detections], columns=list(PATTERNS.columns))
+    for column in ("start", "end"):
+        patterns[column] = pd.to_datetime(patterns[column], utc=True)
+    for column in ("breakout_price", "height", "target", "trigger_up", "trigger_down"):
+        patterns[column] = pd.to_numeric(patterns[column])
+    return patterns
+
+
 def scan_symbol(bars: pd.DataFrame, symbol: str, rules: Rules) -> tuple[dict[str, Any], list]:
     values = latest(bars)
-    recent = bars["timestamp"].dt.date.iloc[-int(rules.g("coverage_sessions")):].tolist()
-    values["coverage"] = round(coverage(recent), 4)
-    values["patterns_skipped"] = values["coverage"] < rules.g("min_recent_coverage")
-    if values["patterns_skipped"]:
-        return values, []                 # holes in the series would fake the shapes
+    values["coverage"], allowed = patterns_allowed(bars, rules)
+    values["patterns_skipped"] = not allowed
+    if not allowed:
+        return values, []
     detections = detect_candles(bars, symbol, rules) + detect_chart(bars, symbol, rules)
     return values, detections
 
@@ -75,11 +92,7 @@ def run_scan(store: Store, universe: pd.DataFrame, universe_day: date, rules: Ru
     if indicators.empty:
         raise ProviderError("scan: no symbol had bars; run --bars first")
     indicators = universe[UNIVERSE_COLUMNS].merge(indicators, on="symbol", how="inner")
-    patterns = pd.DataFrame([d.row() for d in detections], columns=list(PATTERNS.columns))
-    for column in ("start", "end"):
-        patterns[column] = pd.to_datetime(patterns[column], utc=True)
-    for column in ("breakout_price", "height", "target", "trigger_up", "trigger_down"):
-        patterns[column] = pd.to_numeric(patterns[column])
+    patterns = patterns_frame(detections)
 
     counts: dict[str, dict[str, int]] = {}
     for (pattern, status), n in Counter(zip(patterns["pattern"], patterns["status"])).items():

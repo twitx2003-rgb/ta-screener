@@ -48,7 +48,9 @@ Built:
 
 - a scorecard: every chart-pattern breakout is tracked until it reaches its measure-rule
   target, fails (a close back beyond the whole pattern) or runs out of time. These are
-  this site's own results and definitions, not the book's statistics.
+  this site's own results and definitions, not the book's statistics. Past breakouts
+  are found by running the detector on older bars one day at a time, without looking
+  ahead (`run.py --backfill-outcomes`).
 
 The long moving average is 150 days (with 50/150 golden and death crosses).
 
