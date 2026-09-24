@@ -1,5 +1,6 @@
-# Secrets
+# Secrets, and this machine's own settings (e.g. the server's host name)
 .env
+config.local.yaml
 
 # Vendor data: TradingView data may not be redistributed, and this repo is public.
 data/

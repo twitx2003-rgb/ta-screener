@@ -59,3 +59,17 @@ def test_the_shipped_numbers_are_numbers():
 def test_rate_limit_delays_become_a_tuple_of_floats(tmp_path):
     settings = _load(tmp_path, "tradingview:\n  rate_limit_delays: [1, 2]\n")
     assert settings.tradingview.rate_limit_delays == (1.0, 2.0)
+
+
+def test_a_local_file_overrides_single_keys_with_the_same_checks(tmp_path):
+    (tmp_path / "config.local.yaml").write_text(
+        "web:\n  open_browser: false\n  public_hosts: ['screener.example.org']\n", encoding="utf-8")
+    settings = _load(tmp_path, "web:\n  port: 8051\n  open_browser: true\n")
+    assert settings.web.port == 8051 and settings.web.open_browser is False
+    assert settings.web.public_hosts == ("screener.example.org",)
+    (tmp_path / "config.local.yaml").write_text("web:\n  opne_browser: false\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="unknown key"):
+        _load(tmp_path, "web:\n  port: 8051\n")
+    (tmp_path / "config.local.yaml").write_text("web: false\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="config.local.yaml"):
+        _load(tmp_path, "web:\n  port: 8051\n")

@@ -290,12 +290,22 @@ class Settings:
 
 
 def load_settings(config_path: Path | None = None, root: Path = ROOT) -> Settings:
+    """config.yaml, then this machine's config.local.yaml next to it, if any (gitignored;
+    e.g. the server's public host name). The local file replaces single keys, and the
+    same checks apply to both."""
     path = config_path or (root / "config.yaml")
     if not path.exists():
         raise ConfigError(f"Missing config file: {path}")
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ConfigError("config.yaml must be a mapping at the top level")
+    local_path = path.with_name(path.stem + ".local.yaml")
+    if local_path.exists():
+        local = yaml.safe_load(local_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(local, dict) or not all(isinstance(v, dict) for v in local.values()):
+            raise ConfigError(f"{local_path.name} must map sections to key: value mappings")
+        for section, values in local.items():
+            raw[section] = {**(raw.get(section) or {}), **values}
 
     unknown_sections = set(raw) - set(_SECTIONS)
     if unknown_sections:

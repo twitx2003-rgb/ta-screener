@@ -251,6 +251,20 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   - The chart fills the bubble (medium); a click opens it large in a `<dialog>`.
   - Screener: below 1700 px the sidebar leaves no room for all columns, so the columns
     52-week high, ATR% and sector (`.opt`) are hidden there.
+- **Hosting (owner's decision, 2026-09-24): an Oracle Cloud Always Free VM** (Ubuntu 24.04,
+  Ampere A1, 4 OCPU / 24 GB), so the home computer can be off. Vercel-style hosts were
+  ruled out: they serve pages but cannot run the hour-long nightly update or quotes
+  every 5 minutes on a free plan. `deploy/setup.sh <host>` installs uv + Python 3.14,
+  Claude Code, Caddy (HTTPS -> 127.0.0.1:8050), opens 80/443 in the VM's iptables, and
+  the services ta-web / ta-live; `deploy/update.sh` pulls and restarts; steps in
+  `deploy/README.md`. Host name without a domain: `<ip-with-dashes>.sslip.io`.
+  - `config.local.yaml` (gitignored) next to config.yaml overrides single keys on one
+    machine (the server's `web.public_hosts`, `open_browser: false`), same checks.
+  - Data is fetched fresh on the server (`--update`, `--backfill-outcomes`); nothing is
+    copied from the home computer. Sign-ins are the owner's: TradingView through
+    `ssh -L 8766:localhost:8766` + `--auth-tradingview`, Claude Code by `claude` login.
+  - SSH key on the owner's computer: `%USERPROFILE%\.ssh\oracle_ta` (no passphrase).
+  - Unknown until tried: whether TradingView serves a cloud IP as it serves the home one.
 - **Professional agents plan (owner-approved 2026-09-24; stop for review after each
   stage):** A1 outcome ledger, A2 backfill, A3 follow-up posts, B qualitative facts +
   earnings + market overview, C editor (Haiku; posts wait when it cannot run) + memory,
