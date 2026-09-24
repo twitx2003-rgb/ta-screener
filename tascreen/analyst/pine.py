@@ -174,8 +174,10 @@ def pine_script(analysis: Analysis, bars: pd.DataFrame) -> str:
         "    else if mismatched > 0",
         f"        warning := {_pine_string('המחירים בגרף שונים מהנתונים של הניתוח. אולי מופעלת התאמה לדיבידנדים (adj).')}",
         "    if warning != \"\"",
-        "        var table note = table.new(position.top_right, 1, 1, bgcolor=color.new(#130F20, 10))",
-        "        table.cell(note, 0, 0, warning, text_color=#FB7185)",
+        # in the middle: a corner can sit under the Pine Editor or another indicator
+        "        var table note = table.new(position.middle_center, 1, 1, bgcolor=color.new(#130F20, 5), "
+        "border_color=#FB7185, border_width=1)",
+        "        table.cell(note, 0, 0, warning, text_color=#FB7185, text_size=size.large)",
     ]
     tail = [f"    {line}" for line in [
         "var table credit = table.new(position.bottom_right, 1, 1)",
