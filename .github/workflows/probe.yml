@@ -51,8 +51,13 @@ jobs:
             exit 1
           fi
           if ! git clone -q "https://x-access-token:${STATE_REPO_TOKEN}@github.com/${STATE_REPO}.git" state 2> clone-error.txt; then
-            sed -E 's#https://[^@]*@#https://***@#g' clone-error.txt | head -n 3
-            echo "::error::Cannot open ${STATE_REPO} with STATE_REPO_TOKEN: the key must be allowed that repository (Repository access) with Contents: Read and write"
+            case "$STATE_REPO_TOKEN" in
+              github_pat_*) shape="starts with github_pat_ (a fine-grained key)" ;;
+              ghp_*) shape="starts with ghp_ (a classic key)" ;;
+              *) shape="does NOT start with github_pat_ or ghp_ (not a GitHub key?)" ;;
+            esac
+            why=$(sed -E 's#https://[^@]*@#https://***@#g' clone-error.txt | grep -v '^Cloning' | head -n 1)
+            echo "::error::Cannot open ${STATE_REPO} with STATE_REPO_TOKEN. The secret ${shape}, ${#STATE_REPO_TOKEN} characters. git says: ${why}"
             exit 1
           fi
           mkdir -p state/logs
