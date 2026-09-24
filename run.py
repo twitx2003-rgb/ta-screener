@@ -72,6 +72,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "--limit N for the N largest stocks) -> the outcome ledger")
     parser.add_argument("--rebuild", action="store_true",
                         help="With --outcomes: build the ledger again from every saved scan")
+    parser.add_argument("--ci-probe", action="store_true",
+                        help="Stage-0 check on a GitHub runner: TradingView (forced token refresh, "
+                             "a screener pass, --limit N get-ohlcv calls, default 300) and one "
+                             "Claude call; prints counts and timings only (public logs)")
     parser.add_argument("--quotes", action="store_true",
                         help="Fetch every stock's last price once from TradingView's screener "
                              "-> data/quotes/ (the website shows them and live pattern crossings)")
@@ -373,6 +377,17 @@ def backfill_outcomes(settings, limit: int | None) -> int:
     return 1 if report["failed"] else 0
 
 
+def ci_probe(settings, calls: int | None) -> int:
+    from tascreen.ci import probe
+    from tascreen.llm import ClaudeCodeLLM
+
+    report = probe(settings, make_tradingview(settings),
+                   lambda: ClaudeCodeLLM(model=settings.channels.model, effort="low", timeout_s=180),
+                   calls=calls or 300)
+    print(json.dumps(report, indent=2))
+    return 0 if report["tradingview"].get("ok") and report["claude"].get("ok") else 1
+
+
 def scan_symbol(settings, symbol: str) -> int:
     from tascreen.patterns.rules import load_rules
     from tascreen.scan import scan_symbol as scan_one
@@ -623,6 +638,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.scan_symbol, lambda: scan_symbol(settings, args.scan_symbol.strip().upper())),
         (args.outcomes, lambda: outcomes(settings, rebuild=args.rebuild)),
         (args.backfill_outcomes, lambda: backfill_outcomes(settings, args.limit)),
+        (args.ci_probe, lambda: ci_probe(settings, args.limit)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),

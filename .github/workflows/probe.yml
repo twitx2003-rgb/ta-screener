@@ -1,0 +1,100 @@
+# Stage 0 of the move to GitHub Actions + Vercel (owner-approved plan, 2026-09-24):
+# can a GitHub runner reach TradingView and Claude, and publish to Vercel?
+# Run by hand from the Actions tab. This repository is public, and so is this log:
+# every step prints counts and statuses only; full output goes to the PRIVATE state
+# repository (secrets: STATE_REPO_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, VERCEL_TOKEN).
+name: probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      calls:
+        description: "get-ohlcv calls to time"
+        default: "300"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: state            # one run at a time touches the private state (the token file)
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      STATE_REPO: twitx2003-rgb/ta-screener-state
+      VERCEL_CLI: vercel@59.26.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -q -r requirements.txt
+          curl -fsSL https://claude.ai/install.sh | bash > /dev/null 2>&1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Restore the private state
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+        run: |
+          git clone -q "https://x-access-token:${STATE_REPO_TOKEN}@github.com/${STATE_REPO}.git" state
+          mkdir -p state/logs
+          python - <<'EOF'
+          import json, pathlib
+          path = pathlib.Path("state/tv_tokens.json")
+          tokens = json.loads(path.read_text()).get("tokens", {}) if path.exists() else {}
+          for key in ("access_token", "refresh_token"):
+              if tokens.get(key):
+                  print(f"::add-mask::{tokens[key]}")
+          print("token file:", "yes" if tokens else "no")
+          EOF
+
+      - name: TradingView and Claude
+        env:
+          TA_TV_TOKEN_PATH: ${{ github.workspace }}/state/tv_tokens.json
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CALLS: ${{ inputs.calls }}
+        run: |
+          set +e
+          python -u run.py --ci-probe --limit "$CALLS" > probe.json 2> state/logs/probe-stderr.txt
+          code=$?
+          cat probe.json
+          exit $code
+
+      - name: Test deploy to Vercel
+        if: always()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          site="$RUNNER_TEMP/probe-site"
+          python -m tascreen.ci probe-site "$site"
+          cd "$site"
+          logs="$GITHUB_WORKSPACE/state/logs"
+          started=$(date +%s)
+          npx --yes "$VERCEL_CLI" link --yes --project ta-screener-probe --token "$VERCEL_TOKEN" > "$logs/vercel-link.txt" 2>&1
+          npx --yes "$VERCEL_CLI" deploy --prod --yes --token "$VERCEL_TOKEN" > deploy-url.txt 2> "$logs/vercel-deploy.txt"
+          echo "deploy exit $? after $(( $(date +%s) - started )) s"
+          npx --yes "$VERCEL_CLI" inspect "$(tail -n 1 deploy-url.txt)" --token "$VERCEL_TOKEN" > "$logs/vercel-inspect.txt" 2>&1
+          alias=$(grep -ho 'https://[a-z0-9.-]*\.vercel\.app' "$logs/vercel-inspect.txt" deploy-url.txt | awk '{ print length, $0 }' | sort -n | head -n 1 | cut -d' ' -f2)
+          echo "site: $alias"
+          cd "$GITHUB_WORKSPACE"
+          python -m tascreen.ci check-site "$alias"
+
+      - name: Save the state (a refreshed token must not be lost)
+        if: always()
+        run: |
+          cd state
+          git config user.name "ta-screener bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "probe $(date -u +%Y-%m-%dT%H:%MZ)" || true
+          git push -q origin HEAD:main

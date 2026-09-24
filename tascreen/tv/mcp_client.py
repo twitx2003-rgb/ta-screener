@@ -80,6 +80,15 @@ logging.getLogger("mcp.client.auth.oauth2").addFilter(_HideExpectedSignInError()
 
 
 # --------------------------------------------------------------------------- tokens
+def mask_in_actions(*secrets: str | None) -> None:
+    """On GitHub Actions, tell the runner to hide these values in the (public) log."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    for secret in secrets:
+        if secret:
+            print(f"::add-mask::{secret}", flush=True)
+
+
 class FileTokenStorage:
     """Persists OAuth tokens and the registered client between runs.
 
@@ -124,6 +133,7 @@ class FileTokenStorage:
         return OAuthToken.model_validate(raw) if raw else None
 
     async def set_tokens(self, tokens) -> None:
+        mask_in_actions(tokens.access_token, getattr(tokens, "refresh_token", None))
         self._write("tokens", tokens.model_dump(mode="json", exclude_none=True))
         self._write("tokens_saved_at", time.time())
 

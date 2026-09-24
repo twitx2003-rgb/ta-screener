@@ -5,6 +5,8 @@ config.yaml is otherwise a silent bug.
 """
 from __future__ import annotations
 
+import os
+
 import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -306,6 +308,11 @@ def load_settings(config_path: Path | None = None, root: Path = ROOT) -> Setting
             raise ConfigError(f"{local_path.name} must map sections to key: value mappings")
         for section, values in local.items():
             raw[section] = {**(raw.get(section) or {}), **values}
+    # A separate TradingView sign-in (e.g. the one GitHub Actions uses) lives in its own
+    # file; TA_TV_TOKEN_PATH names it, so one project never refreshes another's tokens.
+    if os.environ.get("TA_TV_TOKEN_PATH"):
+        raw["tradingview"] = {**(raw.get("tradingview") or {}),
+                              "token_path": os.environ["TA_TV_TOKEN_PATH"]}
 
     unknown_sections = set(raw) - set(_SECTIONS)
     if unknown_sections:
