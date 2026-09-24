@@ -95,6 +95,19 @@ def test_what_fails_twice_is_left_out_and_the_message_says_so():
     assert "למכור" not in message
 
 
+def test_at_most_two_optional_sections_and_they_are_not_retried():
+    answer = _parts(**GOOD, volume="הנפח יציב.")
+    answer["parts"][4:4] = [{"part": "trend", "text": "סדר הממוצעים שורי.", "cites": ["ma.stack"]},
+                            {"part": "fibonacci", "text": "פיבונאצ'י 61.8% ב-101.9.", "cites": ["fib_618"]},
+                            {"part": "momentum", "text": "המומנטום שורי.", "cites": ["close"]}]
+    llm = SyntheticLLM(lambda s, u, schema: answer)
+    written = write(_analysis(), llm, rules=RULES)
+    optional = [p["part"] for p in written["parts"] if p["part"] not in ("headline", "levels", "up", "down")]
+    assert optional == ["trend", "fibonacci"] and not written["omitted"]
+    assert {d["reason"] for d in written["dropped"]} == {"more optional sections than allowed"}
+    assert len(llm.calls) == 1                         # nothing required failed: no retry
+
+
 def test_the_message_is_escaped_and_fits_one_telegram_message():
     parts = [{"part": k, "title": PARTS[k], "text": "<b>" + "א" * 900, "cites": []} for k in PARTS]
     written = {"symbol": "NASDAQ:TEST", "last_day": "2026-03-20", "parts": parts, "omitted": []}

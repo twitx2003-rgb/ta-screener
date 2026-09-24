@@ -35,8 +35,11 @@ PARTS = {"headline": "בקצרה", "levels": "תמיכה והתנגדות", "tre
          "fibonacci": "פיבונאצ'י", "volume": "נפח", "momentum": "מומנטום", "patterns": "תבניות",
          "up": "תרחיש עולה", "down": "תרחיש יורד"}
 REQUIRED = ("headline", "levels", "up", "down")
-MAX_CHARS = {"headline": 240}
-DEFAULT_MAX = 400
+# Owner's choice after the first live text (2026-09-24): short and simple. The four
+# required sections, plus at most two others that matter now, one sentence each.
+MAX_CHARS = {"headline": 200, "levels": 300, "up": 250, "down": 250}
+DEFAULT_MAX = 180
+MAX_OPTIONAL = 2
 EFFORT = "high"
 
 INTERNAL_ID = re.compile(r"\b(?:zone|tl|div|pat)_\d+\b|\bfib(?:_ext)?_\d+\b|\b[a-z]+[0-9]*\.[a-z_]+\b")
@@ -64,19 +67,20 @@ These rules are checked by a program; a section that breaks one is thrown away:
 8. Never write a fact key or id in the text (zone_2, tl_1, fib_618, ma.stack): name things in
    Hebrew ("אזור התמיכה", "קו ההתנגדות").
 
-Sections ("part"), 1-3 short sentences each, at most one of each:
-- headline (required): the picture now, in one or two sentences: where the price stands
-  between the nearest support and the nearest resistance.
-- levels (required): the support and resistance zones drawn on the chart.
-- trend: the moving averages and the trendlines.
-- fibonacci: only if the chart shows Fibonacci lines or a zone carries a Fibonacci note.
-- volume: the volume profile and the volume trend.
-- momentum: RSI, MACD, divergences.
-- patterns: only if the brief has pat_* facts.
-- up (required): the upward scenario, conditional: which close would start it, the next level
-  on the way, and which level would cancel it.
-- down (required): the same, downward.
-Leave out an optional section that has nothing meaningful to say.
+Keep it short and simple: the whole analysis is read in under a minute. Sections ("part"),
+at most one of each:
+- headline (required, 1-2 short sentences, <= 200 characters): the picture now: where the
+  price stands between the nearest support and the nearest resistance.
+- levels (required, 1-2 sentences, <= 300 characters): the support and resistance zones
+  drawn on the chart, nearest first.
+- up (required, one sentence, <= 250 characters): the upward scenario, conditional: which
+  close would start it, the next level on the way, and which level would cancel it.
+- down (required, one sentence, <= 250 characters): the same, downward.
+- At most TWO of these optional sections, only when they change the picture now, the more
+  important first, ONE short sentence each (<= 180 characters):
+  trend (the moving averages, a trendline), fibonacci (only if the chart shows Fibonacci
+  lines or a zone carries a Fibonacci note), volume (the profile, the volume trend),
+  momentum (RSI, MACD, a divergence), patterns (only if the brief has pat_* facts).
 
 "chart" in the brief lists exactly what the reader sees on the chart. Something that is not
 drawn (a trendline, a divergence, a pattern, the averages) gets at most one short sentence.
@@ -222,7 +226,10 @@ def check_parts(raw: dict, facts: dict[str, dict], rules: dict[str, Any]) -> tup
     dropped: list[dict] = []
     for part in raw.get("parts") or []:
         name = part.get("part")
-        problem = "repeated section" if name in kept else part_problem(part, facts, numbers, dates)
+        optional = sum(1 for n in kept if n not in REQUIRED)
+        problem = ("repeated section" if name in kept else
+                   "more optional sections than allowed" if name in PARTS and name not in REQUIRED
+                   and optional >= MAX_OPTIONAL else part_problem(part, facts, numbers, dates))
         if problem:
             dropped.append({"part": name, "reason": problem, "text": str(part.get("text", ""))[:300]})
             continue
@@ -233,14 +240,15 @@ def check_parts(raw: dict, facts: dict[str, dict], rules: dict[str, Any]) -> tup
 
 def write(analysis: Analysis, llm: LLM, *, rules: dict[str, Any] | None = None,
           now=lambda: datetime.now(timezone.utc)) -> dict[str, Any]:
-    """The written analysis: sections in display order, what was dropped, and the usage."""
+    """The written analysis: sections in display order, what was dropped, and the usage.
+    Only the required sections are retried; an optional one that fails is simply left out."""
     rules = rules or load_rules()
     started = time.monotonic()
     system, user, schema = system_prompt(), user_prompt(analysis), response_schema()
     raw, usage = llm.complete(system=system, user=user, schema=schema)
     kept, dropped = check_parts(raw, analysis.facts, rules)
     usages = [usage]
-    retry = {d["part"]: d["reason"] for d in dropped if d["part"] in PARTS and d["part"] not in kept}
+    retry = {d["part"]: d["reason"] for d in dropped if d["part"] in REQUIRED and d["part"] not in kept}
     retry.update({name: "missing" for name in REQUIRED if name not in kept and name not in retry})
     if retry:
         fix = (user + "\n\nYour previous answer was checked by the program. Write again ONLY these "
@@ -254,8 +262,7 @@ def write(analysis: Analysis, llm: LLM, *, rules: dict[str, Any] | None = None,
         dropped += [{**d, "retry": True} for d in dropped2]
     parts = [{**kept[name], "title": PARTS[name]} for name in PARTS if name in kept]
     return {"symbol": analysis.symbol, "last_day": analysis.last_day, "parts": parts,
-            "omitted": [name for name in REQUIRED if name not in kept]
-                       + [name for name in retry if name not in kept and name not in REQUIRED],
+            "omitted": [name for name in REQUIRED if name not in kept],
             "dropped": dropped, "model": getattr(llm, "name", "?"), "usage": usages,
             "seconds": round(time.monotonic() - started, 1),
             "generated_at": now().isoformat(timespec="seconds")}

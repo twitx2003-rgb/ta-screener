@@ -3,7 +3,8 @@
 The reader is an ordinary person who opened a chart, not a professional. Write so that
 someone who knows only the words "support" and "resistance" understands.
 
-- Short sentences, plain Hebrew. One idea per sentence. 1-3 sentences per section.
+- Short: the whole analysis is read in under a minute. Short sentences, plain Hebrew, one
+  idea per sentence; one or two sentences per section.
 - Explain a technical term once, in a few words in brackets, the first time it appears.
 - Start with what matters now: where the price is between the nearest support and the
   nearest resistance. Then the rest, only where it adds something.
