@@ -61,15 +61,7 @@ jobs:
             exit 1
           fi
           mkdir -p state/logs
-          python - <<'EOF'
-          import json, pathlib
-          path = pathlib.Path("state/tv_tokens.json")
-          tokens = json.loads(path.read_text()).get("tokens", {}) if path.exists() else {}
-          for key in ("access_token", "refresh_token"):
-              if tokens.get(key):
-                  print(f"::add-mask::{tokens[key]}")
-          print("token file:", "yes" if tokens else "no")
-          EOF
+          python .github/mask_tokens.py state/tv_tokens.json
 
       - name: TradingView and Claude
         env:
@@ -81,6 +73,7 @@ jobs:
           if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "::warning::The secret CLAUDE_CODE_OAUTH_TOKEN is missing"; fi
           python -u run.py --ci-probe --limit "$CALLS" > probe.json 2> state/logs/probe-stderr.txt
           code=$?
+          python .github/mask_tokens.py state/tv_tokens.json    # the refreshed token, if any
           cat probe.json
           cp probe.json state/logs/probe.json
           exit $code

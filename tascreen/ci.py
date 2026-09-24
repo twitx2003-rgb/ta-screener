@@ -52,15 +52,23 @@ def _timings(seconds: list[float]) -> dict[str, float | None]:
             "max_s": round(ordered[-1], 2)}
 
 
+# Large, long-listed stocks for timing get-ohlcv without the screener (which can answer
+# 429 for hours); only names, no data.
+PROBE_SYMBOLS = ("NASDAQ:AAPL", "NASDAQ:MSFT", "NASDAQ:NVDA", "NASDAQ:AMZN", "NASDAQ:GOOGL",
+                 "NASDAQ:META", "NYSE:BRK.B", "NYSE:JPM", "NYSE:V", "NYSE:JNJ", "NYSE:WMT",
+                 "NYSE:PG", "NYSE:XOM", "NYSE:HD", "NYSE:KO", "NASDAQ:PEP", "NASDAQ:COST",
+                 "NYSE:MRK", "NYSE:CVX", "NYSE:BAC", "NASDAQ:ADBE", "NASDAQ:CSCO", "NYSE:CRM",
+                 "NASDAQ:INTC", "NYSE:DIS", "NASDAQ:NFLX", "NYSE:MCD", "NYSE:NKE", "NYSE:T",
+                 "NASDAQ:AMD", "NASDAQ:QCOM", "NYSE:IBM", "NYSE:CAT", "NYSE:GS", "NYSE:BA",
+                 "NASDAQ:AMGN", "NYSE:UNH", "NYSE:LLY", "NYSE:ORCL", "NASDAQ:TXN")
+
+
 async def _tradingview(session, settings: Settings, calls: int) -> dict[str, Any]:
     delays = settings.tradingview.rate_limit_delays
-    started = time.monotonic()
-    frame, summary = await fetch_universe(session, settings.universe, delays=delays)
-    out: dict[str, Any] = {"screener": {"ok": True, "stocks": int(len(frame)),
-                                        "bands": len(summary["bands"]),
-                                        "seconds": round(time.monotonic() - started, 1)}}
+    out: dict[str, Any] = {}
     seconds, counts = [], {"ok": 0, "rate_limited": 0, "failed": 0}
-    for symbol in frame["symbol"].head(calls):
+    for n in range(calls):
+        symbol = PROBE_SYMBOLS[n % len(PROBE_SYMBOLS)]
         t = time.monotonic()
         try:
             bars_frame(await fetch_in_session(session, OHLCV_TOOL,
@@ -73,6 +81,13 @@ async def _tradingview(session, settings: Settings, calls: int) -> dict[str, Any
             counts["failed"] += 1
         seconds.append(time.monotonic() - t)
     out["ohlcv"] = {"calls": len(seconds), **counts, **_timings(seconds)}
+    started = time.monotonic()
+    try:
+        frame, summary = await fetch_universe(session, settings.universe, delays=delays)
+        out["screener"] = {"ok": True, "stocks": int(len(frame)), "bands": len(summary["bands"])}
+    except RateLimited:
+        out["screener"] = {"ok": False, "error": "RateLimited"}
+    out["screener"]["seconds"] = round(time.monotonic() - started, 1)
     return out
 
 
@@ -87,7 +102,7 @@ def probe(settings: Settings, client: Any, llm_factory: Callable[[], Any], *,
     started = time.monotonic()
     try:
         report["tradingview"] = client.with_session(lambda s: _tradingview(s, settings, calls))
-        report["tradingview"]["ok"] = True
+        report["tradingview"]["ok"] = report["tradingview"]["ohlcv"]["ok"] > 0
     except Exception as exc:  # noqa: BLE001 — any failure, by class name only (messages can quote payloads)
         report["tradingview"] = {"ok": False, "error": type(exc).__name__}
     report["tradingview"]["seconds"] = round(time.monotonic() - started, 1)

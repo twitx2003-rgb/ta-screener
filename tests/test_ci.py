@@ -10,7 +10,7 @@ from fakes import FakeClient, FakeOhlcv, FakeScreener, stock_row
 from tascreen.ci import probe, refresh_fingerprint
 from tascreen.config import Settings, load_settings
 from tascreen.llm import SyntheticLLM
-from tascreen.tv.mcp_client import FileTokenStorage, mask_in_actions
+from tascreen.tv.mcp_client import FileTokenStorage
 
 
 class _Session:
@@ -46,6 +46,13 @@ def test_probe_reports_counts_and_timings_only(tmp_path):
     report = probe(settings, FakeClient(_Session()), lambda: llm, calls=25)
     assert report["tradingview"]["ok"] and report["tradingview"]["screener"]["stocks"] == 40
     assert report["tradingview"]["ohlcv"]["calls"] == 25 and report["tradingview"]["ohlcv"]["ok"] == 25
+    session = _Session()
+    session.screener.rate_limited = 99                  # the screener answers 429 throughout
+    object.__setattr__(settings.tradingview, "rate_limit_delays", (0,))
+    limited = probe(settings, FakeClient(session), lambda: llm, calls=5)
+    assert limited["tradingview"]["ok"] and limited["tradingview"]["ohlcv"]["ok"] == 5
+    assert limited["tradingview"]["screener"] == {"ok": False, "error": "RateLimited",
+                                                   "seconds": limited["tradingview"]["screener"]["seconds"]}
     assert report["refresh_token"] == "kept" and report["claude"] == {"ok": True, "served_by": "synthetic"}
     text = json.dumps(report)
     assert "S00" not in text and "r1" not in text and "a1" not in text      # no symbols, no tokens
@@ -79,18 +86,16 @@ def test_the_token_path_can_come_from_the_environment(tmp_path, monkeypatch):
         "/state/tv_tokens.json"
 
 
-def test_new_tokens_are_masked_only_on_actions(capsys, monkeypatch, tmp_path):
+def test_saving_new_tokens_prints_nothing(capsys, monkeypatch, tmp_path):
+    """On Actions, stdout goes to files; a token must never reach them (not even as a mask)."""
     from mcp.shared.auth import OAuthToken
 
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    mask_in_actions("secret-1")
-    assert capsys.readouterr().out == ""
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     storage = FileTokenStorage(tmp_path / "t.json")
     asyncio.run(storage.set_tokens(OAuthToken(access_token="acc-9", token_type="Bearer",
                                               refresh_token="ref-9")))
-    out = capsys.readouterr().out
-    assert "::add-mask::acc-9" in out and "::add-mask::ref-9" in out
+    captured = capsys.readouterr()
+    assert "acc-9" not in captured.out + captured.err and "ref-9" not in captured.out + captured.err
 
 
 def test_the_vercel_probe_site_and_its_checks(tmp_path):
