@@ -32,8 +32,21 @@ async function say(token, chat, text) {
   });
 }
 
+// The keys as pasted into GitHub's secrets: a trailing newline would change the HMAC.
+function keys(env) {
+  const clean = (name) => String(env[name] || "").trim();
+  return {token: clean("TELEGRAM_BOT_TOKEN"), owner: clean("TELEGRAM_CHAT_ID"),
+          dispatch: clean("GH_DISPATCH_TOKEN")};
+}
+
+// GET: which keys this deployment has (yes/no only, never a value), to check a deployment.
+function status(env) {
+  const k = keys(env);
+  return {ok: true, bot: k.token.length > 0, owner: k.owner.length > 0, dispatch: k.dispatch.length > 0};
+}
+
 async function handle(req, env) {
-  const token = env.TELEGRAM_BOT_TOKEN, owner = String(env.TELEGRAM_CHAT_ID || "");
+  const {token, owner, dispatch} = keys(env);
   if (req.method !== "POST" || !token || !owner) return "not set up";
   if (!same((req.headers || {})["x-telegram-bot-api-secret-token"], webhookSecret(token))) return "bad secret";
   const message = (req.body && req.body.message) || {};
@@ -49,7 +62,7 @@ async function handle(req, env) {
   const started = await fetch(WORKFLOW, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${env.GH_DISPATCH_TOKEN || ""}`,
+      "Authorization": `Bearer ${dispatch}`,
       "Accept": "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "ta-screener-bot",
@@ -65,6 +78,10 @@ async function handle(req, env) {
 }
 
 module.exports = async function telegram(req, res) {
+  if (req.method === "GET") {
+    res.status(200).json(status(process.env));
+    return;
+  }
   let outcome = "error";
   try {
     outcome = await handle(req, process.env);
@@ -75,4 +92,5 @@ module.exports = async function telegram(req, res) {
   res.status(200).json({ok: true});        // always 200: Telegram must not retry an update
 };
 module.exports.handle = handle;
+module.exports.status = status;
 module.exports.webhookSecret = webhookSecret;

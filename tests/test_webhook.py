@@ -36,6 +36,11 @@ async function run(name, req) { calls = []; return {name, outcome: await fn.hand
   out.push(await run("get", {method: "GET", headers: good, body: update("NVDA")}));
   out.push(await run("not a symbol", {method: "POST", headers: good, body: update("rm -rf /")}));
   out.push(await run("symbol", {method: "POST", headers: good, body: update(" $nvda ")}));
+  calls = [];
+  const padded = {TELEGRAM_BOT_TOKEN: token + "\n", TELEGRAM_CHAT_ID: " 42\n", GH_DISPATCH_TOKEN: "dispatch-key\n"};
+  out.push({name: "padded keys", outcome: await fn.handle(
+    {method: "POST", headers: good, body: update("NVDA")}, padded), calls});
+  out.push({name: "status", full: fn.status(env), empty: fn.status({})});
   dispatchStatus = 401;
   out.push(await run("refused", {method: "POST", headers: good, body: update("NASDAQ:NVDA")}));
   global.fetch = async () => { throw new Error("network down"); };
@@ -72,6 +77,10 @@ def test_the_webhook_answers_only_the_owner_and_only_symbols(tmp_path):
     assert dispatch["body"] == {"ref": "main", "inputs": {"symbol": "NVDA"}}
     assert dispatch["auth"] == "Bearer dispatch-key" and "dispatch-key" not in told["url"]
     assert told["body"]["chat_id"] == "42" and "מנתח את NVDA" in told["body"]["text"]
+    assert by["padded keys"]["outcome"] == "started"            # a pasted newline is harmless
+    assert by["padded keys"]["calls"][0]["auth"] == "Bearer dispatch-key"
+    assert by["status"]["full"] == {"ok": True, "bot": True, "owner": True, "dispatch": True}
+    assert by["status"]["empty"] == {"ok": True, "bot": False, "owner": False, "dispatch": False}
     assert by["refused"]["outcome"] == "dispatch failed"
     assert "GitHub 401" in by["refused"]["calls"][1]["body"]["text"]
     assert by["thrown"]["status"] == 200                         # Telegram never retries
