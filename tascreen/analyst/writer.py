@@ -39,6 +39,7 @@ MAX_CHARS = {"headline": 240}
 DEFAULT_MAX = 400
 EFFORT = "high"
 
+INTERNAL_ID = re.compile(r"\b(?:zone|tl|div|pat)_\d+\b|\bfib(?:_ext)?_\d+\b|\b[a-z]+[0-9]*\.[a-z_]+\b")
 DATE_TEXT = re.compile(r"\d{4}-\d{2}-\d{2}|(?<![\d.])\d{1,2}/\d{1,2}(?:/\d{2,4})?(?![\d/])")
 BULL, BEAR = ("שורי", "שורית", "שוריים", "שוריות"), ("דובי", "דובית", "דוביים", "דוביות")
 UP_TREND = ("מגמה עולה", "מגמת עלייה", "מגמה חיובית")
@@ -60,6 +61,8 @@ These rules are checked by a program; a section that breaks one is thrown away:
    say where the price will go or which scenario is more likely.
 6. A target is always "יעד לפי כלל המדידה", never a forecast.
 7. Nothing outside the facts: no news, earnings, fundamentals, other stocks or market talk.
+8. Never write a fact key or id in the text (zone_2, tl_1, fib_618, ma.stack): name things in
+   Hebrew ("אזור התמיכה", "קו ההתנגדות").
 
 Sections ("part"), 1-3 short sentences each, at most one of each:
 - headline (required): the picture now, in one or two sentences: where the price stands
@@ -75,7 +78,9 @@ Sections ("part"), 1-3 short sentences each, at most one of each:
 - down (required): the same, downward.
 Leave out an optional section that has nothing meaningful to say.
 
-"chart" in the brief lists exactly what the reader sees on the chart.
+"chart" in the brief lists exactly what the reader sees on the chart. Something that is not
+drawn (a trendline, a divergence, a pattern, the averages) gets at most one short sentence.
+Name a line by what it does and its direction together: "קו התנגדות עולה", "קו תמיכה יורד".
 
 KNOWLEDGE (how the engine computes each fact, and how to talk about it):
 """
@@ -195,6 +200,9 @@ def part_problem(part: dict, facts: dict[str, dict], numbers: list[float],
     unknown = [c for c in cites if c not in facts]
     if unknown:
         return f"cites unknown fact keys {unknown[:3]}"
+    ids = INTERNAL_ID.findall(text)
+    if ids:
+        return f"internal ids in the text (name them in Hebrew): {ids[:3]}"
     wrong_dates = [d for d in DATE_TEXT.findall(text) if not _date_ok(d, dates)]
     if wrong_dates:
         return f"dates not in the facts: {wrong_dates[:3]}"

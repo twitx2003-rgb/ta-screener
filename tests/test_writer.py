@@ -52,6 +52,9 @@ def test_a_section_must_stay_inside_the_facts():
     assert "numbers" in _problem("המחיר עשוי להגיע ל-125.", ["zone_1.high"])       # invented level
     assert "dates" in _problem("השיא היה ב-14/02/2026.", ["fib.end_day"])           # a day off
     assert "advice" in _problem("כדאי לקנות מעל 110.", ["zone_1.high"])
+    for leak in ("ההתנגדות (zone_1) ב-110.", "לפי ma.stack הסדר חיובי.", "הרמה fib_618 ב-101.9."):
+        assert "internal ids" in _problem(leak, ["zone_1.high", "ma.stack", "fib_618"])
+    assert _problem("ב-NVDA ובגרף 1D ההתנגדות ב-110.", ["zone_1.high"]) is None
 
 
 def test_bullish_and_trend_words_need_a_fact_that_says_so():
