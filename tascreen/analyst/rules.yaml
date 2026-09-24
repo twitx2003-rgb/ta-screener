@@ -1,0 +1,41 @@
+# Thresholds of the chart analyst (tascreen/analyst). Each value says where it comes
+# from: "common" = the usual textbook setting (see knowledge/*.md for sources),
+# "ours" = a choice made for this engine. Changing a value changes every analysis.
+window_sessions: {value: 250, origin: ours, note: "sessions analysed and drawn (about a year)"}
+atr_period: {value: 14, origin: common}
+
+# turning points (pivots.zigzag): a swing of this many ATRs
+minor_pivot_atr: {value: 1.5, origin: ours, note: "for support/resistance zones, trendlines, divergences"}
+major_pivot_atr: {value: 4.0, origin: ours, note: "for the Fibonacci swing"}
+
+# support and resistance zones: clusters of turning points
+zone_merge_atr: {value: 0.6, origin: ours, note: "turning points this close (in ATRs) form one zone"}
+zone_max_width_atr: {value: 1.0, origin: ours, note: "a zone never spans more (no chaining of nearby points)"}
+zone_min_touches: {value: 2, origin: common, note: "a level tested twice or more"}
+zone_min_width_atr: {value: 0.25, origin: ours}
+zones_each_side: {value: 3, origin: ours, note: "nearest zones above and below the price"}
+
+# trendlines through turning points
+trendline_min_touches: {value: 3, origin: common, note: "two points make a line, the third confirms it"}
+trendline_touch_atr: {value: 0.35, origin: ours}
+trendline_break_atr: {value: 0.5, origin: ours, note: "broken on a close this far beyond (not a wick)"}
+trendline_recent_sessions: {value: 40, origin: ours, note: "its last touch must be this recent"}
+trendline_max_distance_atr: {value: 6, origin: ours, note: "a line this far from the price today is not drawn"}
+
+# Fibonacci (retracements of the last major swing, and its extensions)
+fib_retracements: {value: [0.236, 0.382, 0.5, 0.618, 0.786], origin: common}
+fib_extensions: {value: [1.272, 1.618], origin: common}
+
+# indicators
+rsi_period: {value: 14, origin: common}
+rsi_overbought: {value: 70, origin: common}
+rsi_oversold: {value: 30, origin: common}
+macd: {value: [12, 26, 9], origin: common}
+divergence_recent_sessions: {value: 25, origin: ours, note: "the second turning point must be this recent"}
+ma_periods: {value: [50, 150, 200], origin: ours, note: "150 replaces 200 elsewhere on the site; 200 is kept here for the classic stack"}
+
+# volume
+volume_profile_bins: {value: 40, origin: ours}
+value_area: {value: 0.70, origin: common}
+volume_trend_short: {value: 20, origin: ours}
+volume_trend_long: {value: 50, origin: ours}

@@ -94,6 +94,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ci-notify", metavar="STATUS",
                         help="GitHub Actions: send the owner a Telegram summary of this run "
                              "(STATUS = the job's status)")
+    parser.add_argument("--analyze", metavar="SYMBOL",
+                        help="Technical analysis of one stock from its stored bars: zones, "
+                             "trendlines, Fibonacci, indicators, volume profile, patterns "
+                             "-> an SVG chart and the facts in --out (default logs/analyses/)")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="With --analyze: facts and chart only, no written analysis")
+    parser.add_argument("--out", metavar="DIR", help="With --analyze: where to write the files")
     parser.add_argument("--quotes", action="store_true",
                         help="Fetch every stock's last price once from TradingView's screener "
                              "-> data/quotes/ (the website shows them and live pattern crossings)")
@@ -535,6 +542,31 @@ def ci_notify(settings, status: str) -> int:
     return 0
 
 
+def analyze(settings, symbol: str, out: str | None, with_llm: bool) -> int:
+    from tascreen.analyst.chart import render
+    from tascreen.analyst.facts import analyse
+    from tascreen.store import Store, symbol_file_stem
+
+    store = Store(settings.data_dir)
+    bars = store.read_bars(symbol)
+    if bars is None:
+        log.error("no stored bars for %s", symbol)
+        return 1
+    analysis = analyse(bars, symbol)
+    folder = Path(out) if out else settings.log_dir / "analyses"
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = f"{symbol_file_stem(symbol)}-{analysis.last_day}"
+    (folder / f"{stem}.svg").write_text(render(bars, analysis), encoding="utf-8")
+    (folder / f"{stem}.json").write_text(analysis.as_json(), encoding="utf-8")
+    print(f"\n{symbol}, {analysis.last_day}: {len(analysis.facts)} facts, "
+          f"{len(analysis.drawings)} drawings -> {folder / stem}.svg\n")
+    for key, fact in analysis.facts.items():
+        print(f"  {key:<24} {fact['value']}{fact['unit']}   {fact['label']}")
+    if with_llm:
+        print("\n(the written analysis comes in a later stage)")
+    return 0
+
+
 def scan_symbol(settings, symbol: str) -> int:
     from tascreen.patterns.rules import load_rules
     from tascreen.scan import scan_symbol as scan_one
@@ -797,6 +829,8 @@ def main(argv: list[str] | None = None) -> int:
         (args.export_site, lambda: export_site(settings, args.export_site)),
         (args.setup_telegram, lambda: setup_telegram(settings)),
         (args.ci_notify, lambda: ci_notify(settings, args.ci_notify)),
+        (args.analyze, lambda: analyze(settings, args.analyze.strip().upper(), args.out,
+                                       with_llm=not args.no_llm)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),
