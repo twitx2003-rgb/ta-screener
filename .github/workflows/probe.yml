@@ -68,6 +68,7 @@ jobs:
           python -u run.py --ci-probe --limit "$CALLS" > probe.json 2> state/logs/probe-stderr.txt
           code=$?
           cat probe.json
+          cp probe.json state/logs/probe.json
           exit $code
 
       - name: Test deploy to Vercel
@@ -87,7 +88,7 @@ jobs:
           alias=$(grep -ho 'https://[a-z0-9.-]*\.vercel\.app' "$logs/vercel-inspect.txt" deploy-url.txt | awk '{ print length, $0 }' | sort -n | head -n 1 | cut -d' ' -f2)
           echo "site: $alias"
           cd "$GITHUB_WORKSPACE"
-          python -m tascreen.ci check-site "$alias"
+          python -m tascreen.ci check-site "$alias" | tee state/logs/vercel-check.json
 
       - name: Save the state (a refreshed token must not be lost)
         if: always()
