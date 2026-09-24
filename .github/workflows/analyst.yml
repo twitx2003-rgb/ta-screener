@@ -1,0 +1,68 @@
+# The chart analyst on request (analyst plan, stage T4, 2026-09-24). The owner starts it
+# from the GitHub app (Actions > analyst > Run workflow, then a symbol); later the Telegram
+# bot starts it (T5). It reads the stored daily bars only: no TradingView call, so no
+# sign-in token is used and it can run next to the nightly update (no "state" group).
+# Claude Code writes the Hebrew text (the owner's subscription); the chart, the text and
+# the Pine Script go to Telegram; the analysis is kept on the "analyses" branch of the
+# PRIVATE state repository. This repository is public, and so is this log: it shows one
+# status line; the full log is kept with the analysis.
+name: analyst
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "Stock symbol, for example NVDA"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyse:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      STATE_REPO: twitx2003-rgb/ta-screener-state
+      STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+      DAILY_LIMIT: "10"            # the analyses share the Claude subscription with the channels
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -q -r requirements.txt
+          curl -fsSL https://claude.ai/install.sh | bash > /dev/null 2>&1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # the chart as a PNG: librsvg, with Hebrew and monospace fonts (SIL OFL)
+          sudo apt-get update -qq > /dev/null
+          sudo apt-get install -y -qq --no-install-recommends librsvg2-bin fonts-noto-core fonts-ibm-plex > /dev/null
+
+      - name: Get the stored bars
+        run: bash .github/analyst.sh restore
+
+      - name: Analyse and send to Telegram
+        env:
+          SYMBOL: ${{ inputs.symbol }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set +e
+          python -u run.py --ci-analyze "$SYMBOL" --archive analyses --daily-limit "$DAILY_LIMIT" \
+              > "logs/analyst-$(date -u +%Y%m%dT%H%M%S).log" 2>&1
+          code=$?
+          line=$(grep -h '^analysis: ' logs/analyst-*.log | tail -n 1)
+          echo "${line:-analysis: no status line (see the kept log)}"
+          exit $code
+
+      - name: Keep the analysis
+        if: always()
+        run: bash .github/analyst.sh keep

@@ -614,6 +614,16 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     the message says so. `--analyze NVDA [--telegram]` (short names are resolved against
     the stored bars): chart PNG (`png.py`: rsvg-convert, else headless Edge; Edge writes
     nothing when started from Git Bash here, fine from PowerShell), HTML text, .pine.
+    First live text (NVDA): every number and date right; it leaked an id "(tl_1)" (now
+    rejected). **Owner's choice: short and simple** = headline, levels, up, down + at most
+    2 optional one-sentence sections (only required ones are retried).
+  - T4 `.github/workflows/analyst.yml` (workflow_dispatch, input `symbol`): stored bars from
+    the "bars" release (retried: the nightly save replaces it), no TradingView, no "state"
+    concurrency group; `run.py --ci-analyze SYMBOL --archive analyses --daily-limit 10`
+    (`analyst/request.py`: limit per UTC day counted by kept folders, failed ones too;
+    unknown symbol / limit / failure answered in Telegram in Hebrew); kept on the state
+    repo's `analyses` branch (`.github/analyst.sh`, rebase + push; PNGs not kept). Fonts on
+    the runner: librsvg2-bin, fonts-noto-core, fonts-ibm-plex (SANS lists Noto Hebrew).
 
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 

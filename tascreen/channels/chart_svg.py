@@ -33,7 +33,8 @@ INK = {"bg": "#130F20", "grid": "#221B36", "axis": "#8F86AE", "title": "#EDE9F8"
        "up": "#34D399", "down": "#FB7185", "sma50": "#FBBF24", "sma150": "#67E8F9"}
 ANN = {"line": "#C4B5FD", "bull": "#34D399", "bear": "#FB7185", "target": "#FBBF24",
        "tag": "#1B1530", "note": "#221A3A", "note_ink": "#EDE9F8", "accent": "#8B5CF6"}
-SANS = "Heebo, 'Segoe UI', Arial, sans-serif"
+# Noto: what the analyst's runner has for Hebrew when librsvg turns a chart into a PNG
+SANS = "Heebo, 'Segoe UI', 'Noto Sans Hebrew', 'Noto Sans', Arial, sans-serif"
 MONO = "'IBM Plex Mono', Consolas, monospace"
 
 
