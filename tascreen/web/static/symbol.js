@@ -4,7 +4,20 @@
 (function () {
   "use strict";
   const LC = window.LightweightCharts;
-  const data = JSON.parse(document.getElementById("chart-data").textContent);
+  // The exported site sends column arrays (compact_chart_payload); expand them.
+  function expand(raw) {
+    const k = raw.cols, candles = [], volume = [], sma50 = [], sma150 = [];
+    for (let i = 0; i < k.t.length; i++) {
+      const time = k.t[i];
+      candles.push({ time, open: k.o[i], high: k.h[i], low: k.l[i], close: k.c[i] });
+      volume.push({ time, value: k.v[i], up: k.c[i] >= k.o[i] });
+      if (k.sma50[i] !== null) sma50.push({ time, value: k.sma50[i] });
+      if (k.sma150[i] !== null) sma150.push({ time, value: k.sma150[i] });
+    }
+    return { candles, volume, sma50, sma150, detections: raw.detections };
+  }
+  const raw = JSON.parse(document.getElementById("chart-data").textContent);
+  const data = raw.cols ? expand(raw) : raw;
   const box = document.getElementById("chart");
   if (!LC || !box || !data.candles.length) return;
 

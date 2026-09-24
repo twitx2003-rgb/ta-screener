@@ -22,7 +22,7 @@
     <h2>{{ spec.name_he }} <span class="en">{{ spec.name_en }}</span>
       {% if spec.direction != "either" %}<span class="chip {{ 'up' if spec.direction == 'bullish' else 'down' }}">{{ labels.DIRECTION[spec.direction] }}</span>
       {% else %}<span class="chip">הכיוון נקבע בפריצה</span>{% endif %}
-      {% if view %}<a class="chip accent" href="/screener?pattern={{ key }}">{{ counts.get(key, 0) }} בסריקה האחרונה</a>{% endif %}
+      {% if view %}<a class="chip accent" href="{{ screener_link('pattern=' ~ key) }}">{{ counts.get(key, 0) }} בסריקה האחרונה</a>{% endif %}
     </h2>
     <ul>{% for r in spec.rules_he %}<li>{{ r }}</li>{% endfor %}</ul>
     {% if spec.params %}{{ params_table(spec.params) }}{% endif %}

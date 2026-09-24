@@ -28,7 +28,8 @@
 {%- endmacro %}
 
 {% block content %}
-<div class="layout">
+<div class="layout{% if static %} solo{% endif %}">
+  {% if not static %}
   <details class="filters" id="filters" open>
     <summary>סינון</summary>
     <form method="get" action="/screener">
@@ -134,17 +135,13 @@
       </div>
     </form>
   </details>
+  {% endif %}
 
   <section aria-label="תוצאות">
     <div class="presets" aria-label="סינונים מהירים">
       {% if live and live.active %}<a href="/screener?live=cross">⚡ חוצות עכשיו קו פריצה</a>{% endif %}
-      <a href="/screener?family=chart&amp;status=breakout&amp;within=5&amp;sort=age">פריצות מתבניות גרף, 5 ימים אחרונים</a>
-      <a href="/screener?family=chart&amp;status=forming">תבניות גרף בבנייה</a>
-      <a href="/screener?family=candle&amp;direction=bullish&amp;within=1">נרות שוריים ביום האחרון</a>
-      <a href="/screener?family=candle&amp;direction=bearish&amp;within=1">נרות דוביים ביום האחרון</a>
-      <a href="/screener?near_high=3&amp;relvol_min=1.5">ליד שיא שנתי, בנפח גבוה</a>
-      <a href="/screener?rsi_max=30">RSI מתחת ל-30</a>
-      <a href="/screener?cross=golden">חציית זהב</a>
+      {% for slug, preset, label in PRESETS %}<a href="{{ screener_link(preset) }}">{{ label }}</a>
+      {% endfor %}
     </div>
 
     {% if query.errors %}
@@ -155,7 +152,7 @@
       <span class="count"><span class="num">{{ "{:,}".format(result.total) }}</span> מניות</span>
       {% if query.pattern_filter %}<span class="muted small"><span class="num">{{ result.detections }}</span> זיהויים תואמים</span>{% endif %}
       {% set active = query.active(rules) %}
-      {% if active %}
+      {% if active and not static %}
       <div class="active">
         {% for text, url in active %}<a class="chip accent" href="{{ url }}" title="הסרת הסינון">{{ text }} <span class="x">✕</span></a>{% endfor %}
       </div>
@@ -168,7 +165,8 @@
         <thead>
           <tr>
             {% macro head(key, text, cls="") -%}
-              <th scope="col"{% if cls %} class="{{ cls }}"{% endif %}><a href="{{ query.sort_url(key) }}" {% if query.sort == key %}aria-sort="{{ 'ascending' if query.sort_order == 'asc' else 'descending' }}"{% endif %}>{{ text }}{% if query.sort == key %} {{ '▲' if query.sort_order == 'asc' else '▼' }}{% endif %}</a></th>
+              {% if static %}<th scope="col"{% if cls %} class="{{ cls }}"{% endif %}{% if query.sort == key %} aria-sort="{{ 'ascending' if query.sort_order == 'asc' else 'descending' }}"{% endif %}>{{ text }}{% if query.sort == key %} {{ '▲' if query.sort_order == 'asc' else '▼' }}{% endif %}</th>
+              {%- else %}<th scope="col"{% if cls %} class="{{ cls }}"{% endif %}><a href="{{ query.sort_url(key) }}" {% if query.sort == key %}aria-sort="{{ 'ascending' if query.sort_order == 'asc' else 'descending' }}"{% endif %}>{{ text }}{% if query.sort == key %} {{ '▲' if query.sort_order == 'asc' else '▼' }}{% endif %}</a></th>{% endif %}
             {%- endmacro %}
             {{ head("symbol", "מניה") }}
             {{ head("age", "תבניות") }}
@@ -221,7 +219,9 @@
         </tbody>
       </table>
     </div>
-    {% if result.pages > 1 %}
+    {% if static and result.total > result.rows|length %}
+    <p class="muted small" style="text-align: center; margin-top: 10px">מוצגות <span class="num">{{ result.rows|length }}</span> המניות הראשונות מתוך <span class="num">{{ "{:,}".format(result.total) }}</span>. הסינון המלא יחזור בקרוב.</p>
+    {% elif result.pages > 1 %}
     <nav class="pager" aria-label="עמודים">
       {% if result.page > 1 %}<a href="{{ query.url(page=result.page - 1) }}">→ הקודם</a>{% endif %}
       <span>עמוד <span class="num">{{ result.page }}</span> מתוך <span class="num">{{ result.pages }}</span></span>

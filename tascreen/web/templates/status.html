@@ -78,7 +78,7 @@
       <dt>בורסות</dt><dd class="mono small">{% for ex, n in universe.exchanges.items() %}{{ ex }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</dd>
       <dt>רצועות שווי שוק</dt><dd class="num">{{ universe.bands|length }}</dd>
     </dl>
-    {% else %}<p class="muted">אין עדיין רשימה. להרצה: <span class="mono">run.py --universe</span></p>{% endif %}
+    {% else %}<p class="muted">אין עדיין רשימה.{% if not public %} להרצה: <span class="mono">run.py --universe</span>{% endif %}</p>{% endif %}
   </section>
 
   <section class="panel">
@@ -110,7 +110,7 @@
       {% if audit.sparse_series is defined %}<dt>סדרות דלילות</dt><dd class="num">{{ audit.sparse_series|length }}</dd>{% endif %}
     </dl>
     {% endif %}
-    <p class="muted small" style="margin-top: 10px">עדכון הנרות: <span class="mono">run.py --bars</span> (ממשיך מאיפה שנעצר). TradingView מאט את הקריאות אחרי כאלף קריאות רצופות.</p>
+    {% if not public %}<p class="muted small" style="margin-top: 10px">עדכון הנרות: <span class="mono">run.py --bars</span> (ממשיך מאיפה שנעצר). TradingView מאט את הקריאות אחרי כאלף קריאות רצופות.</p>{% endif %}
   </section>
 </div>
 
@@ -140,7 +140,7 @@
     <tbody>
     {% for key, spec in specs.items() %}{% set c = view.summary.counts.get(key, {}) %}
       <tr>
-        <td><a href="/screener?pattern={{ key }}">{{ spec.name_he }}</a></td>
+        <td><a href="{{ screener_link('pattern=' ~ key) }}">{{ spec.name_he }}</a></td>
         {% for st in STATUSES %}<td class="n"><span class="num">{{ c.get(st, "") }}</span></td>{% endfor %}
         <td class="n"><span class="num">{{ c.values()|sum }}</span></td>
       </tr>

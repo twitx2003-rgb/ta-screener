@@ -43,7 +43,7 @@ from ..config import Settings
 from ..indicators import sma
 from ..outcomes import recent_decided, scorecard
 from ..patterns.rules import Rules, load_rules
-from ..store import Store
+from ..store import Store, symbol_file_stem
 from . import fmt, labels
 from .channels import ChannelRepository
 from .data import Live, QuotesRepository, ScanRepository, ScanView, live_for, with_live_prices
@@ -69,6 +69,40 @@ SCREENER_KEYS = ({f.name for f in fields(Query)} | {"pattern", "status"}) - {"er
 
 def symbol_url(symbol: str) -> str:
     return "/symbol/" + quote(symbol, safe=":")
+
+
+def static_symbol_url(symbol: str) -> str:
+    """The exported site's page: a folder per symbol, no ':' in a file name."""
+    return f"/symbol/{symbol_file_stem(symbol)}/"
+
+
+# The screener's quick filters: (slug for the exported site, query, label).
+PRESETS = (
+    ("recent-chart-breakouts", "family=chart&status=breakout&within=5&sort=age",
+     "פריצות מתבניות גרף, 5 ימים אחרונים"),
+    ("chart-forming", "family=chart&status=forming", "תבניות גרף בבנייה"),
+    ("bullish-candles", "family=candle&direction=bullish&within=1", "נרות שוריים ביום האחרון"),
+    ("bearish-candles", "family=candle&direction=bearish&within=1", "נרות דוביים ביום האחרון"),
+    ("near-high-volume", "near_high=3&relvol_min=1.5", "ליד שיא שנתי, בנפח גבוה"),
+    ("rsi-under-30", "rsi_max=30", "RSI מתחת ל-30"),
+    ("golden-cross", "cross=golden", "חציית זהב"),
+)
+STATIC_ROWS = 500          # rows on an exported screener page (the full filter form returns later)
+
+
+def screener_link(query: str = "", *, static: bool = False) -> str:
+    """A link to the screener with `query`; on the exported site, the page made for it
+    (the default view, a pattern, or a preset)."""
+    if not static:
+        return "/screener" + (f"?{query}" if query else "")
+    if not query:
+        return "/screener/"
+    if query.startswith("pattern=") and "&" not in query:
+        return f"/screener/pattern/{query.split('=', 1)[1]}/"
+    for slug, preset, _ in PRESETS:
+        if query == preset:
+            return f"/screener/preset/{slug}/"
+    return "/screener/"
 
 
 def tradingview_url(symbol: str) -> str:
@@ -126,6 +160,39 @@ def chart_payload(bars: pd.DataFrame, detections: list[dict[str, Any]]) -> dict[
     }
 
 
+def _short(x: float) -> float:
+    """A price with 5 significant digits (enough for a chart, a third of the text)."""
+    return float(f"{float(x):.5g}")
+
+
+def compact_chart_payload(bars: pd.DataFrame, detections: list[dict[str, Any]],
+                          min_bars: int = 200) -> dict[str, Any]:
+    """chart_payload for the exported site: column arrays instead of one object per
+    bar, and only the last `min_bars` sessions (or from the oldest detection's start),
+    with the averages computed on the full history first. symbol.js expands it."""
+    first = max(0, len(bars) - min_bars)
+    days_all = bars["timestamp"].dt.strftime("%Y-%m-%d")
+    starts = [_iso(d["start"]) for d in detections if _iso(d["start"])]
+    if starts:
+        oldest = int((days_all < min(starts)).sum())
+        first = min(first, max(0, oldest - 10))
+    window = bars.iloc[first:]
+    sma50, sma150 = (sma(bars["close"], n).iloc[first:] for n in (50, 150))
+
+    def column(values) -> list:
+        return [_short(x) if fmt.ok(x) else None for x in values]
+
+    full = chart_payload(bars.iloc[first:], detections)
+    return {
+        "cols": {"t": days_all.iloc[first:].tolist(),
+                 "o": column(window["open"]), "h": column(window["high"]),
+                 "l": column(window["low"]), "c": column(window["close"]),
+                 "v": [int(x) if fmt.ok(x) else 0 for x in window["volume"]],
+                 "sma50": column(sma50), "sma150": column(sma150)},
+        "detections": full["detections"],
+    }
+
+
 def live_summary(live: Live | None) -> dict[str, Any]:
     if live is None:
         return {"active": False, "stale": False, "session": None, "crossings": 0}
@@ -135,7 +202,10 @@ def live_summary(live: Live | None) -> dict[str, Any]:
             "note": "Quotes are delayed; a crossing is not a breakout until the session's close."}
 
 
-def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
+def create_app(settings: Settings, *, rules: Rules | None = None, static: bool = False,
+               static_stamp: str = "") -> FastAPI:
+    """`static`: pages for the exported site (tascreen/web/export.py): links to its files,
+    compact charts, no live data, and `static_stamp` as the reload stamp."""
     store = Store(settings.data_dir)
     rules = rules or load_rules()
     repo = ScanRepository(store, rules)
@@ -147,6 +217,8 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
 
     def current() -> tuple[ScanView | None, Live | None]:
         view = repo.current()
+        if static:                     # the exported site gets live data in the browser
+            return view, None
         return view, live_for(view, quotes_repo.current(), datetime.now(timezone.utc), max_age)
 
     def clock(when) -> str:
@@ -158,11 +230,13 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
     templates.env.filters.update(
         num=fmt.num, price=fmt.price, pct=fmt.pct, money=fmt.money, day=fmt.day,
         sign=fmt.sign_class, check_text=labels.check_text, sector=labels.sector,
-        symbol_url=symbol_url, tradingview_url=tradingview_url, clock=clock,
-        post_text=fmt.post_text)
-    public = settings.web.public
+        symbol_url=static_symbol_url if static else symbol_url, tradingview_url=tradingview_url,
+        clock=clock, post_text=fmt.post_text)
+    public = settings.web.public or static
     templates.env.globals.update(labels=labels, rules=rules, specs=specs, SORTS=SORTS,
-                                 STATUSES=STATUSES, ok=fmt.ok, public=public, GENERAL=GENERAL)
+                                 STATUSES=STATUSES, ok=fmt.ok, public=public, GENERAL=GENERAL,
+                                 static=static, PRESETS=PRESETS, STATIC_ROWS=STATIC_ROWS,
+                                 screener_link=lambda q="": screener_link(q, static=static))
 
     app = FastAPI(title="ta-screener", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -182,12 +256,14 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
     def stamp() -> str:
+        if static:
+            return static_stamp
         quotes = quotes_repo.current()
         return f"{quotes.summary.get('fetched_at') if quotes else ''}|{channel_repo.stamp()}"
 
     def render(request: Request, name: str, view: ScanView | None, status_code: int = 200,
                live: Live | None = None, **context: Any) -> HTMLResponse:
-        stale_rules = bool(view and view.summary.get("rules_digest") != rules.digest)
+        stale_rules = bool(view and view.summary.get("rules_digest") != rules.digest) and not static
         sidebar = {"channels": channel_repo.channel_list(view), "fresh": channel_repo.fresh(),
                    "current": context.get("channel").id if context.get("channel") else None}
         return templates.TemplateResponse(
@@ -211,6 +287,11 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
         return render(request, "channel.html", view, live=live, channel=channel, spec=spec,
                       threads=channel_repo.threads(channel_id), members=len(channel_repo.personas))
 
+    if static:
+        @app.get("/__not_found__", response_class=HTMLResponse)
+        def not_found_page(request: Request):
+            return not_found(request, repo.current(), "", kind="page")
+
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request):
         if SCREENER_KEYS & set(request.query_params.keys()):
@@ -227,7 +308,8 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
         if view is None:
             return render(request, "empty.html", None)
         query = parse_query(request.query_params, rules)
-        result = apply(with_live_prices(view, live), query, settings.web.rows_per_page,
+        result = apply(with_live_prices(view, live), query,
+                       STATIC_ROWS if static else settings.web.rows_per_page,
                        crossings=live.crossings if live else None)
         stocks = view.stocks
         facets = {
@@ -249,10 +331,11 @@ def create_app(settings: Settings, *, rules: Rules | None = None) -> FastAPI:
             return not_found(request, view, symbol)
         detections = view.detections_of(symbol)
         bars = store.read_bars(symbol)
-        chart = fmt.script_json(chart_payload(bars, detections)) if bars is not None else None
+        payload = compact_chart_payload if static else chart_payload
+        chart = fmt.script_json(payload(bars, detections)) if bars is not None else None
         crossing = {c["pattern"]: c for c in live.crossings.get(symbol, [])} if live else {}
         return render(request, "symbol.html", view, live=live, stock=stock, detections=detections,
-                      chart=chart, back=back_link(request), crossing=crossing)
+                      chart=chart, back="" if static else back_link(request), crossing=crossing)
 
     @app.get("/patterns", response_class=HTMLResponse)
     def patterns_page(request: Request):

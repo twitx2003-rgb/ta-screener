@@ -85,13 +85,13 @@
       const el = document.activeElement;
       if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
       try {
-        const d = await (await fetch("/api/stamp", { cache: "no-store" })).json();
+        const d = await (await fetch({{ ("/data/stamp.json" if static else "/api/stamp")|tojson }}, { cache: "no-store" })).json();
         if (d.stamp !== shown) {
           try { sessionStorage.setItem("scrollY:" + location.href, String(scrollY)); } catch (e) {}
           location.reload();
         }
       } catch (e) {}
-    }, 60000);
+    }, {{ 120000 if static else 60000 }});
   })();
 </script>
 {% block scripts %}{% endblock %}

@@ -73,6 +73,26 @@ jobs:
           cat state/logs/ci_summary.json 2> /dev/null || echo "no summary (see the log in the state repository)"
           exit $code
 
+      - name: Publish the site to Vercel
+        if: ${{ !cancelled() && inputs.save }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_CLI: vercel@59.26.0
+        run: |
+          site="$RUNNER_TEMP/ta-screener"
+          logs="$GITHUB_WORKSPACE/state/logs"
+          python run.py --export-site "$site" > "$logs/export.json" 2> "$logs/export-stderr.txt" || { echo "export failed (see the state repository)"; exit 1; }
+          cat "$logs/export.json"
+          cd "$site"
+          started=$(date +%s)
+          npx --yes "$VERCEL_CLI" link --yes --project ta-screener --token "$VERCEL_TOKEN" > "$logs/vercel-link.txt" 2>&1
+          npx --yes "$VERCEL_CLI" deploy --prod --yes --token "$VERCEL_TOKEN" > deploy-url.txt 2> "$logs/vercel-deploy.txt"
+          code=$?
+          echo "deploy exit $code after $(( $(date +%s) - started )) s"
+          npx --yes "$VERCEL_CLI" inspect "$(tail -n 1 deploy-url.txt)" --token "$VERCEL_TOKEN" > "$logs/vercel-inspect.txt" 2>&1 || true
+          grep -ho 'https://[a-z0-9.-]*\.vercel\.app' "$logs/vercel-inspect.txt" deploy-url.txt | awk '{ print length, $0 }' | sort -n | head -n 1 | cut -d' ' -f2
+          exit $code
+
       - name: Save the state
         if: always()
         env:

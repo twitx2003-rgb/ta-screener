@@ -85,6 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-minutes", type=float, metavar="M",
                         help="With --update/--bars/--ci-tick: stop fetching bars after M minutes "
                              "(the rest are deferred to the next run)")
+    parser.add_argument("--export-site", metavar="DIR",
+                        help="Write the website as static files to DIR (for Vercel): every page, "
+                             "no live data")
     parser.add_argument("--quotes", action="store_true",
                         help="Fetch every stock's last price once from TradingView's screener "
                              "-> data/quotes/ (the website shows them and live pattern crossings)")
@@ -461,6 +464,14 @@ def _read_log_json(settings, name: str) -> dict:
         return {}
 
 
+def export_site(settings, out: str) -> int:
+    from tascreen.web.export import export_site as export
+
+    report = export(settings, Path(out))
+    print(json.dumps(report))
+    return 0
+
+
 def scan_symbol(settings, symbol: str) -> int:
     from tascreen.patterns.rules import load_rules
     from tascreen.scan import scan_symbol as scan_one
@@ -720,6 +731,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.ci_probe, lambda: ci_probe(settings, args.limit)),
         (args.ci_tick, lambda: ci_tick(settings, args.limit, args.max_minutes,
                                        with_channels=not args.no_channels)),
+        (args.export_site, lambda: export_site(settings, args.export_site)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),

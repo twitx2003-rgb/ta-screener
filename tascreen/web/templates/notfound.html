@@ -3,11 +3,13 @@
 {% block content %}
 <section class="panel" style="margin-top: 18px">
   <h1>לא נמצא</h1>
-  {% if kind == "channel" %}
+  {% if kind == "page" %}
+  <p style="margin-top: 8px">הדף הזה לא קיים באתר. אולי הקישור ישן: דפי המניות, למשל, נמצאים עכשיו בכתובת כמו <span class="mono" dir="ltr">/symbol/NASDAQ_AAPL/</span>.</p>
+  {% elif kind == "channel" %}
   <p style="margin-top: 8px">אין ערוץ בשם <span class="mono">{{ what }}</span>. רשימת הערוצים נמצאת בצד הדף.</p>
   {% else %}
-  <p style="margin-top: 8px">המניה <span class="mono">{{ what }}</span> לא נמצאת בסריקה האחרונה. הסימול צריך להיות בפורמט של TradingView, בורסה:סימול, למשל <a class="mono" href="/symbol/NASDAQ:AAPL">NASDAQ:AAPL</a>.</p>
+  <p style="margin-top: 8px">המניה <span class="mono">{{ what }}</span> לא נמצאת בסריקה האחרונה. הסימול צריך להיות בפורמט של TradingView, בורסה:סימול, למשל <a class="mono" href="{{ "NASDAQ:AAPL"|symbol_url }}">NASDAQ:AAPL</a>.</p>
   {% endif %}
-  <p style="margin-top: 8px"><a href="/">→ לדף הבית</a> · <a href="/screener">לסורק</a></p>
+  <p style="margin-top: 8px"><a href="/">→ לדף הבית</a> · <a href="{{ screener_link() }}">לסורק</a></p>
 </section>
 {% endblock %}
