@@ -46,7 +46,15 @@ jobs:
         env:
           STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
         run: |
-          git clone -q "https://x-access-token:${STATE_REPO_TOKEN}@github.com/${STATE_REPO}.git" state
+          if [ -z "$STATE_REPO_TOKEN" ]; then
+            echo "::error::The secret STATE_REPO_TOKEN is missing (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+          if ! git clone -q "https://x-access-token:${STATE_REPO_TOKEN}@github.com/${STATE_REPO}.git" state 2> clone-error.txt; then
+            sed -E 's#https://[^@]*@#https://***@#g' clone-error.txt | head -n 3
+            echo "::error::Cannot open ${STATE_REPO} with STATE_REPO_TOKEN: the key must be allowed that repository (Repository access) with Contents: Read and write"
+            exit 1
+          fi
           mkdir -p state/logs
           python - <<'EOF'
           import json, pathlib
@@ -65,6 +73,7 @@ jobs:
           CALLS: ${{ inputs.calls }}
         run: |
           set +e
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "::warning::The secret CLAUDE_CODE_OAUTH_TOKEN is missing"; fi
           python -u run.py --ci-probe --limit "$CALLS" > probe.json 2> state/logs/probe-stderr.txt
           code=$?
           cat probe.json
@@ -80,6 +89,8 @@ jobs:
           python -m tascreen.ci probe-site "$site"
           cd "$site"
           logs="$GITHUB_WORKSPACE/state/logs"
+          mkdir -p "$logs"
+          if [ -z "$VERCEL_TOKEN" ]; then echo "::error::The secret VERCEL_TOKEN is missing"; exit 1; fi
           started=$(date +%s)
           npx --yes "$VERCEL_CLI" link --yes --project ta-screener-probe --token "$VERCEL_TOKEN" > "$logs/vercel-link.txt" 2>&1
           npx --yes "$VERCEL_CLI" deploy --prod --yes --token "$VERCEL_TOKEN" > deploy-url.txt 2> "$logs/vercel-deploy.txt"
@@ -93,6 +104,7 @@ jobs:
       - name: Save the state (a refreshed token must not be lost)
         if: always()
         run: |
+          if [ ! -d state/.git ]; then echo "no state checkout: nothing to save"; exit 0; fi
           cd state
           git config user.name "ta-screener bot"
           git config user.email "actions@users.noreply.github.com"
