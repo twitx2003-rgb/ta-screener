@@ -27,6 +27,7 @@ def _analysis() -> Analysis:
         "zone_2.high": {"value": 100.5, "label": "גבול עליון", "unit": "$"},
         "ma.stack": {"value": "שורי (50 מעל 150 מעל 200, המחיר מעליהם)", "label": "סדר", "unit": ""},
         "volume.trend": {"value": "יציב", "label": "מגמת הנפח", "unit": ""},
+        "div_1.kind": {"value": "דובית", "label": "סוג הסטייה", "unit": ""},
         "fib.end_day": {"value": "2026-02-13", "label": "תאריך סוף התנועה", "unit": ""},
         "fib_618": {"value": 101.9, "label": "תיקון פיבונאצ'י 61.8%", "unit": "$"},
     }
@@ -38,9 +39,9 @@ def _analysis() -> Analysis:
     return a
 
 
-def _problem(text, cites):
+def _problem(text, cites, signal="yellow", part="levels"):
     facts = _analysis().facts
-    return part_problem({"part": "levels", "text": text, "cites": cites}, facts,
+    return part_problem({"part": part, "signal": signal, "text": text, "cites": cites}, facts,
                         allowed_numbers(facts, RULES), fact_dates(facts))
 
 
@@ -64,10 +65,21 @@ def test_bullish_and_trend_words_need_a_fact_that_says_so():
     assert "falling trend" in _problem("המניה במגמה יורדת.", ["volume.trend"])
 
 
+def test_the_light_must_not_contradict_the_text():
+    assert _problem("התמונה שורית: הממוצעים מסודרים.", ["ma.stack"], "green") is None
+    assert "green light on a bearish" in _problem("סטייה דובית במומנטום.", ["div_1.kind"], "green")
+    assert _problem("סטייה דובית במומנטום.", ["div_1.kind"], "red") is None
+    assert "red light on a bullish" in _problem("התמונה שורית.", ["ma.stack"], "red")
+    assert "no light" in _problem("התנגדות ב-110.", ["zone_1.high"], None)
+    # the scenarios' lights are fixed: up is green, down is red, whatever the model sent
+    assert _problem("אם תהיה סגירה מעל 110, ההתנגדות תיפרץ.", ["zone_1.high"], "red", "up") is None
+
+
 def _parts(**texts):
     cites = {"headline": ["close"], "levels": ["zone_1.low", "zone_2.high"], "up": ["zone_1.high"],
              "down": ["zone_2.low"], "volume": ["volume.trend"]}
-    return {"parts": [{"part": k, "text": v, "cites": cites[k]} for k, v in texts.items()]}
+    return {"parts": [{"part": k, "signal": "yellow", "text": v, "cites": cites[k]}
+                      for k, v in texts.items()]}
 
 
 GOOD = dict(headline="המחיר 104.2, בין תמיכה להתנגדות.", levels="התנגדות 108.5-110, תמיכה 99-100.5.",
@@ -93,13 +105,17 @@ def test_what_fails_twice_is_left_out_and_the_message_says_so():
     message = telegram_html(written)
     assert "הושמט: תרחיש יורד" in message and "לא ייעוץ השקעות" in message
     assert "למכור" not in message
+    lines = message.split("\n")
+    assert lines[2] == "🟡 " + GOOD["headline"] and "🟡 <b>תמיכה והתנגדות:</b> " + GOOD["levels"] in lines
+    assert "🟢 <b>תרחיש עולה:</b> " + GOOD["up"] in lines          # yellow sent, green shown
 
 
 def test_at_most_two_optional_sections_and_they_are_not_retried():
     answer = _parts(**GOOD, volume="הנפח יציב.")
-    answer["parts"][4:4] = [{"part": "trend", "text": "סדר הממוצעים שורי.", "cites": ["ma.stack"]},
-                            {"part": "fibonacci", "text": "פיבונאצ'י 61.8% ב-101.9.", "cites": ["fib_618"]},
-                            {"part": "momentum", "text": "המומנטום שורי.", "cites": ["close"]}]
+    answer["parts"][4:4] = [
+        {"part": "trend", "signal": "green", "text": "סדר הממוצעים שורי.", "cites": ["ma.stack"]},
+        {"part": "fibonacci", "signal": "yellow", "text": "פיבונאצ'י 61.8% ב-101.9.", "cites": ["fib_618"]},
+        {"part": "momentum", "signal": "green", "text": "המומנטום שורי.", "cites": ["close"]}]
     llm = SyntheticLLM(lambda s, u, schema: answer)
     written = write(_analysis(), llm, rules=RULES)
     optional = [p["part"] for p in written["parts"] if p["part"] not in ("headline", "levels", "up", "down")]
@@ -113,7 +129,7 @@ def test_the_message_is_escaped_and_fits_one_telegram_message():
     written = {"symbol": "NASDAQ:TEST", "last_day": "2026-03-20", "parts": parts, "omitted": []}
     message = telegram_html(written)
     assert len(message) <= 4096 and "&lt;b&gt;" in message
-    kept = [k for k in PARTS if f"<b>{PARTS[k]}</b>" in message]
+    kept = [k for k in PARTS if f"<b>{PARTS[k]}:</b>" in message]
     assert {"levels", "up", "down"} <= set(kept) and "momentum" not in kept
 
 

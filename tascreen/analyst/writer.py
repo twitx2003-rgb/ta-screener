@@ -35,11 +35,14 @@ PARTS = {"headline": "בקצרה", "levels": "תמיכה והתנגדות", "tre
          "fibonacci": "פיבונאצ'י", "volume": "נפח", "momentum": "מומנטום", "patterns": "תבניות",
          "up": "תרחיש עולה", "down": "תרחיש יורד"}
 REQUIRED = ("headline", "levels", "up", "down")
-# Owner's choice after the first live text (2026-09-24): short and simple. The four
-# required sections, plus at most two others that matter now, one sentence each.
-MAX_CHARS = {"headline": 200, "levels": 300, "up": 250, "down": 250}
-DEFAULT_MAX = 180
+# Owner's choices after the first live texts (2026-09-24): short and simple, then shorter
+# still, with a light by each section. The four required sections, plus at most two
+# others that matter now; one short sentence each.
+MAX_CHARS = {"headline": 150, "levels": 220, "up": 170, "down": 170}
+DEFAULT_MAX = 130
 MAX_OPTIONAL = 2
+LIGHTS = {"green": "🟢", "red": "🔴", "yellow": "🟡"}
+FIXED_LIGHT = {"up": "green", "down": "red"}
 EFFORT = "high"
 
 INTERNAL_ID = re.compile(r"\b(?:zone|tl|div|pat)_\d+\b|\bfib(?:_ext)?_\d+\b|\b[a-z]+[0-9]*\.[a-z_]+\b")
@@ -67,20 +70,26 @@ These rules are checked by a program; a section that breaks one is thrown away:
 8. Never write a fact key or id in the text (zone_2, tl_1, fib_618, ma.stack): name things in
    Hebrew ("אזור התמיכה", "קו ההתנגדות").
 
-Keep it short and simple: the whole analysis is read in under a minute. Sections ("part"),
-at most one of each:
-- headline (required, 1-2 short sentences, <= 200 characters): the picture now: where the
-  price stands between the nearest support and the nearest resistance.
-- levels (required, 1-2 sentences, <= 300 characters): the support and resistance zones
-  drawn on the chart, nearest first.
-- up (required, one sentence, <= 250 characters): the upward scenario, conditional: which
-  close would start it, the next level on the way, and which level would cancel it.
-- down (required, one sentence, <= 250 characters): the same, downward.
+Keep it very short: the whole analysis is read in half a minute. ONE short sentence per
+section, at most one of each:
+- headline (required, <= 150 characters): the picture now: where the price stands between
+  the nearest support and the nearest resistance.
+- levels (required, <= 220 characters): the nearest support and resistance zones on the chart.
+- up (required, <= 170 characters): conditional: which close would start it and the next
+  level on the way; it may name the level that cancels it.
+- down (required, <= 170 characters): the same, downward.
 - At most TWO of these optional sections, only when they change the picture now, the more
-  important first, ONE short sentence each (<= 180 characters):
-  trend (the moving averages, a trendline), fibonacci (only if the chart shows Fibonacci
-  lines or a zone carries a Fibonacci note), volume (the profile, the volume trend),
-  momentum (RSI, MACD, a divergence), patterns (only if the brief has pat_* facts).
+  important first (<= 130 characters each): trend (the moving averages, a trendline),
+  fibonacci (only if the chart shows Fibonacci lines or a zone carries a Fibonacci note),
+  volume (the profile, the volume trend), momentum (RSI, MACD, a divergence), patterns
+  (only if the brief has pat_* facts).
+
+Each section has a light ("signal") shown next to it: "green" when the facts it cites lean
+positive for the price (price above the averages, MACD above its signal line, a bullish
+divergence or pattern, the price holding above support), "red" when they lean negative,
+"yellow" when they are neutral or mixed. It describes the data, it is not advice. A section
+whose text says bearish (דובי) cannot be green, one that says bullish (שורי) cannot be red.
+up is always green and down always red.
 
 "chart" in the brief lists exactly what the reader sees on the chart. Something that is not
 drawn (a trendline, a divergence, a pattern, the averages) gets at most one short sentence.
@@ -122,8 +131,10 @@ def user_prompt(analysis: Analysis) -> str:
 
 
 def response_schema() -> dict:
-    part = {"type": "object", "additionalProperties": False, "required": ["part", "text", "cites"],
+    part = {"type": "object", "additionalProperties": False,
+            "required": ["part", "signal", "text", "cites"],
             "properties": {"part": {"type": "string", "enum": list(PARTS)},
+                           "signal": {"type": "string", "enum": list(LIGHTS)},
                            "text": {"type": "string"},
                            "cites": {"type": "array", "items": {"type": "string"}}}}
     return {"type": "object", "additionalProperties": False, "required": ["parts"],
@@ -216,7 +227,17 @@ def part_problem(part: dict, facts: dict[str, dict], numbers: list[float],
     words = banned(text)
     if words:
         return f"advice or forecast wording: {words[:3]}"
-    return direction_problem(text, [facts[c] for c in cites])
+    problem = direction_problem(text, [facts[c] for c in cites])
+    if problem or name in FIXED_LIGHT:
+        return problem
+    light = part.get("signal")
+    if light not in LIGHTS:
+        return f"no light (one of {', '.join(LIGHTS)})"
+    if light == "green" and _has_word(text, BEAR) and not _has_word(text, BULL):
+        return "a green light on a bearish text"
+    if light == "red" and _has_word(text, BULL) and not _has_word(text, BEAR):
+        return "a red light on a bullish text"
+    return None
 
 
 def check_parts(raw: dict, facts: dict[str, dict], rules: dict[str, Any]) -> tuple[dict[str, dict], list[dict]]:
@@ -233,7 +254,8 @@ def check_parts(raw: dict, facts: dict[str, dict], rules: dict[str, Any]) -> tup
         if problem:
             dropped.append({"part": name, "reason": problem, "text": str(part.get("text", ""))[:300]})
             continue
-        kept[name] = {"part": name, "text": finish_text(part["text"], live=False),
+        kept[name] = {"part": name, "signal": FIXED_LIGHT.get(name, part.get("signal")),
+                      "text": finish_text(part["text"], live=False),
                       "cites": [c for c in part["cites"] if isinstance(c, str)]}
     return kept, dropped
 
@@ -286,12 +308,18 @@ def telegram_html(written: dict[str, Any]) -> str:
     ticker = written["symbol"].split(":")[-1]
     parts = list(written["parts"])
     while True:
-        lines = [f"<b>ניתוח טכני · {html.escape(ticker)} · {_day(written['last_day'])}</b>", ""]
+        lines = [f"<b>ניתוח טכני · {html.escape(ticker)} · {_day(written['last_day'])}</b>"]
+        group = None
         for part in parts:
-            if part["part"] == "headline":
-                lines += [html.escape(part["text"]), ""]
-            else:
-                lines += [f"<b>{html.escape(part['title'])}</b>", html.escape(part["text"]), ""]
+            light = LIGHTS.get(part.get("signal"), "")
+            now = ("head" if part["part"] == "headline" else
+                   "scenario" if part["part"] in FIXED_LIGHT else "body")
+            if now != group:
+                lines.append("")                 # a blank line between the three groups
+                group = now
+            title = "" if now == "head" else f"<b>{html.escape(part['title'])}:</b> "
+            lines.append(f"{light} {title}{html.escape(part['text'])}".strip())
+        lines.append("")
         if written["omitted"]:
             names = ", ".join(PARTS[n] for n in written["omitted"])
             lines += [html.escape(f"(הושמט: {names}. הטקסט לא עבר את הבדיקה מול הנתונים.)"), ""]

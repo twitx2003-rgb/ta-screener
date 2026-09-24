@@ -16,7 +16,7 @@ NOW = datetime(2026, 3, 20, 21, 5, 7, tzinfo=timezone.utc)
 
 
 def _answer(system, user, schema):
-    return {"parts": [{"part": p, "text": "בדיקה.", "cites": ["close"]}
+    return {"parts": [{"part": p, "signal": "yellow", "text": "בדיקה.", "cites": ["close"]}
                       for p in ("headline", "levels", "up", "down")]}
 
 
