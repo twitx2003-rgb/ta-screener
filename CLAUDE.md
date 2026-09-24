@@ -294,6 +294,12 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     `run.py --setup-telegram` once (hidden token, finds the chat, test message, saves
     ~/.ta-screener/telegram.json); run.yml sends a Hebrew summary after each run
     (`--ci-notify`). Messages carry counts and links only.
+  - **Stage 3 cut-over (2026-09-24):** the owner stopped `--live` on the PC; the PC's
+    ledger (with the backfill) and channels were copied to the state repo
+    (`deploy/seed_state.py`); run.yml got its schedule (21:40 UTC Mon-Fri, catch-ups
+    01:10 and 05:10 UTC Tue-Sat; a scheduled run writes channels and saves). The PC
+    no longer runs anything. Site: https://ta-screener.vercel.app (no live prices
+    until stage 4; the screener shows the first 500 rows until stage 5).
   - `config.local.yaml` (gitignored) overrides single keys on one machine; the runner
     writes one (paths into the state checkout, `live.update_after_close: false`).
 - **Professional agents plan (owner-approved 2026-09-24; stop for review after each

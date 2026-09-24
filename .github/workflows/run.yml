@@ -4,10 +4,15 @@
 # (TradingView sign-in, data, full logs) lives in the PRIVATE repository
 # twitx2003-rgb/ta-screener-state. This repository is public, and so is this log: it
 # shows only logs/ci_summary.json (dates, counts, error class names).
-# Stage 1: started by hand; a schedule is added when the home computer stops (stage 3).
+# Scheduled since the home computer stopped (stage 3, 2026-09-24). Several start times:
+# GitHub delays or drops scheduled runs, and each run only does what is still due.
 name: run
 
 on:
+  schedule:
+    - cron: "40 21 * * 1-5"      # after the close (16:15 New York), summer and winter
+    - cron: "10 1 * * 2-6"       # catch-ups: finish an update that was cut short
+    - cron: "10 5 * * 2-6"
   workflow_dispatch:
     inputs:
       limit:
@@ -61,7 +66,7 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           LIMIT: ${{ inputs.limit }}
-          CHANNELS: ${{ inputs.channels }}
+          CHANNELS: ${{ github.event_name == 'schedule' || inputs.channels }}
         run: |
           set +e
           args=(--ci-tick --max-minutes 300)
@@ -75,7 +80,7 @@ jobs:
           exit $code
 
       - name: Publish the site to Vercel
-        if: ${{ !cancelled() && inputs.save }}
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.save) }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_CLI: vercel@59.26.0
@@ -105,7 +110,7 @@ jobs:
       - name: Save the state
         if: always()
         env:
-          SAVE: ${{ inputs.save }}
+          SAVE: ${{ github.event_name == 'schedule' || inputs.save }}
         run: |
           if [ ! -d state/.git ]; then echo "no state checkout: nothing to save"; exit 0; fi
           if [ "$SAVE" = "true" ]; then bash .github/state.sh save; else bash .github/state.sh save-token; fi
