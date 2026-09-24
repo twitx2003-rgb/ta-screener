@@ -76,6 +76,15 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Stage-0 check on a GitHub runner: TradingView (forced token refresh, "
                              "a screener pass, --limit N get-ohlcv calls, default 300) and one "
                              "Claude call; prints counts and timings only (public logs)")
+    parser.add_argument("--ci-tick", action="store_true",
+                        help="GitHub Actions: do whatever is due now (the daily update and the "
+                             "channels after a session closes); logs/ci_summary.json gets counts "
+                             "only, for the public log")
+    parser.add_argument("--no-channels", action="store_true",
+                        help="With --ci-tick: skip the channels (a test run)")
+    parser.add_argument("--max-minutes", type=float, metavar="M",
+                        help="With --update/--bars/--ci-tick: stop fetching bars after M minutes "
+                             "(the rest are deferred to the next run)")
     parser.add_argument("--quotes", action="store_true",
                         help="Fetch every stock's last price once from TradingView's screener "
                              "-> data/quotes/ (the website shows them and live pattern crossings)")
@@ -388,6 +397,70 @@ def ci_probe(settings, calls: int | None) -> int:
     return 0 if report["tradingview"].get("ok") and report["claude"].get("ok") else 1
 
 
+def ci_tick(settings, limit: int | None, max_minutes: float | None, with_channels: bool) -> int:
+    """What is due now on a GitHub runner. The daily update runs when the last completed
+    session has no complete update yet (a run cut short, e.g. by a throttled TradingView,
+    is finished by the next one); then the channels. The public log shows only
+    logs/ci_summary.json: dates, counts and error class names."""
+    from datetime import datetime, timedelta, timezone
+
+    from tascreen.market_hours import next_open
+    from tascreen.store import Store
+
+    started = datetime.now(timezone.utc)
+    store = Store(settings.data_dir)
+    target = _target(settings)
+    state = store.read_live_state()
+    due = state.get("daily_update_for") != target.isoformat() or not state.get("complete", True)
+    summary: dict = {"session": target.isoformat(), "due": due}
+    code = 0
+    if due:
+        deadline = next_open(started, market_tz=settings.market.timezone) - timedelta(minutes=10)
+        if max_minutes:
+            deadline = min(deadline, started + timedelta(minutes=max_minutes))
+        try:
+            code = update(settings, limit, stop_at=deadline)
+        except ScreenerError as exc:
+            code, summary["update_error"] = 1, type(exc).__name__
+        last = _read_log_json(settings, "bars_last_run.json")
+        summary["bars"] = last.get("counts", {})
+        deferred = int(summary["bars"].get("deferred", 0))
+        scans = store.scan_days()
+        if scans and scans[-1] == target:
+            scan_summary = store.read_scan(target)[2]
+            summary["scan"] = {k: scan_summary.get(k) for k in
+                               ("symbols_in_universe", "symbols_scanned", "detections")}
+        summary["outcomes"] = store.read_outcomes_meta().get("updated_at")
+        complete = code == 0 and deferred == 0 and bool(scans) and scans[-1] == target
+        if with_channels and settings.channels.enabled and scans and scans[-1] == target:
+            try:
+                channels(settings)
+            except ScreenerError as exc:
+                summary["channels_error"] = type(exc).__name__
+            report = _read_log_json(settings, "channels_last_run.json").get("channels", {})
+            summary["channels"] = {
+                "written": sum(1 for v in report.values() if isinstance(v, dict)),
+                "already": sum(1 for v in report.values() if v == "already written"),
+                "failed": sum(1 for v in report.values() if str(v).startswith("failed")),
+                "skipped": sum(1 for v in report.values() if str(v).startswith("skipped"))}
+        store.write_live_state({"daily_update_for": target.isoformat(), "complete": complete,
+                                "exit_code": code,
+                                "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+        summary["complete"] = complete
+    summary["seconds"] = round((datetime.now(timezone.utc) - started).total_seconds())
+    settings.log_dir.mkdir(parents=True, exist_ok=True)
+    (settings.log_dir / "ci_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return 0 if not due or summary.get("complete") else 1
+
+
+def _read_log_json(settings, name: str) -> dict:
+    path = settings.log_dir / name
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def scan_symbol(settings, symbol: str) -> int:
     from tascreen.patterns.rules import load_rules
     from tascreen.scan import scan_symbol as scan_one
@@ -617,6 +690,12 @@ def update(settings, limit: int | None, stop_at=None) -> int:
     return max(bars_code, scan(settings))
 
 
+def _stop_at(max_minutes: float | None):
+    from datetime import datetime, timedelta, timezone
+
+    return datetime.now(timezone.utc) + timedelta(minutes=max_minutes) if max_minutes else None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = load_settings(Path(args.config) if args.config else None)
@@ -631,14 +710,16 @@ def main(argv: list[str] | None = None) -> int:
         (args.tradingview_call, lambda: tradingview_call(settings, args.tradingview_call)),
         (args.discover is not None, lambda: discover(settings, args.discover)),
         (args.universe, lambda: universe(settings)),
-        (args.bars, lambda: bars(settings, args.limit)),
-        (args.update, lambda: update(settings, args.limit)),
+        (args.bars, lambda: bars(settings, args.limit, _stop_at(args.max_minutes))),
+        (args.update, lambda: update(settings, args.limit, _stop_at(args.max_minutes))),
         (args.check_bars, lambda: check_bars(settings)),
         (args.scan, lambda: scan(settings)),
         (args.scan_symbol, lambda: scan_symbol(settings, args.scan_symbol.strip().upper())),
         (args.outcomes, lambda: outcomes(settings, rebuild=args.rebuild)),
         (args.backfill_outcomes, lambda: backfill_outcomes(settings, args.limit)),
         (args.ci_probe, lambda: ci_probe(settings, args.limit)),
+        (args.ci_tick, lambda: ci_tick(settings, args.limit, args.max_minutes,
+                                       with_channels=not args.no_channels)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),

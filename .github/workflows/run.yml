@@ -1,0 +1,82 @@
+# The pipeline on GitHub Actions (owner-approved plan, 2026-09-24: GitHub Actions + Vercel).
+# Each run does what is due now (run.py --ci-tick): after a session closes, the daily
+# update (universe, bars, scan, outcome ledger) and the channels. The working state
+# (TradingView sign-in, data, full logs) lives in the PRIVATE repository
+# twitx2003-rgb/ta-screener-state. This repository is public, and so is this log: it
+# shows only logs/ci_summary.json (dates, counts, error class names).
+# Stage 1: started by hand; a schedule is added when the home computer stops (stage 3).
+name: run
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Only the N largest stocks (a test run; empty = all)"
+        default: ""
+      channels:
+        description: "Write the channels (uses the Claude subscription)"
+        type: boolean
+        default: false
+      save:
+        description: "Save the data to the state repository (off = a test: only the token is kept)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: state            # one run at a time uses the state and the TradingView token
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      STATE_REPO: twitx2003-rgb/ta-screener-state
+      STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+      TA_TV_TOKEN_PATH: ${{ github.workspace }}/state/tv_tokens.json
+      TA_STATE_DIR: ${{ github.workspace }}/state
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -q -r requirements.txt
+          curl -fsSL https://claude.ai/install.sh | bash > /dev/null 2>&1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Restore the private state
+        run: bash .github/state.sh restore
+
+      - name: Do what is due
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          LIMIT: ${{ inputs.limit }}
+          CHANNELS: ${{ inputs.channels }}
+        run: |
+          set +e
+          args=(--ci-tick --max-minutes 300)
+          if [ -n "$LIMIT" ]; then args+=(--limit "$LIMIT"); fi
+          if [ "$CHANNELS" != "true" ]; then args+=(--no-channels); fi
+          python -u run.py "${args[@]}" > "state/logs/tick-$(date -u +%Y%m%dT%H%M).log" 2>&1
+          code=$?
+          python .github/mask_tokens.py state/tv_tokens.json
+          cat state/logs/ci_summary.json 2> /dev/null || echo "no summary (see the log in the state repository)"
+          exit $code
+
+      - name: Save the state
+        if: always()
+        env:
+          SAVE: ${{ inputs.save }}
+        run: |
+          if [ ! -d state/.git ]; then echo "no state checkout: nothing to save"; exit 0; fi
+          if [ "$SAVE" = "true" ]; then bash .github/state.sh save; else bash .github/state.sh save-token; fi

@@ -130,3 +130,75 @@ def test_the_vercel_probe_site_and_its_checks(tmp_path):
         return 200, (tmp_path / name).read_text(encoding="utf-8")
 
     assert all(r["ok"] for r in check_site("https://example.org", fetch))
+
+
+# ------------------------------------------------------------------ the tick
+def _tick_setup(tmp_path, monkeypatch, deferred=0):
+    import run
+    from test_web_live import _setup
+
+    settings, store, day = _setup(tmp_path)
+    calls = {"update": 0, "channels": 0}
+
+    def fake_update(s, limit, stop_at=None):
+        calls["update"] += 1
+        s.log_dir.mkdir(parents=True, exist_ok=True)
+        (s.log_dir / "bars_last_run.json").write_text(
+            json.dumps({"counts": {"updated": 2, **({"deferred": deferred} if deferred else {})}}),
+            encoding="utf-8")
+        return 0
+
+    def fake_channels(s, force=False, writer=None):
+        calls["channels"] += 1
+        (s.log_dir / "channels_last_run.json").write_text(
+            json.dumps({"channels": {"general": {"threads": 1}, "double_top": "failed: x"}}),
+            encoding="utf-8")
+        return 1
+
+    monkeypatch.setattr(run, "update", fake_update)
+    monkeypatch.setattr(run, "channels", fake_channels)
+    monkeypatch.setattr(run, "_target", lambda s: day)
+    return run, settings, store, day, calls
+
+
+def test_the_tick_runs_the_daily_update_once_per_session(tmp_path, monkeypatch):
+    run, settings, store, day, calls = _tick_setup(tmp_path, monkeypatch)
+    assert run.ci_tick(settings, None, None, with_channels=True) == 0
+    summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
+    assert summary["due"] and summary["complete"] and summary["session"] == day.isoformat()
+    assert summary["channels"] == {"written": 1, "already": 0, "failed": 1, "skipped": 0}
+    assert summary["scan"]["symbols_scanned"] == 2
+    assert run.ci_tick(settings, None, None, with_channels=True) == 0       # nothing due now
+    assert calls == {"update": 1, "channels": 1}
+    text = (settings.log_dir / "ci_summary.json").read_text(encoding="utf-8")
+    assert "NYSE:HS" not in text and "close" not in text                    # counts only
+
+
+def test_a_cut_short_update_is_finished_by_the_next_tick(tmp_path, monkeypatch):
+    run, settings, store, day, calls = _tick_setup(tmp_path, monkeypatch, deferred=5)
+    assert run.ci_tick(settings, None, 30, with_channels=False) == 1
+    assert store.read_live_state()["complete"] is False
+    run.ci_tick(settings, None, 30, with_channels=False)
+    assert calls == {"update": 2, "channels": 0}
+
+
+def test_a_refreshed_token_is_pushed_to_the_state_repo(tmp_path, monkeypatch):
+    import subprocess
+
+    from mcp.shared.auth import OAuthToken
+
+    def git(*args, cwd=None):
+        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+    origin, state = tmp_path / "origin.git", tmp_path / "state"
+    git("init", "-q", "--bare", "-b", "main", str(origin))
+    git("clone", "-q", str(origin), str(state))
+    git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty",
+        "-m", "seed", cwd=state)
+    git("push", "-q", "origin", "HEAD:main", cwd=state)
+    git("config", "user.name", "t", cwd=state)
+    git("config", "user.email", "t@example.invalid", cwd=state)
+    monkeypatch.setenv("TA_STATE_DIR", str(state))
+    storage = FileTokenStorage(state / "tv_tokens.json")
+    asyncio.run(storage.set_tokens(OAuthToken(access_token="a", token_type="Bearer", refresh_token="r")))
+    assert "tv_tokens.json" in git("ls-tree", "-r", "--name-only", "main", cwd=origin)

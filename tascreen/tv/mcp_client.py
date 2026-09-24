@@ -80,6 +80,28 @@ logging.getLogger("mcp.client.auth.oauth2").addFilter(_HideExpectedSignInError()
 
 
 # --------------------------------------------------------------------------- tokens
+def push_token_file(path: Path) -> None:
+    """On GitHub Actions: commit and push a just-refreshed token file to the private
+    state repository at once (TA_STATE_DIR is its checkout). TradingView replaces the
+    refresh token on every refresh (probe, 2026-09-24), so a run that dies before its
+    final save would otherwise lose the only valid one. Never raises."""
+    state = os.environ.get("TA_STATE_DIR")
+    if not state:
+        return
+    import subprocess
+
+    def git(*args: str, check: bool = True) -> None:
+        subprocess.run(["git", "-C", state, *args], check=check, capture_output=True, timeout=90)
+
+    try:
+        git("add", "--", str(Path(path).resolve()))
+        git("commit", "-q", "-m", "token refreshed", check=False)    # nothing new: fine
+        git("push", "-q", "origin", "HEAD:main")
+        log.info("refreshed TradingView token pushed to the state repository")
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not push the refreshed token: %s", type(exc).__name__)
+
+
 class FileTokenStorage:
     """Persists OAuth tokens and the registered client between runs.
 
@@ -126,6 +148,7 @@ class FileTokenStorage:
     async def set_tokens(self, tokens) -> None:
         self._write("tokens", tokens.model_dump(mode="json", exclude_none=True))
         self._write("tokens_saved_at", time.time())
+        push_token_file(self.path)
 
     def expires_at(self) -> float | None:
         """When the stored access token expires (unix time), or None if unknown.
