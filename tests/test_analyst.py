@@ -113,5 +113,56 @@ def test_the_pine_script_draws_only_data_it_was_given():
     used = {int(n) for n in re.findall(r"array\.get\(anchorBars, (\d+)\)", script)}
     assert used and max(used) < len(days)
     assert "nan" not in script.lower() and script.count("(") == script.count(")")
-    assert "box.new" in script and "line.new" in script and "label.new" in script
+    assert "box.new" in script and "label.new" in script
+    assert "showZones = input.bool(true" in script and "ta.sma" not in script
+    assert script.count("if showZones and") <= 4                        # the simple view only
     assert _pine_string('a "b" \\ c\nd') == '"a \\"b\\" \\\\ c d"'
+    assert _pine_string("one", 'two "2"') == '"one\\ntwo \\"2\\""'          # Pine's newline escape
+    assert "\n" not in _pine_string("a\nb", "c\r\nd")
+
+
+# ------------------------------------------------------------------ the simple view
+def _view_case(close, fib_end=120.0):
+    from tascreen.analyst.facts import Analysis
+
+    a = Analysis("TEST:SYN", "2026-01-30", 0)
+    a.facts = {"close": {"value": close}, "atr": {"value": 2.0}}
+
+    def zone(lo, hi, kind):
+        return {"type": "zone", "kind": kind, "low": lo, "high": hi,
+                "first_day": "2026-01-02", "last_day": "2026-01-20", "touches": 2}
+
+    span = fib_end - 90.0
+    a.drawings = {"zone_1": zone(129, 130, "resistance"), "zone_2": zone(119, 120, "resistance"),
+                  "zone_3": zone(112, 113, "resistance"), "zone_4": zone(104.5, 105.5, "support"),
+                  "zone_5": zone(99, 100, "support"), "zone_6": zone(90, 91, "support"),
+                  "fib": {"type": "fib", "direction": "up", "start_day": "2026-01-05",
+                          "end_day": "2026-01-15", "start": 90.0, "end": fib_end,
+                          "levels": {"fib_382": fib_end - 0.382 * span, "fib_500": fib_end - 0.5 * span,
+                                     "fib_618": fib_end - 0.618 * span, "fib_ext_1618": 90 + 1.618 * span}},
+                  "vp": {"type": "profile", "edges": [90.0, 100.0, 110.0, 120.0],
+                         "volume": [1.0, 3.0, 1.0], "poc": 105.0, "val": 100.0, "vah": 110.0},
+                  "tl_1": {"type": "line"}, "ma": {"type": "ma", "periods": [50]}}
+    return a
+
+
+def test_the_simple_view_keeps_the_nearest_levels_and_joins_the_ones_that_meet():
+    from tascreen.analyst.view import simple_view
+
+    view = simple_view(_view_case(108.0), RULES)
+    assert {k for k, v in view.items() if v["type"] == "zone"} == {"zone_2", "zone_3", "zone_4", "zone_5"}
+    assert "tl_1" not in view and "ma" not in view
+    fib = view["fib"]                                   # 108 is 40% back into the 90 -> 120 move
+    assert fib["show"] and "fib_ext_1618" not in fib["levels"]
+    assert view["zone_4"]["notes"] == ["fib_500", "poc"]    # 105 is on the 104.5-105.5 zone
+    assert set(fib["levels"]) == {"fib_382", "fib_618"}
+    assert view["vp"]["show"] and not view["vp"]["poc_label"]
+
+
+def test_fibonacci_and_the_profile_stay_off_when_they_do_not_matter_now():
+    from tascreen.analyst.view import simple_view
+
+    view = simple_view(_view_case(128.0), RULES)            # above the swing, far from the POC
+    assert not view["fib"]["show"] and not view["vp"]["show"]
+    assert all(not v.get("notes") for v in view.values())
+    assert set(view["fib"]["levels"]) == {"fib_382", "fib_500", "fib_618"}

@@ -1,6 +1,7 @@
-"""The analyst's chart (SVG): candles, volume, moving averages, and the drawings the
-analysis chose (zones, trendlines, the Fibonacci ladder, divergences, patterns), with the
-volume-by-price profile in a panel beside the price axis. Every coordinate comes from the
+"""The analyst's chart (SVG): candles and volume with, by default, the simple view
+(view.py: the nearest zones, and Fibonacci and the volume-by-price profile when they
+matter; the profile sits in a panel beside the price axis). A list of drawing ids draws
+those instead (trendlines, divergences, patterns and averages too). Every coordinate comes from the
 Analysis (facts.py); the colours are the site's night-violet palette (chart_svg.py).
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ import pandas as pd
 from ..channels.chart_svg import ANN, INK, MONO, SANS
 from ..indicators import sma
 from .facts import Analysis
+from .view import note_parts, simple_view
 
 W, H = 1040, 560
 LEFT, AXIS, PROFILE, TOP, BOTTOM = 14, 66, 96, 48, 28
@@ -66,6 +68,7 @@ class _Tags:
     def add(self, x: float, y: float, text: str, color: str, anchor: str = "start") -> None:
         """A label in the gutter right of the candles (`x` only picks the gutter's side)."""
         width = 16 + 6.9 * len(text.replace("\u2066", "").replace("\u2069", ""))
+        text = f"\u2067{text}\u2069"             # a right-to-left label, whatever it starts or ends with
         left = self.plot.xc + 8 if anchor != "middle" else min(max(x - width / 2, self.plot.x0 + 2),
                                                                     self.plot.xc - width - 4)
         lowest, highest = self.plot.y0 + 11, self.plot.y1 - 11
@@ -91,15 +94,12 @@ class _Tags:
                         f'text-anchor="middle">{_esc(text)}</text></g>')
 
 
-def default_drawings(analysis: Analysis) -> list[str]:
-    """Everything worth drawing when no choice was made."""
-    order = ("zone_", "tl_", "fib", "div_", "pat_", "vp", "ma")
-    return [key for prefix in order for key in analysis.drawings if key.startswith(prefix)]
-
-
 def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = None, *,
            title: str | None = None) -> str:
-    wanted = [d for d in (drawings or default_drawings(analysis)) if d in analysis.drawings]
+    if drawings is None:
+        items = {k: v for k, v in simple_view(analysis).items() if v.get("show", True)}
+    else:
+        items = {k: analysis.drawings[k] for k in drawings if k in analysis.drawings}
     bars = bars.reset_index(drop=True)
     last = len(bars) - 1
     first = max(0, len(bars) - SHOW_BARS)
@@ -117,8 +117,7 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
             return False
 
     levels = []
-    for key in wanted:
-        item = analysis.drawings[key]
+    for item in items.values():
         if item["type"] == "zone":
             levels += [item["low"], item["high"]]
         elif item["type"] == "fib":
@@ -151,8 +150,7 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                f'font-size="12" text-anchor="end">1D · {pd.Timestamp(days[last]):%d/%m/%Y}</text>')
 
     # zones first (behind the candles)
-    for key in wanted:
-        item = analysis.drawings[key]
+    for item in items.values():
         if item["type"] != "zone" or not (keep(item["low"]) and keep(item["high"])):
             continue
         color = ZONE[item["kind"]]
@@ -162,7 +160,10 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                    f'height="{max(2.0, y_b - y_a):.1f}" fill="{color}" fill-opacity="0.13" '
                    f'stroke="{color}" stroke-opacity="0.45" stroke-dasharray="4 3"/>')
         name = "תמיכה" if item["kind"] == "support" else "התנגדות"
-        tags.add(right, (y_a + y_b) / 2, f"{name} {_ltr(_fmt(item['low']) + '–' + _fmt(item['high']))}", color)
+        notes = "".join(f" · {word}" + (f" {_ltr(number)}" if number else "")
+                        for word, number in map(note_parts, item.get("notes", [])))
+        tags.add(right, (y_a + y_b) / 2,
+                 f"{name} {_ltr(_fmt(item['low']) + '–' + _fmt(item['high']))}{notes}", color)
 
     # volume and candles
     vmax = float(win["volume"].max() or 1)
@@ -180,8 +181,8 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
         out.append(f'<rect x="{x - body / 2:.1f}" y="{top:.1f}" width="{body:.1f}" '
                    f'height="{max(1.0, bot - top):.1f}" fill="{color}"/>')
 
-    if "ma" in wanted:
-        for n in analysis.drawings["ma"]["periods"]:
+    if "ma" in items:
+        for n in items["ma"]["periods"]:
             values = sma(bars["close"], n).iloc[first:]
             pts = [f"{plot.x(i):.1f},{plot.y(v):.1f}" for i, v in zip(range(first, last + 1), values)
                    if math.isfinite(v) and plot.inside(v)]
@@ -189,8 +190,7 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                 out.append(f'<polyline points="{" ".join(pts)}" fill="none" stroke="{MA_COLORS.get(n, INK["axis"])}" '
                            f'stroke-width="1.4" stroke-opacity="0.85"/>')
 
-    for key in wanted:
-        item = analysis.drawings[key]
+    for item in items.values():
         kind = item["type"]
         if kind == "line":
             i1 = index.get(item["day1"], first)
@@ -206,9 +206,10 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
         elif kind == "fib":
             a_i = max(first, index.get(item["start_day"], first))
             b_i = index.get(item["end_day"], last)
-            out.append(f'<line class="ann" x1="{plot.x(a_i):.1f}" y1="{plot.y(item["start"]):.1f}" '
-                       f'x2="{plot.x(b_i):.1f}" y2="{plot.y(item["end"]):.1f}" stroke="{ANN["line"]}" '
-                       f'stroke-width="1.2" stroke-dasharray="2 4"/>')
+            if drawings is not None:                        # the swing itself: not in the simple view
+                out.append(f'<line class="ann" x1="{plot.x(a_i):.1f}" y1="{plot.y(item["start"]):.1f}" '
+                           f'x2="{plot.x(b_i):.1f}" y2="{plot.y(item["end"]):.1f}" stroke="{ANN["line"]}" '
+                           f'stroke-width="1.2" stroke-dasharray="2 4"/>')
             for name, price in item["levels"].items():
                 if not keep(price):
                     continue
@@ -216,7 +217,7 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                 y = plot.y(price)
                 out.append(f'<line class="ann" x1="{plot.x(b_i):.1f}" y1="{y:.1f}" x2="{right:.1f}" y2="{y:.1f}" '
                            f'stroke="{ANN["target"]}" stroke-width="1" stroke-opacity="0.8" stroke-dasharray="6 4"/>')
-                tags.add(right, y, f"פיבו' {_ltr(f'{ratio:g}%  {_fmt(price)}')}", ANN["target"])
+                tags.add(right, y, f"פיבו {_ltr(f'{ratio:g}%')} {_ltr(_fmt(price))}", ANN["target"])
         elif kind == "divergence":
             i1, i2 = index.get(item["day1"]), index.get(item["day2"])
             if i1 is None or i2 is None or i1 < first:
@@ -261,8 +262,8 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                     else plot.y(float(bars["high"].iloc[i])) - 14
                 out.append(f'<circle class="ann" cx="{plot.x(i):.1f}" cy="{y:.1f}" r="4" fill="{color}"/>')
 
-    if "vp" in wanted:                                     # the profile panel
-        vp = analysis.drawings["vp"]
+    if "vp" in items:                                      # the profile panel
+        vp = items["vp"]
         px0, px1 = plot.x1 + 8, plot.x1 + 8 + PROFILE - 12
         vmax = max(vp["volume"]) or 1
         for n, vol in enumerate(vp["volume"]):
@@ -276,7 +277,8 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                    f'stroke="{ANN["accent"]}" stroke-width="1" stroke-opacity="0.7" stroke-dasharray="1 3"/>')
         out.append(f'<text x="{(px0 + px1) / 2:.1f}" y="{TOP - 8}" fill="{INK["axis"]}" font-family="{SANS}" '
                    f'font-size="11" text-anchor="middle">נפח לפי מחיר</text>')
-        tags.add(right, y, f"שליטה (POC) {_ltr(_fmt(vp['poc']))}", ANN["accent"])
+        if vp.get("poc_label", True):
+            tags.add(right, y, f"שליטה (POC) {_ltr(_fmt(vp['poc']))}", ANN["accent"])
 
     out += tags.out
     out.append("</svg>")

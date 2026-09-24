@@ -39,3 +39,10 @@ volume_profile_bins: {value: 40, origin: ours}
 value_area: {value: 0.70, origin: common}
 volume_trend_short: {value: 20, origin: ours}
 volume_trend_long: {value: 50, origin: ours}
+
+# the simple view (view.py): what the chart and the Pine Script show by default
+view_zones_each_side: {value: 2, origin: ours, note: "the nearest support and resistance zones drawn (owner: simple, to the point)"}
+view_fib_levels: {value: [0.382, 0.5, 0.618], origin: common, note: "the main retracements only"}
+view_fib_when_retraced: {value: [0.2, 0.85], origin: ours, note: "Fibonacci is shown while the price is inside a pullback of the last big move"}
+view_vp_poc_within_atr: {value: 3, origin: ours, note: "the volume profile is shown when its POC is this close to the price"}
+view_confluence_atr: {value: 0.25, origin: ours, note: "a Fibonacci level or the POC this close to a drawn zone joins the zone's label"}
