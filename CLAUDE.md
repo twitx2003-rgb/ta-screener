@@ -251,20 +251,51 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   - The chart fills the bubble (medium); a click opens it large in a `<dialog>`.
   - Screener: below 1700 px the sidebar leaves no room for all columns, so the columns
     52-week high, ATR% and sector (`.opt`) are hidden there.
-- **Hosting (owner's decision, 2026-09-24): an Oracle Cloud Always Free VM** (Ubuntu 24.04,
-  Ampere A1, 4 OCPU / 24 GB), so the home computer can be off. Vercel-style hosts were
-  ruled out: they serve pages but cannot run the hour-long nightly update or quotes
-  every 5 minutes on a free plan. `deploy/setup.sh <host>` installs uv + Python 3.14,
-  Claude Code, Caddy (HTTPS -> 127.0.0.1:8050), opens 80/443 in the VM's iptables, and
-  the services ta-web / ta-live; `deploy/update.sh` pulls and restarts; steps in
-  `deploy/README.md`. Host name without a domain: `<ip-with-dashes>.sslip.io`.
-  - `config.local.yaml` (gitignored) next to config.yaml overrides single keys on one
-    machine (the server's `web.public_hosts`, `open_browser: false`), same checks.
-  - Data is fetched fresh on the server (`--update`, `--backfill-outcomes`); nothing is
-    copied from the home computer. Sign-ins are the owner's: TradingView through
-    `ssh -L 8766:localhost:8766` + `--auth-tradingview`, Claude Code by `claude` login.
-  - SSH key on the owner's computer: `%USERPROFILE%\.ssh\oracle_ta` (no passphrase).
-  - Unknown until tried: whether TradingView serves a cloud IP as it serves the home one.
+- **Hosting (owner's decision, 2026-09-24): GitHub Actions + Vercel, free, no credit card.**
+  (Oracle's Always Free VM was the first choice; the owner did not want a card. The
+  `deploy/` scripts for a VM stay as the fallback, e.g. if GitHub restricts the usage.)
+  Plan stages: 0 probe, 1 daily update on Actions, 2 static site on Vercel, 3 cut-over
+  (home computer stops), 4 live data, 5 client-side screener, 6 upkeep.
+  - **Stage 0 probe (2026-09-24, `.github/workflows/probe.yml`, `run.py --ci-probe`):**
+    from a GitHub runner, get-ohlcv works (300 calls, median 0.8 s, a few timeouts);
+    Claude Code with `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) works;
+    Vercel works; the TradingView screener answered 429 (as at home, often for hours);
+    **TradingView rotates the refresh token on every refresh.**
+  - **State:** the PRIVATE repo `twitx2003-rgb/ta-screener-state` holds the runners'
+    own TradingView sign-in (`tv_tokens.json`, a separate OAuth client made on the PC
+    with `TA_TV_TOKEN_PATH=~/.ta-screener/tv_tokens_ci.json run.py --auth-tradingview`),
+    `data/` (minus bars) and full logs. Bars live in its `bars` release asset.
+    `.github/state.sh restore|save|save-token`; `save` is one commit with no history,
+    force-pushed. A refreshed token is pushed at once (`mcp_client.push_token_file`,
+    `TA_STATE_DIR`), or a dead run would lose the only valid one.
+  - **Secrets in the public repo:** STATE_REPO_TOKEN (fine-grained key: only the state
+    repo, Contents read/write), CLAUDE_CODE_OAUTH_TOKEN, VERCEL_TOKEN,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+  - **Public logs:** the Actions log shows only `logs/ci_summary.json` (counts, dates,
+    error class names); everything else goes to the state repo. Python never prints
+    token-derived text (a mask line once carried a token into a log file; the state
+    history was rewritten); `.github/mask_tokens.py` masks from the token file.
+  - **Stage 1 (`.github/workflows/run.yml`, `run.py --ci-tick`):** does what is due: the
+    daily update when the last completed session has no complete update yet (bars
+    deferred or failed -> the next run finishes it), then the channels. `--max-minutes`
+    bounds the bar fetch. Manual inputs: limit, channels, save. First full run: the
+    first 600-bar fetch is slow from GitHub (4-9 s a call, ~3 h for all); a TradingView
+    session that failed to open stopped it at 400, so a failed session now costs its
+    batch only (`bars.MAX_BROKEN_SESSIONS`). The ledger now re-reads a day whose scan
+    was run again (meta `ingested` = day -> scan created_at).
+  - **Stage 2 (`tascreen/web/export.py`, `run.py --export-site DIR`):** the same app in
+    static mode through TestClient -> folder pages (/c/<id>/, /symbol/<EXCHANGE_TICKER>/,
+    /screener/pattern/<key>/, /screener/preset/<slug>/), compact charts (200 sessions,
+    column arrays), no live data yet, no filter form (stage 5), content-hash stamp in
+    /data/stamp.json, vercel.json (trailing slashes, headers). Real data: ~2,440 files,
+    ~65 MB (Vercel's CLI limit is 100 MB; the export refuses > 85 MB). Deterministic.
+    run.yml publishes after a saving run (`vercel link --project ta-screener`, deploy).
+  - **Telegram (`tascreen/notify.py`):** the owner's bot @ta_screener_alert_bot;
+    `run.py --setup-telegram` once (hidden token, finds the chat, test message, saves
+    ~/.ta-screener/telegram.json); run.yml sends a Hebrew summary after each run
+    (`--ci-notify`). Messages carry counts and links only.
+  - `config.local.yaml` (gitignored) overrides single keys on one machine; the runner
+    writes one (paths into the state checkout, `live.update_after_close: false`).
 - **Professional agents plan (owner-approved 2026-09-24; stop for review after each
   stage):** A1 outcome ledger, A2 backfill, A3 follow-up posts, B qualitative facts +
   earnings + market overview, C editor (Haiku; posts wait when it cannot run) + memory,
