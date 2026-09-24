@@ -18,7 +18,7 @@ on:
         type: boolean
         default: false
       save:
-        description: "Save the data to the state repository (off = a test: only the token is kept)"
+        description: "Save the data to the state repository (off = a test: only the token and logs are kept)"
         type: boolean
         default: false
 

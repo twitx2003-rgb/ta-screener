@@ -66,11 +66,13 @@ save)
     fi
     ;;
 save-token)
+    # a test run: keep the token (it was replaced) and the run's logs, not its data
     cd state
-    git add -- tv_tokens.json
-    git commit -qm "token $(date -u +%Y-%m-%dT%H:%MZ)" || true
+    ls -1t logs/tick-*.log 2> /dev/null | tail -n +15 | xargs -r rm --
+    git add -- tv_tokens.json logs .gitignore
+    git commit -qm "test run $(date -u +%Y-%m-%dT%H:%MZ): token and logs" || true
     git push -q origin HEAD:main
-    echo "state: token saved"
+    echo "state: token and logs saved"
     ;;
 *)
     echo "usage: $0 restore|save|save-token" >&2
