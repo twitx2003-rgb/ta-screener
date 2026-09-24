@@ -78,6 +78,17 @@ def test_probe_sees_a_rotated_refresh_token_and_names_failures(tmp_path):
     assert report["claude"] == {"ok": False, "error": "FileNotFoundError"}
     assert "payload" not in json.dumps(report)
 
+    class Slow(_Session):
+        async def call_tool(self, name, args):
+            import time as _time
+            _time.sleep(0.05)
+            return await super().call_tool(name, args)
+
+    report = probe(settings, FakeClient(Slow()), lambda: SyntheticLLM(lambda *a: {"ok": True}),
+                   calls=500, budget_s=0.2)
+    assert report["tradingview"]["ohlcv"]["calls"] < 500
+    assert "time budget" in report["tradingview"]["ohlcv_stopped_early"]
+
 
 def test_the_token_path_can_come_from_the_environment(tmp_path, monkeypatch):
     (tmp_path / "config.yaml").write_text("tradingview:\n  token_path: '~/a.json'\n", encoding="utf-8")

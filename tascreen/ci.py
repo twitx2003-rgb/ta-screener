@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import statistics
 import time
 from pathlib import Path
@@ -22,6 +23,8 @@ from .errors import ProviderError
 from .tv.data import OHLCV_TOOL, RateLimited, bars_frame, fetch_in_session
 from .tv.mcp_client import FileTokenStorage
 from .universe import fetch_universe
+
+log = logging.getLogger(__name__)
 
 PROBE_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}},
                 "required": ["ok"], "additionalProperties": False}
@@ -63,11 +66,19 @@ PROBE_SYMBOLS = ("NASDAQ:AAPL", "NASDAQ:MSFT", "NASDAQ:NVDA", "NASDAQ:AMZN", "NA
                  "NASDAQ:AMGN", "NYSE:UNH", "NYSE:LLY", "NYSE:ORCL", "NASDAQ:TXN")
 
 
-async def _tradingview(session, settings: Settings, calls: int) -> dict[str, Any]:
+async def _tradingview(session, settings: Settings, calls: int, budget_s: float) -> dict[str, Any]:
+    """`calls` get-ohlcv calls, stopping early after `budget_s` seconds (a throttled
+    server can take 20-50 s a call), then one screener pass."""
     delays = settings.tradingview.rate_limit_delays
     out: dict[str, Any] = {}
     seconds, counts = [], {"ok": 0, "rate_limited": 0, "failed": 0}
+    began = time.monotonic()
     for n in range(calls):
+        if time.monotonic() - began > budget_s:
+            out["ohlcv_stopped_early"] = f"time budget of {budget_s:.0f} s used after {n} calls"
+            break
+        if n and n % 25 == 0:
+            log.info("probe: %d get-ohlcv calls, %.0f s", n, time.monotonic() - began)
         symbol = PROBE_SYMBOLS[n % len(PROBE_SYMBOLS)]
         t = time.monotonic()
         try:
@@ -92,7 +103,7 @@ async def _tradingview(session, settings: Settings, calls: int) -> dict[str, Any
 
 
 def probe(settings: Settings, client: Any, llm_factory: Callable[[], Any], *,
-          calls: int = 300) -> dict[str, Any]:
+          calls: int = 300, budget_s: float = 480.0) -> dict[str, Any]:
     """The stage-0 report (see the module notes)."""
     path = Path(settings.tradingview.token_path).expanduser()
     report: dict[str, Any] = {"token_file": path.exists()}
@@ -101,7 +112,7 @@ def probe(settings: Settings, client: Any, llm_factory: Callable[[], Any], *,
         force_refresh(path)
     started = time.monotonic()
     try:
-        report["tradingview"] = client.with_session(lambda s: _tradingview(s, settings, calls))
+        report["tradingview"] = client.with_session(lambda s: _tradingview(s, settings, calls, budget_s))
         report["tradingview"]["ok"] = report["tradingview"]["ohlcv"]["ok"] > 0
     except Exception as exc:  # noqa: BLE001 — any failure, by class name only (messages can quote payloads)
         report["tradingview"] = {"ok": False, "error": type(exc).__name__}
