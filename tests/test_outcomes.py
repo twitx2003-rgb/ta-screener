@@ -159,6 +159,20 @@ def test_update_reads_each_scan_once_and_keeps_first_values(tmp_path):
     assert rebuilt["rows"] == len(ledger) and rebuilt["new"] == len(ledger)
 
 
+def test_a_scan_run_again_for_the_same_day_is_read_again(tmp_path):
+    import json as _json
+
+    settings, store, day = _setup(tmp_path)
+    update(store, 60)
+    path = store.scans_dir / day.isoformat() / "scan.json"
+    summary = _json.loads(path.read_text(encoding="utf-8"))
+    summary["created_at"] = "2099-01-01T00:00:00+00:00"          # the same day, scanned again
+    path.write_text(_json.dumps(summary), encoding="utf-8")
+    again = update(store, 60)
+    assert again["scan_days_read"] == [day.isoformat()] and again["new"] == 0
+    assert update(store, 60)["scan_days_read"] == []
+
+
 def test_a_new_tracking_window_evaluates_every_row_again(tmp_path):
     _, store, _ = _setup(tmp_path)
     update(store, 60)

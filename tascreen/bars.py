@@ -81,6 +81,9 @@ class SymbolResult:
                 "calls": self.calls, "note": self.note}
 
 
+MAX_BROKEN_SESSIONS = 3        # then the rest of the run is deferred to the next one
+
+
 @dataclass
 class BarsJob:
     store: Store
@@ -168,6 +171,7 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
     results: list[SymbolResult] = []
     started = time.monotonic()
     calls = 0
+    broken = 0                   # sessions in a row that failed to open or died
     for start in range(0, len(symbols), job.bars.session_batch):
         batch = symbols[start:start + job.bars.session_batch]
         done, need = [], []
@@ -179,8 +183,20 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
                 need.append(symbol)
         if need and job.stop_at is not None and datetime.now(timezone.utc) >= job.stop_at:
             done += [SymbolResult(s, "deferred", note="stopped at the deadline") for s in need]
+        elif need and broken >= MAX_BROKEN_SESSIONS:
+            done += [SymbolResult(s, "deferred", note="TradingView sessions kept failing")
+                     for s in need]
         elif need:
-            done += client.with_session(lambda session, need=need: job.run_batch(session, need))
+            # A session that cannot open, or dies mid-batch (seen from GitHub's runners),
+            # costs this batch only; the symbols are fetched by the next run.
+            try:
+                done += client.with_session(lambda session, need=need: job.run_batch(session, need))
+                broken = 0
+            except (ProviderError, OSError, TimeoutError, ExceptionGroup) as exc:
+                broken += 1
+                note = f"session failed: {type(exc).__name__}: {str(exc)[:200]}"
+                log.warning("bars for %s..%s: %s", need[0], need[-1], note)
+                done += [SymbolResult(s, "failed", note=note) for s in need]
         checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         for r in done:
             status[r.symbol] = {**r.as_dict(), "checked_at": checked_at}

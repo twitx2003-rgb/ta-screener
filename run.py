@@ -424,6 +424,7 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None, with_channel
         try:
             code = update(settings, limit, stop_at=deadline)
         except ScreenerError as exc:
+            log.error("daily update failed: %s", exc)          # the private log only
             code, summary["update_error"] = 1, type(exc).__name__
         last = _read_log_json(settings, "bars_last_run.json")
         summary["bars"] = last.get("counts", {})

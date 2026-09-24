@@ -23,6 +23,7 @@ carries the stored levels into today's units.
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 from datetime import date, datetime, timezone
@@ -217,7 +218,11 @@ def _update(store: Store, max_sessions: int, *, rebuild: bool, now: datetime | N
     ledger = None if rebuild else store.read_ledger()
     if ledger is None:
         ledger, meta = empty_ledger(), {}
-    done = set(meta.get("ingested", []))
+    # day -> the scan's created_at when it was read: a scan run again for the same day
+    # (e.g. after a bar fetch cut short) is read again; merge() keeps first values.
+    seen = meta.get("ingested", {})
+    if isinstance(seen, list):                            # meta written before 2026-09-24
+        seen = {day: None for day in seen}
     cache: dict[str, pd.DataFrame | None] = {}
 
     def bars_of(symbol: str) -> pd.DataFrame | None:
@@ -226,13 +231,14 @@ def _update(store: Store, max_sessions: int, *, rebuild: bool, now: datetime | N
         return cache[symbol]
 
     counts = {"new": 0, "restated": 0}
-    days = [d for d in store.scan_days() if d.isoformat() not in done]
+    days = [d for d in store.scan_days()
+            if d.isoformat() not in seen or seen[d.isoformat()] != _scan_created(store, d)]
     for day in days:
         _, patterns, summary = store.read_scan(day)
         ledger, got = merge(ledger, rows_from_scan(patterns, day, summary.get("rules_digest", ""),
                                                    bars_of))
         counts = {k: counts[k] + got[k] for k in counts}
-        done.add(day.isoformat())
+        seen[day.isoformat()] = summary.get("created_at")
     if rebuild or backfill:
         saved = store.read_backfill_rows()
         if saved is not None:
@@ -241,10 +247,18 @@ def _update(store: Store, max_sessions: int, *, rebuild: bool, now: datetime | N
     ledger = evaluate(ledger, bars_of, max_sessions,
                       everything=meta.get("max_sessions") not in (None, max_sessions))
     now = now or datetime.now(timezone.utc)
-    store.write_ledger(ledger, {"ingested": sorted(done), "max_sessions": max_sessions,
+    store.write_ledger(ledger, {"ingested": dict(sorted(seen.items())), "max_sessions": max_sessions,
                                 "updated_at": now.isoformat(timespec="seconds")})
     return {"scan_days_read": [d.isoformat() for d in days], "rows": len(ledger), **counts,
             "outcomes": {k: int(v) for k, v in ledger["outcome"].value_counts().items()}}
+
+
+def _scan_created(store: Store, day: date) -> str | None:
+    path = store.scans_dir / day.isoformat() / "scan.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("created_at")
+    except (OSError, ValueError):
+        return None
 
 
 def recent_decided(ledger: pd.DataFrame | None, count: int) -> list[dict[str, Any]]:

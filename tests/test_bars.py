@@ -159,3 +159,34 @@ def test_history_bounds(value):
 
     with pytest.raises(ConfigError):
         BarsSettings(history=value)
+
+
+class _FlakyClient(FakeClient):
+    """Sessions whose number is in `broken` fail to open (as seen from GitHub's runners)."""
+
+    def __init__(self, session, broken):
+        super().__init__(session)
+        self.broken = set(broken)
+
+    def with_session(self, work):
+        self.sessions_opened += 1
+        if self.sessions_opened in self.broken:
+            from tascreen.errors import ProviderError
+            raise ProviderError("could not open a TradingView session")
+        return asyncio.run(work(self.session))
+
+
+def test_a_failed_session_costs_its_batch_only(tmp_path):
+    job = _job(tmp_path, session_batch=2)
+    client = _FlakyClient(FakeOhlcv(DAY), broken={2})
+    report = update_all(client, job, ["A:1", "A:2", "A:3", "A:4", "A:5"], progress=lambda l: None)
+    assert report["counts"] == {"new": 3, "failed": 2}
+    assert "session failed" in report["failed"]["A:3"]
+
+
+def test_sessions_that_keep_failing_defer_the_rest(tmp_path):
+    job = _job(tmp_path, session_batch=1)
+    client = _FlakyClient(FakeOhlcv(DAY), broken={1, 2, 3, 4, 5})
+    report = update_all(client, job, [f"A:{i}" for i in range(6)], progress=lambda l: None)
+    assert report["counts"] == {"failed": 3, "deferred": 3}
+    assert client.sessions_opened == 3                        # no more knocking after three
