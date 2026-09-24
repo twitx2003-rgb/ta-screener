@@ -43,7 +43,7 @@ def test_every_page_is_written_clean(site):
                  "screener/pattern/double_bottom/index.html",
                  "screener/preset/chart-forming/index.html", "symbol/NYSE_HS/index.html",
                  "symbol/NASDAQ_DB/index.html", "404.html", "static/app.css",
-                 "static/symbol.js", "data/stamp.json", "vercel.json"):
+                 "static/symbol.js", "data/stamp.json", "vercel.json", "api/telegram.js"):
         assert (out / name).exists(), name
     for page in out.rglob("*.html"):
         html = page.read_text(encoding="utf-8")

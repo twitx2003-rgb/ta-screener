@@ -624,6 +624,20 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     unknown symbol / limit / failure answered in Telegram in Hebrew); kept on the state
     repo's `analyses` branch (`.github/analyst.sh`, rebase + push; PNGs not kept). Fonts on
     the runner: librsvg2-bin, fonts-noto-core, fonts-ibm-plex (SANS lists Noto Hebrew).
+    First run from the phone: OK, 2 minutes. **Owner: a light per section** (green /
+    red / yellow for mixed; up always green, down always red; a light may not contradict
+    the text's bullish/bearish words) and shorter still (one sentence per section).
+  - T5 the bot answers: `tascreen/web/vercel/telegram.js` (copied by export.py to
+    `api/telegram.js`): Telegram's secret header = HMAC-SHA256(bot token, "ta-screener
+    telegram webhook") (`notify.webhook_secret`, same in JS: no extra secret), owner's chat
+    AND user id only, symbol regex only, always 200; dispatches analyst.yml with
+    `GH_DISPATCH_TOKEN` (fine-grained key: ta-screener only, Actions read/write) and
+    replies "מנתח את X". Keys reach the function as `vercel deploy -e` run-time env from
+    run.yml (never stored in the Vercel project). run.yml then runs
+    `run.py --telegram-webhook https://ta-screener.vercel.app/api/telegram/` (trailing
+    slash: Telegram does not follow the 308) only if GH_DISPATCH_TOKEN exists.
+    `--setup-telegram` removes the webhook while it reads getUpdates and puts it back.
+    Tested under Node with fake endpoints (tests/test_webhook.py; skipped without Node).
 
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 

@@ -80,10 +80,16 @@ jobs:
           exit $code
 
       - name: Publish the site to Vercel
+        id: publish
         if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.save) }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_CLI: vercel@59.26.0
+          # run-time keys of the site's Telegram webhook function (api/telegram.js); they
+          # stay GitHub secrets, handed to each deployment and never stored in the project
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
         run: |
           site="$RUNNER_TEMP/ta-screener"
           logs="$GITHUB_WORKSPACE/state/logs"
@@ -92,12 +98,24 @@ jobs:
           cd "$site"
           started=$(date +%s)
           npx --yes "$VERCEL_CLI" link --yes --project ta-screener --token "$VERCEL_TOKEN" > "$logs/vercel-link.txt" 2>&1
-          npx --yes "$VERCEL_CLI" deploy --prod --yes --token "$VERCEL_TOKEN" > deploy-url.txt 2> "$logs/vercel-deploy.txt"
+          npx --yes "$VERCEL_CLI" deploy --prod --yes --token "$VERCEL_TOKEN" \
+              -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" -e TELEGRAM_CHAT_ID="$TELEGRAM_CHAT_ID" \
+              -e GH_DISPATCH_TOKEN="$GH_DISPATCH_TOKEN" > deploy-url.txt 2> "$logs/vercel-deploy.txt"
           code=$?
           echo "deploy exit $code after $(( $(date +%s) - started )) s"
           npx --yes "$VERCEL_CLI" inspect "$(tail -n 1 deploy-url.txt)" --token "$VERCEL_TOKEN" > "$logs/vercel-inspect.txt" 2>&1 || true
           grep -ho 'https://[a-z0-9.-]*\.vercel\.app' "$logs/vercel-inspect.txt" deploy-url.txt | awk '{ print length, $0 }' | sort -n | head -n 1 | cut -d' ' -f2 | tee "$logs/site-url.txt"
           exit $code
+
+      - name: Point the Telegram bot at the site
+        if: ${{ !cancelled() && steps.publish.outcome == 'success' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_DISPATCH_TOKEN" ]; then echo "webhook: no GH_DISPATCH_TOKEN secret yet, the bot stays silent"; exit 0; fi
+          python run.py --telegram-webhook "https://ta-screener.vercel.app/api/telegram/" 2> /dev/null || echo "webhook: not set"
 
       - name: Tell the owner (Telegram)
         if: always()

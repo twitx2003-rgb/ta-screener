@@ -104,6 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="With --analyze: also send the chart, the text and the Pine Script "
                              "to your Telegram bot")
     parser.add_argument("--out", metavar="DIR", help="With --analyze: where to write the files")
+    parser.add_argument("--telegram-webhook", metavar="URL",
+                        help="Point the Telegram bot at the site's webhook (https://.../api/telegram/), "
+                             "or 'off' to remove it")
     parser.add_argument("--ci-analyze", metavar="SYMBOL",
                         help="GitHub Actions (analyst.yml): one requested analysis sent to Telegram, "
                              "kept under --archive, within --daily-limit")
@@ -511,7 +514,14 @@ def setup_telegram(settings) -> int:
         print(f"\nהמפתח לא עובד: {exc}\n")
         return 1
     print(f"\nהבוט @{name} מחובר. אם עוד לא שלחת לו הודעה בטלגרם, שלח עכשיו (מחכה עד 2 דקות)...")
-    chat = bot.find_private_chat(wait_s=120)
+    hooked = bot.webhook_url()           # Telegram refuses getUpdates while a webhook is set
+    if hooked:
+        bot.delete_webhook()
+    try:
+        chat = bot.find_private_chat(wait_s=120)
+    finally:
+        if hooked:
+            bot.set_webhook(hooked)
     if chat is None:
         print("\nלא הגיעה לבוט הודעה. שלח לו הודעה כלשהי בטלגרם והרץ את הפקודה שוב.\n")
         return 1
@@ -522,6 +532,28 @@ def setup_telegram(settings) -> int:
     print("\nעכשיו שמור ב-GitHub שני סודות (Settings > Secrets and variables > Actions):")
     print("  TELEGRAM_BOT_TOKEN  = אותו מפתח שהדבקת עכשיו")
     print(f"  TELEGRAM_CHAT_ID    = {chat}\n")
+    return 0
+
+
+def telegram_webhook(settings, url: str) -> int:
+    """Point the bot at the site's webhook function (run.yml after each deployment), or
+    'off' to remove it. Prints no URL parameters and no secret."""
+    from tascreen.notify import from_environment
+
+    bot = from_environment()
+    if bot is None:
+        print("telegram: not configured")
+        return 1
+    if url == "off":
+        bot.delete_webhook()
+        print("webhook: removed")
+        return 0
+    if not url.startswith("https://") or not url.endswith("/"):
+        log.error("the webhook must be an https:// address ending in / (Telegram does not "
+                  "follow the site's trailing-slash redirect)")
+        return 2
+    bot.set_webhook(url)
+    print("webhook: set")
     return 0
 
 
@@ -880,6 +912,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.analyze, lambda: analyze(settings, args.analyze, args.out, with_llm=not args.no_llm,
                                        to_telegram=args.telegram)),
         (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit)),
+        (args.telegram_webhook, lambda: telegram_webhook(settings, args.telegram_webhook)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),

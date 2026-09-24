@@ -10,8 +10,9 @@ fetched through TestClient and written as a folder index:
     /symbol/<EXCHANGE_TICKER>/ every stock (compact chart data)
     /patterns/  /scorecard/  /status/  and 404.html
 
-plus /static/ (copied), data/stamp.json (the reload stamp every page embeds) and
-vercel.json (trailing slashes, security headers, a rewrite for ?pattern= links).
+plus /static/ (copied), data/stamp.json (the reload stamp every page embeds),
+vercel.json (trailing slashes, security headers, a rewrite for ?pattern= links) and
+api/telegram.js, the Telegram bot's webhook function (copied from web/vercel/).
 There is no live data yet (a later stage adds it in the browser).
 
 The same data gives byte-identical files: the stamp is a hash of the content, not of
@@ -113,6 +114,7 @@ def export_site(settings: Settings, out: Path, *, rules: Rules | None = None,
     shutil.copytree(WEB_DIR / "static", out / "static")
     _write(out / "data" / "stamp.json", json.dumps({"stamp": stamp}).encode())
     _write(out / "vercel.json", json.dumps(VERCEL_CONFIG, indent=2).encode())
+    _write(out / "api" / "telegram.js", (WEB_DIR / "vercel" / "telegram.js").read_bytes())
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     if size > max_bytes:
         raise ExportError(f"the site is {size / 2**20:.1f} MB, over the {max_bytes / 2**20:.0f} MB "

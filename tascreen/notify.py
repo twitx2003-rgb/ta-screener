@@ -11,6 +11,8 @@ so every error message is scrubbed with `redact` first.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -27,6 +29,13 @@ from .errors import ProviderError
 API = "https://api.telegram.org"
 CREDENTIALS = Path("~/.ta-screener/telegram.json")
 _TOKEN = re.compile(r"\d{5,}:[\w-]{20,}")
+WEBHOOK_LABEL = b"ta-screener telegram webhook"
+
+
+def webhook_secret(token: str) -> str:
+    """The webhook's secret_token: an HMAC of the bot token, so no separate secret has to
+    be kept (web/vercel/telegram.js computes the same and checks Telegram's header)."""
+    return hmac.new(token.strip().encode(), WEBHOOK_LABEL, hashlib.sha256).hexdigest()
 
 
 def redact(text: str) -> str:
@@ -82,6 +91,18 @@ class Telegram:
 
     def bot_name(self) -> str:
         return self.call("getMe").get("username", "")
+
+    # The bot answers the owner through a webhook (the site's api/telegram.js). While one
+    # is set, Telegram refuses getUpdates, so --setup-telegram removes it and puts it back.
+    def webhook_url(self) -> str:
+        return (self.call("getWebhookInfo") or {}).get("url", "")
+
+    def set_webhook(self, url: str) -> None:
+        self.call("setWebhook", url=url, secret_token=webhook_secret(self.token),
+                  allowed_updates=json.dumps(["message"]))
+
+    def delete_webhook(self) -> None:
+        self.call("deleteWebhook")
 
     def find_private_chat(self, wait_s: float = 120, sleep: Callable[[float], None] = time.sleep) -> int | None:
         """The newest private chat that wrote to the bot (the owner's), waiting up to `wait_s`."""
