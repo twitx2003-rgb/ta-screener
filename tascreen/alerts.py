@@ -372,6 +372,15 @@ def live_crossings(view: ScanView, prices: dict[str, float], session_day: date,
     return out
 
 
+def watch_started_message(near: int, far: int, cfg: AlertsSettings) -> str:
+    """Sent once a session when the live watch starts, so a quiet day is not a doubt."""
+    return (f"🔎 <b>המעקב במהלך המסחר התחיל</b>\n"
+            f"{near + far} מניות במעקב: {near} עד {cfg.verge_pct:g}% מקו הפריצה (כל "
+            f"{cfg.live_interval_minutes:g} דקות), {far} רחוקות יותר (כל "
+            f"{cfg.live_interval_minutes * cfg.far_every:g} דקות).\n"
+            "תגיע הודעה רק כשמניה חוצה את קו הפריצה.")
+
+
 def live_message(found: list[dict[str, Any]], at: datetime, market_tz: str, site_url: str,
                  news: dict[str, dict] | None = None) -> str:
     head = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} שעון ניו יורק</b>",

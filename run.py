@@ -630,6 +630,11 @@ def ci_live(settings, max_minutes: float) -> int:
     hand_over = started + timedelta(minutes=max_minutes)
     interval = cfg.live_interval_minutes
     sent = alerts.read_sent(store, day)
+    if not sent.get("watch_started"):           # once a session: the owner knows it runs
+        bot.send(alerts.watch_started_message(len(near), len(far), cfg), html=True)
+        sent["watch_started"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        alerts.write_sent(store, day, sent)
+        push_token_file(alerts.sent_path(store, day), "live watch started")
     client = make_tradingview(settings)
     all_seconds: list[float] = []
     while True:
