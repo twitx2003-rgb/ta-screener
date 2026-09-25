@@ -246,3 +246,46 @@ def test_ci_live_ends_at_once_when_the_market_is_closed(tmp_path, monkeypatch):
     assert run.ci_live(settings, 345) == 0
     summary = json.loads((settings.log_dir / "live_summary.json").read_text(encoding="utf-8"))
     assert summary["ended"] == "the market is closed" and summary["passes"] == 0
+
+
+# ------------------------------------------------------------------ news
+def _news_payload(now):
+    def row(title, hours, symbols, link="https://www.tradingview.com/news/x/"):
+        return {"id": title, "title": title, "published": int(now.timestamp() - hours * 3600),
+                "link": link, "provider": {"id": "p", "name": "Dow Jones Newswires"}, "urgency": 2,
+                "relatedSymbols": [{"symbol": s} for s in symbols], "paywall": True}
+    return {"success": True, "data": {"count": 4, "has_more": False, "offset": 0, "total_available": 4,
+            "headlines": [row("Old news <b>", 60, ["NYSE:AAA"]),
+                          row("Market wrap names everyone", 1, ["NYSE:AAA", "B:B", "C:C", "D:D"]),
+                          row("AAA wins a big contract <script>", 5, ["NYSE:AAA"]),
+                          row("AAA older story", 20, ["NYSE:AAA"])]}}
+
+
+def test_the_headline_is_the_newest_about_the_stock_itself():
+    from tascreen.alerts import news_line, pick_headline
+
+    now = datetime(2026, 3, 20, 21, 0, tzinfo=timezone.utc)
+    best = pick_headline(_news_payload(now), "NYSE:AAA", now)
+    assert best["title"] == "AAA wins a big contract <script>" and round(best["hours"]) == 5
+    line = news_line(best)
+    assert line.startswith("📰 <a href=\"https://www.tradingview.com/news/x/\">AAA wins a big contract &lt;script&gt;</a>")
+    assert "(Dow Jones Newswires, לפני 5 שעות)" in line
+    assert pick_headline(_news_payload(now), "NYSE:ZZZ", now) is None and news_line(None) == ""
+    foreign = {**best, "link": "https://evil.example/x"}
+    assert "<a" not in news_line(foreign)                          # only TradingView's own links
+
+
+def test_the_news_goes_under_each_breakout_and_live_crossing():
+    from tascreen.alerts import live_message
+
+    now = datetime(2026, 3, 20, 21, 0, tzinfo=timezone.utc)
+    news = {"NYSE:BBB": {"title": "BBB beats estimates", "hours": 2.0, "provider": "Reuters",
+                         "link": "https://www.tradingview.com/news/y/", "published": now}}
+    breakouts = bullish_breakouts(_view(), lambda s: None, {})
+    text = "\n".join(evening_messages(DAY, breakouts, [], site_url="https://s.example", verge_pct=2.0,
+                                      news=news))
+    assert "BBB beats estimates" in text and text.count("📰") == 1
+    found = [{"symbol": "NYSE:BBB", "name": "משולש", "line": 100.0, "price": 101.0, "target": 110.0,
+              "key": "k"}] * 60
+    message = live_message(found, now, "America/New_York", "https://s.example", news)
+    assert len(message) <= 4096 and "BBB beats estimates" in message and "באתר." in message

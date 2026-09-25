@@ -33,7 +33,7 @@ from .outcomes import FINAL
 from .patterns.levels import invalidation
 from .quotes import crossings
 from .store import Store, _write_json, symbol_file_stem
-from .tv.data import OHLCV_TOOL, fetch_in_session
+from .tv.data import NEWS_TOOL, OHLCV_TOOL, fetch_in_session
 from .web.data import ScanView, detection_record
 
 MESSAGE_LIMIT = 4000                   # Telegram allows 4096; room for the escaping
@@ -179,7 +179,8 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, sit
                      verge_pct: float, coverage: tuple[int, int] | None = None,
                      analyses: list[str] | None = None,
                      intraday: list[dict] | None = None,
-                     live_summary: dict[str, Any] | None = None) -> list[str]:
+                     live_summary: dict[str, Any] | None = None,
+                     news: dict[str, dict] | None = None) -> list[str]:
     head = f"<b>🚀 פריצות שוריות · {_day(day)}</b>\nאחרי הסגירה, מהחזקה לחלשה (לפי הנפח ביום הפריצה)."
     if coverage and coverage[0] < coverage[1]:
         head += f"\n(נסרקו {coverage[0]:,} מתוך {coverage[1]:,} מניות)"
@@ -195,9 +196,11 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, sit
             levels.append(f"ביטול {_price(b['invalidation'])}")
         if b["hit_rate"] is not None and _finite(b["target"]):
             levels.append(f"בעבר {b['hit_rate']:g}% מהפריצות שלה הגיעו ליעד")
+        headline = news_line((news or {}).get(b["symbol"]))
         blocks.append(f"{n}. {_link(b['symbol'], site_url)} · {html.escape(str(b['name']))}\n"
                       f"פריצה {_price(b['breakout'])} · סגירה {_price(b['close'])}{volume}"
-                      + (f"\n{' · '.join(levels)}" if levels else ""))
+                      + (f"\n{' · '.join(levels)}" if levels else "")
+                      + (f"\n{headline}" if headline else ""))
     if analyses:
         blocks.append("📊 ניתוח מלא יגיע בהודעות נפרדות: "
                       + ", ".join(html.escape(s.split(":")[-1]) for s in analyses))
@@ -230,7 +233,8 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, sit
 def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: Any, min_cases: int,
                    dispatch: Callable[[str, dict[str, str]], int],
                    can_dispatch: bool, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-                   live_summary: dict[str, Any] | None = None) -> dict[str, Any]:
+                   live_summary: dict[str, Any] | None = None,
+                   news_of: Callable[[list[str]], dict[str, dict]] | None = None) -> dict[str, Any]:
     """Send the session's report once; start the full analyses of the strongest few.
     Returns counts for the public log (no symbols, no prices)."""
     sent = read_sent(store, view.day)
@@ -243,9 +247,10 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
     coverage = ((int(summary["symbols_scanned"]), int(summary["symbols_in_universe"]))
                 if summary.get("symbols_scanned") and summary.get("symbols_in_universe") else None)
     intraday = intraday_followup(view, sent.get("live") or {})
+    news = news_of([b["symbol"] for b in breakouts]) if news_of and breakouts else {}
     messages = evening_messages(view.day, breakouts, verge, site_url=cfg.site_url,
                                 verge_pct=cfg.verge_pct, coverage=coverage, analyses=chosen,
-                                intraday=intraday, live_summary=live_summary)
+                                intraday=intraday, live_summary=live_summary, news=news)
     for message in messages:
         bot.send(message, html=True)
     started = [s for s in chosen if dispatch("analyst.yml", {"symbol": s}) == 204]
@@ -367,13 +372,79 @@ def live_crossings(view: ScanView, prices: dict[str, float], session_day: date,
     return out
 
 
-def live_message(found: list[dict[str, Any]], at: datetime, market_tz: str, site_url: str) -> str:
-    lines = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} שעון ניו יורק</b>",
-             "לא סופי עד הסגירה. מחירי TradingView עשויים להיות מעוכבים.", ""]
+def live_message(found: list[dict[str, Any]], at: datetime, market_tz: str, site_url: str,
+                 news: dict[str, dict] | None = None) -> str:
+    head = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} שעון ניו יורק</b>",
+            "לא סופי עד הסגירה. מחירי TradingView עשויים להיות מעוכבים.", ""]
+    tail = ["", f"<i>{html.escape('לא ייעוץ השקעות. פריצה מאושרת רק בסגירה.')}</i>"]
+    items: list[str] = []
     for n, c in enumerate(found, 1):
         above = (c["price"] / c["line"] - 1) * 100
         target = f" · יעד {_price(c['target'])} (כלל המדידה)" if _finite(c["target"]) else ""
-        lines.append(f"{n}. {_link(c['symbol'], site_url)} · {html.escape(str(c['name']))} · "
-                     f"קו {_price(c['line'])} · מחיר {_price(c['price'])} (+{above:.1f}% מעל){target}")
-    lines += ["", f"<i>{html.escape('לא ייעוץ השקעות. פריצה מאושרת רק בסגירה.')}</i>"]
-    return "\n".join(lines)[:MESSAGE_LIMIT]
+        headline = news_line((news or {}).get(c["symbol"]))
+        item = (f"{n}. {_link(c['symbol'], site_url)} · {html.escape(str(c['name']))} · "
+                f"קו {_price(c['line'])} · מחיר {_price(c['price'])} (+{above:.1f}% מעל){target}"
+                + (f"\n{headline}" if headline else ""))
+        if len("\n".join(head + items + [item] + tail)) > MESSAGE_LIMIT - 40:      # never cut a tag
+            items.append(f"ועוד {len(found) - n + 1} באתר.")
+            break
+        items.append(item)
+    return "\n".join(head + items + tail)
+
+
+# ------------------------------------------------------------------ news
+NEWS_MAX_AGE_HOURS = 48
+NEWS_MAX_RELATED = 3         # a headline naming many stocks is about something else
+
+
+def pick_headline(payload: dict[str, Any], symbol: str, now: datetime) -> dict[str, Any] | None:
+    """The newest headline about `symbol` itself (it names at most NEWS_MAX_RELATED stocks)
+    from the last NEWS_MAX_AGE_HOURS, from a get-news answer; None when there is none.
+    Shape (live, 2026-09-25): {data: {headlines: [{title, published (unix), link,
+    provider: {name}, relatedSymbols: [{symbol}], urgency, ...}]}}."""
+    data = pick(payload, ["data"], context=NEWS_TOOL)
+    best = None
+    for row in pick(data, ["headlines"], context=NEWS_TOOL) or []:
+        related = [pick(r, ["symbol"], context=NEWS_TOOL) for r in (row.get("relatedSymbols") or [])]
+        if symbol not in related or len(related) > NEWS_MAX_RELATED:
+            continue
+        published = datetime.fromtimestamp(int(pick(row, ["published"], context=NEWS_TOOL)), timezone.utc)
+        hours = (now - published).total_seconds() / 3600
+        if not 0 <= hours <= NEWS_MAX_AGE_HOURS:
+            continue
+        if best is None or published > best["published"]:
+            provider = row.get("provider") or {}
+            best = {"title": str(pick(row, ["title"], context=NEWS_TOOL)).strip(), "published": published,
+                    "hours": hours, "provider": str(provider.get("name") or "").strip(),
+                    "link": str(row.get("link") or "")}
+    return best if best and best["title"] else None
+
+
+async def fetch_news(session: Any, symbols: list[str], now: datetime) -> dict[str, dict[str, Any]]:
+    """The headline for each symbol (English: TradingView had none in Hebrew). A failed
+    call means no headline, never a failed report."""
+    out: dict[str, dict[str, Any]] = {}
+    for symbol in dict.fromkeys(symbols):
+        try:
+            payload = await fetch_in_session(session, NEWS_TOOL, {"symbol": symbol, "lang": "en", "limit": 10})
+            headline = pick_headline(payload, symbol, now)
+        except (ProviderError, OSError, TimeoutError, ValueError):
+            continue
+        if headline:
+            out[symbol] = headline
+    return out
+
+
+def news_line(headline: dict[str, Any] | None) -> str:
+    """One line under an alert: the headline as published (no interpretation), its
+    source and age, linked to TradingView's story page."""
+    if not headline:
+        return ""
+    title = headline["title"] if len(headline["title"]) <= 140 else headline["title"][:137] + "..."
+    hours = headline["hours"]
+    age = "לפני פחות משעה" if hours < 1 else f"לפני {hours:.0f} שעות"
+    source = f"{headline['provider']}, " if headline["provider"] else ""
+    text = html.escape(title)
+    if headline["link"].startswith("https://www.tradingview.com/"):
+        text = f'<a href="{html.escape(headline["link"])}">{text}</a>'
+    return f"📰 {text} ({html.escape(source)}{age})"

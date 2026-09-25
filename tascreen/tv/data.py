@@ -39,6 +39,7 @@ from ..fields import pick
 log = logging.getLogger(__name__)
 
 OHLCV_TOOL = "mcp-tv-get-ohlcv"
+NEWS_TOOL = "mcp-tv-get-news"      # {symbol, lang, limit, offset}; Hebrew returned none for NVDA
 SCREENER_TOOL = "mcp-tv-run-screener"
 COLUMNS_TOOL = "mcp-tv-get-screener-columns"
 RATE_LIMIT_DELAYS = (5.0, 15.0, 45.0)
