@@ -638,6 +638,31 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     slash: Telegram does not follow the 308) only if GH_DISPATCH_TOKEN exists.
     `--setup-telegram` removes the webhook while it reads getUpdates and puts it back.
     Tested under Node with fake endpoints (tests/test_webhook.py; skipped without Node).
+    First live messages got no answer: the keys arrive as pasted (trailing newline), so the
+    function trims them; GET /api/telegram/ answers which keys a deployment has (yes/no).
+    Works since 2026-09-24 (the owner's messages started analyst.yml runs).
+- **Breakout alerts (owner's request 2026-09-24; plan A1 evening report, A2 live watch).**
+  Owner's choices: also during the session; a line per stock + full analyses for the
+  strongest; all bullish breakouts + stocks on the verge. `tascreen/alerts.py`, config
+  section `alerts` (verge_pct 2, watch_pct 5, top_analyses 3, live_interval_minutes 15,
+  live_max_symbols 120). Bullish chart patterns only. Sent once: `data/alerts/<session>.json`.
+  - A1: `ci_tick` -> `_evening_alerts`: the day's confirmed bullish breakouts, ranked by
+    rel_volume then the pattern's hit rate in our ledger (`hit_rates`: patterns with a
+    target and >= min_cases decided), + forming bullish/either patterns whose close is
+    within verge_pct below `trigger_up`; after a complete update, or anyway 8 h after the
+    close (the morning catch-up). The top 3 get analyst.yml via `tascreen/github.py`
+    (`dispatch`, GH_DISPATCH_TOKEN). 23/09 would have had 7 breakouts, 22 on the verge.
+  - A2: `.github/workflows/live.yml` (crons 13:35 and 14:35 UTC = 09:35 New York in
+    summer/winter; group "state"), `run.py --ci-live`: watch list = forming bullish lines
+    within watch_pct above the close (~80 stocks), one get-ohlcv (2 daily bars) per stock
+    per pass, the newest bar's close if it is today's session; a crossing above
+    `trigger_up` (`quotes.crossings`) is sent once, the record pushed at once
+    (`push_token_file(path, what)`); a slow pass (median call > 5 s) doubles the interval;
+    after 345 minutes it dispatches its own continuation. `state.sh restore` with
+    SKIP_BARS=1, `save-alerts`. Not yet run live: measure call times on its first day.
+  - **Tests never reach the real bot**: `tests/conftest.py` clears the Telegram/GitHub keys
+    and points `notify.CREDENTIALS` away from ~/.ta-screener (a tick test once sent the
+    owner a real report of made-up stocks before that guard existed).
 
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 

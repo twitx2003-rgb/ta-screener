@@ -256,6 +256,38 @@ class OutcomesSettings:
             raise ConfigError("outcomes.backfill_workers must be 1..32")
 
 
+@dataclass(frozen=True)
+class AlertsSettings:
+    # Telegram alerts on bullish chart-pattern breakouts (tascreen/alerts.py; owner's
+    # request 2026-09-24): an evening report after the close, and crossings during the
+    # session (run.py --ci-live).
+    enabled: bool = True
+    verge_pct: float = 2.0             # "on the verge": the close this far below the breakout line
+    watch_pct: float = 5.0             # watched in the session: the line this far above the close
+    top_analyses: int = 3              # full analyses (analyst.yml) for the strongest breakouts
+    live_interval_minutes: float = 15.0
+    live_max_symbols: int = 120        # get-ohlcv calls per pass, at most
+    site_url: str = "https://ta-screener.vercel.app"
+
+    def __post_init__(self):
+        for name in ("verge_pct", "watch_pct", "live_interval_minutes"):
+            object.__setattr__(self, name, float(getattr(self, name)))
+        for name in ("top_analyses", "live_max_symbols"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        if not 0 < self.verge_pct <= 10:
+            raise ConfigError("alerts.verge_pct must be above 0 and at most 10")
+        if not self.verge_pct <= self.watch_pct <= 20:
+            raise ConfigError("alerts.watch_pct must be verge_pct..20")
+        if not 0 <= self.top_analyses <= 5:
+            raise ConfigError("alerts.top_analyses must be 0..5 (they use the daily analyses)")
+        if not 5 <= self.live_interval_minutes <= 60:
+            raise ConfigError("alerts.live_interval_minutes must be 5..60")
+        if not 1 <= self.live_max_symbols <= 300:
+            raise ConfigError("alerts.live_max_symbols must be 1..300")
+        if not str(self.site_url).startswith("https://"):
+            raise ConfigError("alerts.site_url must start with https://")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
@@ -266,6 +298,7 @@ _SECTIONS = {
     "live": LiveSettings,
     "channels": ChannelsSettings,
     "outcomes": OutcomesSettings,
+    "alerts": AlertsSettings,
 }
 
 
@@ -281,6 +314,7 @@ class Settings:
     live: LiveSettings = field(default_factory=LiveSettings)
     channels: ChannelsSettings = field(default_factory=ChannelsSettings)
     outcomes: OutcomesSettings = field(default_factory=OutcomesSettings)
+    alerts: AlertsSettings = field(default_factory=AlertsSettings)
 
     @property
     def data_dir(self) -> Path:

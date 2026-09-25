@@ -6,6 +6,8 @@
 #   bash .github/state.sh save          one fresh commit with no history, force-pushed,
 #                                       and the bars back into the release
 #   bash .github/state.sh save-token    only the TradingView token (a test run)
+#   bash .github/state.sh save-alerts   the token, data/alerts and the log (live.yml)
+#   SKIP_BARS=1 ... restore             without the bars (live.yml does not need them)
 #
 # Needs STATE_REPO (owner/name) and STATE_REPO_TOKEN (a key with Contents: read and
 # write on that repository only). Bars live in a release asset, not in git: they are
@@ -29,7 +31,9 @@ data/bars/*.parquet
 *.tmp
 logs/screener.log.*
 EOF
-    if gh release download bars --repo "$STATE_REPO" --pattern bars.tar.zst \
+    if [ -n "${SKIP_BARS:-}" ]; then
+        echo "bars: not needed by this run"          # live.yml: it never saves the bars
+    elif gh release download bars --repo "$STATE_REPO" --pattern bars.tar.zst \
             --dir "$RUNNER_TEMP" --clobber > /dev/null 2>&1; then
         tar --zstd -xf "$RUNNER_TEMP/bars.tar.zst" -C state/data
         echo "bars: restored ($(find state/data/bars -name '*.parquet' | wc -l) files)"
@@ -74,8 +78,18 @@ save-token)
     git push -q origin HEAD:main
     echo "state: token and logs saved"
     ;;
+save-alerts)
+    # live.yml: the token, the record of alerts sent (so none is sent twice) and its log
+    cd state
+    ls -1t logs/live-*.log 2> /dev/null | tail -n +15 | xargs -r rm --
+    git add -- tv_tokens.json logs .gitignore
+    if [ -d data/alerts ]; then git add -- data/alerts; fi
+    git commit -qm "live watch $(date -u +%Y-%m-%dT%H:%MZ): token, alerts and log" || true
+    git push -q origin HEAD:main
+    echo "state: token, alerts and log saved"
+    ;;
 *)
-    echo "usage: $0 restore|save|save-token" >&2
+    echo "usage: $0 restore|save|save-token|save-alerts" >&2
     exit 2
     ;;
 esac

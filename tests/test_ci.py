@@ -174,6 +174,33 @@ def test_the_tick_runs_the_daily_update_once_per_session(tmp_path, monkeypatch):
     assert "NYSE:HS" not in text and "close" not in text                    # counts only
 
 
+def test_the_tick_sends_the_breakout_report_once_and_logs_counts_only(tmp_path, monkeypatch):
+    import tascreen.notify
+
+    run, settings, store, day, calls = _tick_setup(tmp_path, monkeypatch)
+    sent = []
+
+    class Bot:
+        def send(self, text, html=False):
+            sent.append(text)
+
+    monkeypatch.setattr(tascreen.notify, "from_environment", lambda: Bot())
+    run.ci_tick(settings, None, None, with_channels=False)
+    summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
+    assert summary["alerts"]["status"] == "sent" and sent and "פריצות שוריות" in sent[0]
+    assert set(summary["alerts"]) == {"status", "breakouts", "verge", "analyses", "messages"}
+    run.ci_tick(settings, None, None, with_channels=False)
+    summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
+    assert summary["alerts"] == {"status": "already sent"} and len(sent) == 1
+
+
+def test_without_a_bot_the_tick_only_says_so(tmp_path, monkeypatch):
+    run, settings, store, day, calls = _tick_setup(tmp_path, monkeypatch)
+    run.ci_tick(settings, None, None, with_channels=False)
+    summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
+    assert summary["alerts"] == {"status": "telegram not configured"}
+
+
 def test_a_cut_short_update_is_finished_by_the_next_tick(tmp_path, monkeypatch):
     run, settings, store, day, calls = _tick_setup(tmp_path, monkeypatch, deferred=5)
     assert run.ci_tick(settings, None, 30, with_channels=False) == 1

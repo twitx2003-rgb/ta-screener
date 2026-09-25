@@ -98,3 +98,15 @@ outcomes:
   backfill_step: 1
   backfill_min_bars: 150     # start once a stock has this much history
   backfill_workers: 4        # parallel processes (this computer has 8 cores)
+
+alerts:
+  # Telegram alerts on bullish chart-pattern breakouts (owner's request, 2026-09-24):
+  # after the close, the day's confirmed breakouts and the patterns on the verge of one;
+  # during the session, a price crossing a breakout line (not final until the close).
+  enabled: true
+  verge_pct: 2.0             # "on the verge": the close this far below the breakout line
+  watch_pct: 5.0             # watched during the session: the line this far above the close
+  top_analyses: 3            # full analyses for the strongest breakouts (of the 10 a day)
+  live_interval_minutes: 15  # a price pass during the session (get-ohlcv, one call a stock)
+  live_max_symbols: 120      # stocks watched, at most, nearest to their line first
+  site_url: "https://ta-screener.vercel.app"

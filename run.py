@@ -84,7 +84,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="With --ci-tick: skip the channels (a test run)")
     parser.add_argument("--max-minutes", type=float, metavar="M",
                         help="With --update/--bars/--ci-tick: stop fetching bars after M minutes "
-                             "(the rest are deferred to the next run)")
+                             "(the rest are deferred to the next run); with --ci-live: start the "
+                             "continuation after M minutes (default 345)")
     parser.add_argument("--export-site", metavar="DIR",
                         help="Write the website as static files to DIR (for Vercel): every page, "
                              "no live data")
@@ -107,6 +108,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--telegram-webhook", metavar="URL",
                         help="Point the Telegram bot at the site's webhook (https://.../api/telegram/), "
                              "or 'off' to remove it")
+    parser.add_argument("--ci-live", action="store_true",
+                        help="GitHub Actions (live.yml): during the session, alert on prices "
+                             "crossing a bullish pattern's breakout line (--max-minutes, then "
+                             "the job starts its continuation)")
     parser.add_argument("--ci-analyze", metavar="SYMBOL",
                         help="GitHub Actions (analyst.yml): one requested analysis sent to Telegram, "
                              "kept under --archive, within --daily-limit")
@@ -477,10 +482,138 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None, with_channel
                                 "exit_code": code,
                                 "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         summary["complete"] = complete
+    if settings.alerts.enabled:
+        summary["alerts"] = _evening_alerts(settings, store, target)
     summary["seconds"] = round((datetime.now(timezone.utc) - started).total_seconds())
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     (settings.log_dir / "ci_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return 0 if not due or summary.get("complete") else 1
+
+
+def _evening_alerts(settings, store, target) -> dict:
+    """The breakout report (tascreen/alerts.py), once per session: after a complete
+    update, or anyway from the morning catch-up (8 hours after the close), so an update
+    cut short still reports. Counts only: this goes to the public log."""
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    from tascreen import github, notify
+    from tascreen.alerts import evening_report
+    from tascreen.market_hours import session_bounds
+    from tascreen.patterns.rules import load_rules
+    from tascreen.web.data import ScanRepository
+
+    scans = store.scan_days()
+    if not scans or scans[-1] != target:
+        return {"status": "no scan of the session yet"}
+    state = store.read_live_state()
+    complete = state.get("daily_update_for") == target.isoformat() and state.get("complete")
+    close = session_bounds(target, settings.market.timezone)[1]
+    if not complete and datetime.now(timezone.utc) < close + timedelta(hours=8):
+        return {"status": "waiting for a complete update"}
+    bot = notify.from_environment()
+    if bot is None:
+        return {"status": "telegram not configured"}
+    try:
+        return evening_report(store, ScanRepository(store, load_rules()).current(), settings.alerts,
+                              bot=bot, min_cases=settings.outcomes.min_cases, dispatch=github.dispatch,
+                              can_dispatch=bool(os.environ.get("GH_DISPATCH_TOKEN", "").strip()))
+    except ScreenerError as exc:
+        log.error("breakout report failed: %s", exc)             # the private log only
+        return {"status": "failed", "error": type(exc).__name__}
+
+
+def ci_live(settings, max_minutes: float) -> int:
+    """GitHub Actions (live.yml): during the session, price the stocks whose bullish
+    pattern is near its breakout line and tell the owner when a price crosses it (not
+    final until the close). A runner job lasts 6 hours at most and the session is longer,
+    so after `max_minutes` the job starts its own continuation. The public log shows
+    logs/live_summary.json: counts and seconds only."""
+    import statistics
+    import time as clock
+    from datetime import datetime, timedelta, timezone
+
+    from tascreen import alerts, github, notify
+    from tascreen.errors import ProviderError
+    from tascreen.market_hours import live_session, next_open, session_bounds
+    from tascreen.patterns.rules import load_rules
+    from tascreen.store import Store
+    from tascreen.tv.mcp_client import push_token_file
+    from tascreen.web.data import ScanRepository
+
+    cfg, tz = settings.alerts, settings.market.timezone
+    started = datetime.now(timezone.utc)
+    summary: dict = {"started": started.isoformat(timespec="seconds"), "passes": 0, "failed_passes": 0,
+                     "calls": 0, "failed_calls": 0, "median_call_s": None, "alerts": 0}
+
+    def finish(ended: str, code: int = 0) -> int:
+        summary["ended"] = ended
+        settings.log_dir.mkdir(parents=True, exist_ok=True)
+        (settings.log_dir / "live_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        return code
+
+    bot = notify.from_environment()
+    if bot is None or not cfg.enabled:
+        return finish("telegram not configured" if bot is None else "alerts are off", 1 if bot is None else 0)
+    after = settings.live.after_close_minutes
+    day = live_session(started, market_tz=tz, after_close_minutes=after)
+    if day is None:
+        opens = next_open(started, market_tz=tz)
+        if opens - started > timedelta(minutes=15):
+            return finish("the market is closed")        # the other start time covers winter/summer
+        clock.sleep((opens - started).total_seconds())
+        day = live_session(datetime.now(timezone.utc), market_tz=tz, after_close_minutes=after)
+    store = Store(settings.data_dir)
+    view = ScanRepository(store, load_rules()).current()
+    if view is None:
+        return finish("no scan")
+    watch = alerts.watch_list(view, cfg.watch_pct, cfg.live_max_symbols)
+    summary["watched"] = len(watch)
+    if not watch:
+        return finish("nothing near a breakout line")
+    ends = session_bounds(day, tz)[1] + timedelta(minutes=after)
+    hand_over = started + timedelta(minutes=max_minutes)
+    interval = cfg.live_interval_minutes
+    sent = alerts.read_sent(store, day)
+    client = make_tradingview(settings)
+    all_seconds: list[float] = []
+    while True:
+        now = datetime.now(timezone.utc)
+        if now >= ends:
+            return finish("the session is over")
+        if now >= hand_over:
+            status = github.dispatch("live.yml", {"continued": "yes"})
+            return finish(f"handed over ({status})", 0 if status == 204 else 1)
+        pass_started = clock.monotonic()
+        try:
+            got = client.with_session(lambda session: alerts.fetch_live_prices(
+                session, watch, day, tz, concurrency=settings.bars.concurrency))
+        except (ProviderError, OSError, TimeoutError, ExceptionGroup) as exc:
+            log.warning("a price pass failed: %s", type(exc).__name__)
+            summary["failed_passes"] += 1
+            got = {"prices": {}, "seconds": [], "failed": 0}
+        summary["passes"] += 1
+        summary["calls"] += len(got["seconds"]) + got["failed"]
+        summary["failed_calls"] += got["failed"]
+        all_seconds += got["seconds"]
+        if all_seconds:
+            summary["median_call_s"] = round(statistics.median(all_seconds), 2)
+        found = alerts.live_crossings(view, got["prices"], day, sent.get("live", {}))
+        if found:
+            bot.send(alerts.live_message(found, datetime.now(timezone.utc), tz, cfg.site_url), html=True)
+            live = sent.setdefault("live", {})
+            for c in found:
+                live[c["key"]] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                  "price": c["price"], "line": c["line"]}
+            alerts.write_sent(store, day, sent)
+            push_token_file(alerts.sent_path(store, day), "live alerts sent")
+            summary["alerts"] += len(found)
+        # TradingView slows down after heavy use: a slow pass stretches the interval
+        if got["seconds"] and statistics.median(got["seconds"]) > 5:
+            interval = min(interval * 2, 60.0)
+        wait = pass_started + interval * 60 - clock.monotonic()
+        limit = min(ends, hand_over) - datetime.now(timezone.utc)
+        clock.sleep(max(0.0, min(wait, limit.total_seconds())))
 
 
 def _read_log_json(settings, name: str) -> dict:
@@ -912,6 +1045,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.analyze, lambda: analyze(settings, args.analyze, args.out, with_llm=not args.no_llm,
                                        to_telegram=args.telegram)),
         (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit)),
+        (args.ci_live, lambda: ci_live(settings, args.max_minutes or 345)),
         (args.telegram_webhook, lambda: telegram_webhook(settings, args.telegram_webhook)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),

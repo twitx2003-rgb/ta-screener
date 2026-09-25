@@ -1,0 +1,75 @@
+# Breakout alerts during the session (alerts plan, stage A2, 2026-09-24): price the
+# stocks whose bullish chart pattern is near its breakout line, and tell the owner in
+# Telegram when a price crosses it (not final until the close; the confirmed breakouts
+# come in the evening report of run.yml).
+# It uses the TradingView sign-in, so it shares the "state" concurrency group with
+# run.yml: the nightly run (21:40 UTC) starts after it ends (close + 20 minutes).
+# Two start times cover New York's summer and winter time; the one that finds the
+# market closed ends at once. A job lasts 6 hours at most and the session is 6.5, so
+# after 345 minutes it starts its own continuation (workflow_dispatch).
+# This repository is public, and so is this log: it shows logs/live_summary.json only.
+name: live
+
+on:
+  schedule:
+    - cron: "35 13 * * 1-5"      # 09:35 New York in summer time (EDT)
+    - cron: "35 14 * * 1-5"      # 09:35 New York in winter time (EST)
+  workflow_dispatch:
+    inputs:
+      continued:
+        description: "Started by the previous watch (its 6-hour limit); empty when run by hand"
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: state            # one run at a time uses the state and the TradingView token
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      STATE_REPO: twitx2003-rgb/ta-screener-state
+      STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+      TA_TV_TOKEN_PATH: ${{ github.workspace }}/state/tv_tokens.json
+      TA_STATE_DIR: ${{ github.workspace }}/state
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -q -r requirements.txt
+
+      - name: Restore the private state (no bars)
+        env:
+          SKIP_BARS: "1"
+        run: bash .github/state.sh restore
+
+      - name: Watch the session
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
+        run: |
+          set +e
+          rm -f state/logs/live_summary.json
+          python -u run.py --ci-live --max-minutes 345 > "state/logs/live-$(date -u +%Y%m%dT%H%M).log" 2>&1
+          code=$?
+          python .github/mask_tokens.py state/tv_tokens.json
+          cat state/logs/live_summary.json 2> /dev/null || echo "no summary (see the log in the state repository)"
+          exit $code
+
+      - name: Save the token, the alerts sent and the log
+        if: always()
+        run: |
+          if [ ! -d state/.git ]; then echo "no state checkout: nothing to save"; exit 0; fi
+          bash .github/state.sh save-alerts

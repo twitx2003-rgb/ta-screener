@@ -80,11 +80,12 @@ logging.getLogger("mcp.client.auth.oauth2").addFilter(_HideExpectedSignInError()
 
 
 # --------------------------------------------------------------------------- tokens
-def push_token_file(path: Path) -> None:
+def push_token_file(path: Path, what: str = "token refreshed") -> None:
     """On GitHub Actions: commit and push a just-refreshed token file to the private
     state repository at once (TA_STATE_DIR is its checkout). TradingView replaces the
     refresh token on every refresh (probe, 2026-09-24), so a run that dies before its
-    final save would otherwise lose the only valid one. Never raises."""
+    final save would otherwise lose the only valid one. Also used for other files that
+    must survive a dead run (the live watch's record of alerts sent). Never raises."""
     state = os.environ.get("TA_STATE_DIR")
     if not state:
         return
@@ -95,11 +96,11 @@ def push_token_file(path: Path) -> None:
 
     try:
         git("add", "--", str(Path(path).resolve()))
-        git("commit", "-q", "-m", "token refreshed", check=False)    # nothing new: fine
+        git("commit", "-q", "-m", what, check=False)                 # nothing new: fine
         git("push", "-q", "origin", "HEAD:main")
-        log.info("refreshed TradingView token pushed to the state repository")
+        log.info("%s: pushed to the state repository", what)
     except (OSError, subprocess.SubprocessError) as exc:
-        log.warning("could not push the refreshed token: %s", type(exc).__name__)
+        log.warning("could not push (%s): %s", what, type(exc).__name__)
 
 
 class FileTokenStorage:
