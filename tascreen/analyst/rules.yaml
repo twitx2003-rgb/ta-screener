@@ -31,7 +31,7 @@ rsi_period: {value: 14, origin: common}
 rsi_overbought: {value: 70, origin: common}
 rsi_oversold: {value: 30, origin: common}
 macd: {value: [12, 26, 9], origin: common}
-divergence_recent_sessions: {value: 25, origin: ours, note: "the second turning point must be this recent"}
+divergence_recent_sessions: {value: 10, origin: ours, note: "the second turning point must be this recent (review round 1: an older one had already played out)"}
 ma_periods: {value: [50, 150, 200], origin: ours, note: "150 replaces 200 elsewhere on the site; 200 is kept here for the classic stack"}
 
 # volume
@@ -45,4 +45,15 @@ view_zones_each_side: {value: 2, origin: ours, note: "the nearest support and re
 view_fib_levels: {value: [0.382, 0.5, 0.618], origin: common, note: "the main retracements only"}
 view_fib_when_retraced: {value: [0.2, 0.85], origin: ours, note: "Fibonacci is shown while the price is inside a pullback of the last big move"}
 view_vp_poc_within_atr: {value: 3, origin: ours, note: "the volume profile is shown when its POC is this close to the price"}
-view_confluence_atr: {value: 0.25, origin: ours, note: "a Fibonacci level or the POC this close to a drawn zone joins the zone's label"}
+view_confluence_atr: {value: 0.0, origin: ours, note: "a Fibonacci level or the POC inside a drawn zone joins the zone's label (review round 1: a level just outside was named as the zone)"}
+
+# review round 1 (2026-09-25): the headline missed the story, extremes were not levels,
+# scenario levels sat too close, the Fibonacci swing was stale or tiny
+fib_min_atr: {value: 3.0, origin: ours, note: "a swing smaller than this (in ATRs) gets no Fibonacci"}
+fib_min_bars: {value: 10, origin: ours, note: "nor one shorter than this many sessions"}
+event_fresh_sessions: {value: 10, origin: ours, note: "a pattern breakout this recent is the key event"}
+event_near_extreme_pct: {value: 3.0, origin: ours, note: "within this of the 52-week high or low is the key event"}
+event_big_move_pct: {value: 15.0, origin: ours, note: "a 20-session move this large is the key event"}
+scenario_min_gap_atr: {value: 1.0, origin: ours, note: "a next level closer than this to its trigger is skipped"}
+extreme_draw_pct: {value: 10.0, origin: ours, note: "the 52-week high or low is drawn when this close to the price"}
+scenario_band_max_atr: {value: 1.5, origin: ours, note: "levels join into one band only up to this width (no chains of near levels)"}

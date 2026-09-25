@@ -154,12 +154,32 @@ def trendlines(bars: pd.DataFrame, piv: list[Pivot], atr: np.ndarray,
     return out
 
 
-def fibonacci(bars: pd.DataFrame, major: list[Pivot], rules: dict[str, Any]) -> Fibonacci | None:
+def fibonacci(bars: pd.DataFrame, major: list[Pivot], rules: dict[str, Any],
+              atr_now: float = math.nan) -> Fibonacci | None:
+    """The retracements of the latest big move. That is the leg still in progress when it
+    is already a big move (from the last major turning point to the extreme after it: a
+    zigzag confirms a turning point only after the reversal, so a strong recent move has
+    no confirmed end yet); otherwise the last confirmed leg. None for a move smaller than
+    fib_min_atr ATRs or shorter than fib_min_bars sessions (review round 1: a two-day
+    drop and a leg the price had already rebuilt were measured)."""
     if len(major) < 2:
         return None
     a, b = major[-2], major[-1]
+    big = rules["major_pivot_atr"] * atr_now if math.isfinite(atr_now) else math.inf
+    after = slice(b.i + 1, len(bars))
+    if b.i + 1 < len(bars):
+        if b.kind == "H":
+            k = int(np.argmin(bars["low"].to_numpy(float)[after])) + b.i + 1
+            end = Pivot(k, float(bars["low"].iloc[k]), "L")
+        else:
+            k = int(np.argmax(bars["high"].to_numpy(float)[after])) + b.i + 1
+            end = Pivot(k, float(bars["high"].iloc[k]), "H")
+        if abs(end.price - b.price) >= big and end.i - b.i >= rules["fib_min_bars"]:
+            a, b = b, end
     span = b.price - a.price
-    if span == 0:
+    if span == 0 or b.i - a.i < rules["fib_min_bars"]:
+        return None
+    if math.isfinite(atr_now) and abs(span) < rules["fib_min_atr"] * atr_now:
         return None
     up = span > 0
     levels = {f"fib_{round(r * 1000)}": round(b.price - r * span, 4) for r in rules["fib_retracements"]}

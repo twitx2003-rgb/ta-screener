@@ -23,7 +23,7 @@ GUTTER = 220                    # right of the last candle: the drawings' labels
                                 # (a zone label with a note is ~210 px: it stays clear of the profile)
 VOLUME_SHARE = 0.15
 SHOW_BARS = 130                 # about six months: wide enough candles on a phone
-MA_COLORS = {50: INK["sma50"], 150: INK["sma150"], 200: "#A78BFA"}
+MA_COLORS = {50: INK["sma150"], 150: "#F0ABFC", 200: "#A78BFA"}   # never Fibonacci's gold
 ZONE = {"support": ANN["bull"], "resistance": ANN["bear"]}
 
 
@@ -86,37 +86,58 @@ class _Plot:
 
 
 class _Tags:
-    """Small labels that never cover each other."""
+    """Small labels that never cover each other. The gutter labels keep their price order
+    and stay inside the gutter, clear of the price axis (review round 1: labels swapped
+    places and hid axis values); a label pushed off its level gets a thin leader."""
+
+    GAP = 24                                 # a label is 20 px high
 
     def __init__(self, plot: _Plot):
         self.plot, self.out, self.boxes = plot, [], []
+        self.pending: list[tuple[float, str, str]] = []
 
     def add(self, x: float, y: float, text: str, color: str, anchor: str = "start") -> None:
-        """A label in the gutter right of the candles (`x` only picks the gutter's side)."""
+        if anchor != "middle":
+            self.pending.append((y, text, color))     # laid out together in finish()
+            return
         width = 16 + 6.9 * len(text.replace("\u2066", "").replace("\u2069", ""))
-        text = f"\u2067{text}\u2069"             # a right-to-left label, whatever it starts or ends with
-        left = self.plot.xc + 8 if anchor != "middle" else min(max(x - width / 2, self.plot.x0 + 2),
-                                                                    self.plot.xc - width - 4)
-        lowest, highest = self.plot.y0 + 11, self.plot.y1 - 11
-        wanted = y
-        y = min(max(y, lowest), highest)
-        # the free height nearest to the wanted one, anywhere in the column
-        steps = int((highest - lowest) // 4) + 1
-        for cy in sorted((lowest + 4 * k for k in range(steps)), key=lambda c: abs(c - y)):
-            if all(left + width + 3 <= b[0] or left - 3 >= b[2] or cy + 12 <= b[1] or cy - 12 >= b[3]
-                   for b in self.boxes):
-                y = cy
-                break
+        left = min(max(x - width / 2, self.plot.x0 + 2), self.plot.xc - width - 4)
+        y = min(max(y, self.plot.y0 + 11), self.plot.y1 - 11)
         self.boxes.append((left, y - 10, left + width, y + 10))
-        if anchor != "middle" and abs(y - wanted) > 8 and self.plot.y0 <= wanted <= self.plot.y1:
-            # moved away from its level: a thin leader keeps them paired
-            self.out.append(f'<path class="ann" d="M{self.plot.xc + 2:.1f},{wanted:.1f} '
-                            f'L{left - 2:.1f},{y:.1f}" stroke="{color}" stroke-width="0.8" '
-                            f'stroke-opacity="0.7" fill="none"/>')
+        self._draw(left, y, width, 12.0, text, color)
+
+    def finish(self) -> list[str]:
+        """Place the gutter labels: in price order, each as near its level as the ones
+        above it allow, pushed up from the bottom if the column overflows."""
+        lowest, highest = self.plot.y0 + 11, self.plot.y1 - 11
+        tags = sorted(self.pending, key=lambda t: t[0])
+        ys: list[float] = []
+        for wanted, _, _ in tags:
+            y = max(min(max(wanted, lowest), highest), (ys[-1] + self.GAP) if ys else lowest)
+            ys.append(y)
+        for k in range(len(ys) - 1, -1, -1):          # the bottom overflowed: push back up
+            limit = highest if k == len(ys) - 1 else ys[k + 1] - self.GAP
+            ys[k] = max(min(ys[k], limit), lowest)
+        left = self.plot.xc + 8
+        room = self.plot.x1 - left - 2                # never into the profile or the axis
+        for (wanted, text, color), y in zip(tags, ys):
+            chars = len(text.replace("\u2066", "").replace("\u2069", ""))
+            size = 12.0 if 16 + 6.9 * chars <= room else max(9.5, 12.0 * (room - 16) / (6.9 * chars))
+            width = min(room, 16 + 6.9 * chars * size / 12.0)
+            if abs(y - wanted) > 8 and self.plot.y0 <= wanted <= self.plot.y1:
+                self.out.append(f'<path class="ann" d="M{self.plot.xc + 2:.1f},{wanted:.1f} '
+                                f'L{left - 2:.1f},{y:.1f}" stroke="{color}" stroke-width="0.8" '
+                                f'stroke-opacity="0.7" fill="none"/>')
+            self._draw(left, y, width, size, text, color)
+        self.pending = []
+        return self.out
+
+    def _draw(self, left: float, y: float, width: float, size: float, text: str, color: str) -> None:
+        text = f"\u2067{text}\u2069"             # a right-to-left label, whatever it starts or ends with
         self.out.append(f'<g class="ann"><rect x="{left:.1f}" y="{y - 10:.1f}" width="{width:.1f}" '
                         f'height="20" rx="6" fill="{ANN["tag"]}" stroke="{color}" stroke-width="1"/>'
                         f'<text x="{left + width / 2:.1f}" y="{y + 4:.1f}" fill="{color}" '
-                        f'font-family="{SANS}" font-size="12" font-weight="600" '
+                        f'font-family="{SANS}" font-size="{size:.1f}" font-weight="600" '
                         f'text-anchor="middle">{_esc(text)}</text></g>')
 
 
@@ -151,6 +172,8 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
             levels += [v for v in item["levels"].values()]
         elif item["type"] == "pattern":
             levels += [item.get("target"), item.get("invalidation")]
+        elif item["type"] == "extreme":
+            levels.append(item["price"])
     levels = [float(v) for v in levels if keep(v)]
     lo, hi = min([lo, *levels]), max([hi, *levels])
     pad = (hi - lo) * 0.06 or 1.0
@@ -194,18 +217,21 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
     legend = [(ZONE["support"], "תמיכה") if "support" in kinds else None,
               (ZONE["resistance"], "התנגדות") if "resistance" in kinds else None,
               (ANN["target"], "פיבונאצ'י") if "fib" in items else None,
-              (ANN["accent"], "פרופיל נפח") if "vp" in items else None]
+              (ANN["accent"], "פרופיל נפח") if "vp" in items else None,
+              (MA_COLORS[50], "ממוצע 50") if 50 in (items.get("ma") or {}).get("periods", []) else None,
+              (INK["title"], "שיא/שפל שנתי") if any(v["type"] == "extreme" for v in items.values()) else None]
     cursor = W - 18
     for color, word in (e for e in legend if e):
         out.append(f'<circle cx="{cursor - 4:.1f}" cy="21" r="4.5" fill="{color}"/>')
         out.append(f'<text x="{cursor - 13:.1f}" y="25" fill="{INK["axis"]}" font-family="{SANS}" '
                    f'font-size="12" text-anchor="end">{_esc(word)}</text>')
         cursor -= 13 + 7.2 * len(word) + 16
-    # the last close: a dotted line across and a tag on the price axis
-    out.append(f'<line x1="{plot.x0}" x2="{plot.x1}" y1="{close_y:.1f}" y2="{close_y:.1f}" stroke="{day_color}" '
-               f'stroke-width="1" stroke-opacity="0.55" stroke-dasharray="2 3"/>')
+    # the last close: a dotted line across and a tag on the price axis, in a neutral colour
+    # (review round 1: a red or green price tag read as a signal)
+    out.append(f'<line x1="{plot.x0}" x2="{plot.x1}" y1="{close_y:.1f}" y2="{close_y:.1f}" stroke="{INK["axis"]}" '
+               f'stroke-width="1" stroke-opacity="0.7" stroke-dasharray="2 3"/>')
     out.append(f'<rect x="{W - AXIS + 2}" y="{close_y - 10:.1f}" width="{AXIS - 6}" height="20" rx="4" '
-               f'fill="{day_color}"/>')
+               f'fill="{INK["title"]}"/>')
     out.append(f'<text x="{W - AXIS + 2 + (AXIS - 6) / 2:.1f}" y="{close_y + 4:.1f}" fill="{INK["bg"]}" '
                f'font-family="{MONO}" font-size="12" font-weight="700" text-anchor="middle">{_fmt(close)}</text>')
 
@@ -277,7 +303,15 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                 y = plot.y(price)
                 out.append(f'<line class="ann" x1="{plot.x(b_i):.1f}" y1="{y:.1f}" x2="{right:.1f}" y2="{y:.1f}" '
                            f'stroke="{ANN["target"]}" stroke-width="1" stroke-opacity="0.8" stroke-dasharray="6 4"/>')
-                tags.add(right, y, f"פיבו {_ltr(f'{ratio:g}%')} {_ltr(_fmt(price))}", ANN["target"])
+                tags.add(right, y, f"פיבו {_ltr(f'{ratio:g}%')} · {_ltr(_fmt(price))}", ANN["target"])
+        elif kind == "extreme":
+            if not keep(item["price"]):
+                continue
+            y = plot.y(item["price"])
+            a_i = max(first, index.get(item.get("day") or "", first))
+            out.append(f'<line class="ann" x1="{plot.x(a_i):.1f}" y1="{y:.1f}" x2="{right:.1f}" y2="{y:.1f}" '
+                       f'stroke="{INK["title"]}" stroke-width="1.2" stroke-opacity="0.7" stroke-dasharray="8 4"/>')
+            tags.add(right, y, f"{item['label']} {_ltr(_fmt(item['price']))}", INK["title"])
         elif kind == "divergence":
             i1, i2 = index.get(item["day1"]), index.get(item["day2"])
             if i1 is None or i2 is None or i1 < first:
@@ -306,7 +340,15 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                 if i is not None and i >= first:
                     out.append(f'<circle class="ann" cx="{plot.x(i):.1f}" cy="{plot.y(point["price"]):.1f}" '
                                f'r="4" fill="{INK["bg"]}" stroke="{ANN["line"]}" stroke-width="1.8"/>')
-            for level, name, dash in ((item.get("target"), "יעד (כלל המדידה)", "7 4"),
+            i = index.get(item.get("breakout_day") or "")
+            if i is not None and i >= first and item.get("breakout") is not None:
+                # where the price broke out: a mark on the breakout line at that session
+                y, x = plot.y(float(item["breakout"])), plot.x(i)
+                out.append(f'<circle class="ann" cx="{x:.1f}" cy="{y:.1f}" r="6.5" fill="{color}" '
+                           f'fill-opacity="0.25" stroke="{color}" stroke-width="2"/>')
+                word = "פריצה" if item["direction"] == "bullish" else "שבירה"
+                tags.add(x, y + (24 if item["direction"] == "bearish" else -16), word, color, "middle")
+            for level, name, dash in ((item.get("target"), "יעד (גובה התבנית)", "7 4"),
                                       (item.get("invalidation"), "ביטול", "2 4")):
                 if level is not None and keep(level):
                     y = plot.y(level)
@@ -341,6 +383,6 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
         if vp.get("poc_label", True):
             tags.add(right, y, f"שליטה (POC) {_ltr(_fmt(vp['poc']))}", ANN["accent"])
 
-    out += tags.out
+    out += tags.finish()
     out.append("</svg>")
     return "".join(out)

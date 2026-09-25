@@ -91,7 +91,7 @@ def test_the_whole_analysis_is_clean_and_drawable():
     text = json.dumps(result.facts, ensure_ascii=False)
     assert "nan" not in text.lower() and "none" not in text.lower()
     for key in result.drawings:
-        assert re.fullmatch(r"(zone|tl|div|pat)_\d+|fib|vp|ma", key), key
+        assert re.fullmatch(r"(zone|tl|div|pat)_\d+|fib|vp|ma|swings", key), key
     svg = render(bars, result)
     xml.dom.minidom.parseString(svg)
     assert not re.search(r"(?<![a-z])nan(?![a-z])", svg.lower())
@@ -151,12 +151,33 @@ def test_the_simple_view_keeps_the_nearest_levels_and_joins_the_ones_that_meet()
 
     view = simple_view(_view_case(108.0), RULES)
     assert {k for k, v in view.items() if v["type"] == "zone"} == {"zone_2", "zone_3", "zone_4", "zone_5"}
-    assert "tl_1" not in view and "ma" not in view
+    assert "tl_1" not in view and view["ma"]["periods"] == [50]   # the 50-day average only
     fib = view["fib"]                                   # 108 is 40% back into the 90 -> 120 move
     assert fib["show"] and "fib_ext_1618" not in fib["levels"]
     assert view["zone_4"]["notes"] == ["fib_500", "poc"]    # 105 is on the 104.5-105.5 zone
     assert set(fib["levels"]) == {"fib_382", "fib_618"}
     assert view["vp"]["show"] and not view["vp"]["poc_label"]
+
+
+def test_the_view_adds_a_near_yearly_extreme_and_a_fresh_breakout_only():
+    from tascreen.analyst.view import simple_view
+
+    def fact(v):
+        return {"value": v}
+
+    a = _view_case(108.0)
+    a.facts.update({"high_52w": fact(116.0), "high_52w_day": fact("2026-01-12"),   # 7% above, no zone
+                    "low_52w": fact(80.0), "low_52w_day": fact("2025-06-02"),      # 26% below: too far
+                    "pat_1.sessions_since_breakout": fact(4), "pat_2.sessions_since_breakout": fact(60)})
+    pattern = {"type": "pattern", "family": "chart", "direction": "bullish", "lines": [], "points": []}
+    a.drawings.update({"pat_1": pattern, "pat_2": pattern,
+                       "pat_3": {**pattern, "family": "candle"}})
+    view = simple_view(a, RULES)
+    assert view["hi52"] == {"type": "extreme", "price": 116.0, "label": "שיא שנתי", "day": "2026-01-12"}
+    assert "lo52" not in view
+    assert "pat_1" in view and "pat_2" not in view and "pat_3" not in view
+    a.facts["high_52w"] = fact(119.5)                          # on the drawn 119-120 zone: its label
+    assert "hi52" not in simple_view(a, RULES)
 
 
 def test_fibonacci_and_the_profile_stay_off_when_they_do_not_matter_now():
@@ -174,9 +195,34 @@ def test_the_scenarios_are_built_from_the_zones_the_chart_shows():
     facts = {k: v["value"] for k, v in key_level_facts(_view_case(108.0), RULES).items()}
     assert (facts["level.r1.low"], facts["level.r1.high"], facts["level.r2.low"]) == (112, 113, 119)
     assert (facts["level.s1.low"], facts["level.s1.high"], facts["level.s2.high"]) == (104.5, 105.5, 100)
-    assert (facts["up.trigger"], facts["up.next"], facts["up.cancel"]) == (113, 119, 104.5)
-    assert (facts["down.trigger"], facts["down.next"], facts["down.cancel"]) == (104.5, 100, 113)
+    # a close back through the zone that started a scenario cancels it (review round 1)
+    assert (facts["up.trigger"], facts["up.next"], facts["up.cancel"]) == (113, 119, 112)
+    assert (facts["down.trigger"], facts["down.next"], facts["down.cancel"]) == (104.5, 100, 105.5)
+    assert (facts["up.trigger_pct"], facts["up.next_pct"], facts["down.trigger_pct"]) == (4.6, 10.2, 3.2)
+    assert facts["event.kind"] == "position"
     assert facts["position"] == "בין התמיכה להתנגדות, קרוב יותר לתמיכה"      # 2.5 below vs 4 above
     assert facts["level.r1.distance_pct"] == 3.7 and facts["level.s1.distance_pct"] == 2.3
     inside = {k: v["value"] for k, v in key_level_facts(_view_case(105.0), RULES).items()}
     assert inside["position"] == "בתוך אזור התמיכה הקרוב" and inside["level.s1.distance_pct"] == 0
+    assert (inside["down.trigger"], inside["down.cancel"], inside["event.kind"]) == (104.5, 105.5, "inside_zone")
+
+
+def test_near_levels_join_into_a_band_and_the_next_level_is_never_right_behind():
+    from tascreen.analyst.facts import Analysis
+    from tascreen.analyst.view import key_level_facts
+
+    def zone(lo, hi, kind):
+        return {"type": "zone", "kind": kind, "low": lo, "high": hi,
+                "first_day": "2026-01-02", "last_day": "2026-01-20", "touches": 2}
+
+    a = Analysis("TEST:SYN", "2026-01-30", 0)
+    a.facts = {"close": {"value": 100.0}, "atr": {"value": 2.0}, "high_52w": {"value": 112.0},
+               "low_52w": {"value": 80.0}}
+    a.drawings = {"zone_1": zone(103, 104, "resistance"), "zone_2": zone(104.8, 105.5, "resistance"),
+                  "zone_3": zone(96, 97, "support"), "zone_4": zone(95.4, 95.9, "support"),
+                  "swings": {"type": "swings", "points": [{"day": "2026-01-10", "price": 90.0, "kind": "L"}]}}
+    f = {k: v["value"] for k, v in key_level_facts(a, RULES).items()}
+    assert (f["up.trigger"], f["up.cancel"]) == (105.5, 103)          # 103-104 and 104.8-105.5: one band
+    assert (f["up.next"], f["up.next_what"]) == (112, "השיא השנתי")
+    assert (f["down.trigger"], f["down.next"]) == (95.4, 90)          # the swing low of 10/01
+    assert f["down.next_what"] == "השפל מ-10/01"

@@ -65,80 +65,101 @@ def test_bullish_and_trend_words_need_a_fact_that_says_so():
     assert "falling trend" in _problem("המניה במגמה יורדת.", ["volume.trend"])
 
 
-def test_the_scenarios_and_levels_must_use_the_charts_own_facts():
+def test_the_headline_and_the_levels_must_use_the_charts_own_facts():
     facts = {**_analysis().facts,
              "level.r1.high": {"value": 110.0, "label": "התנגדות", "unit": "$"},
-             "up.trigger": {"value": 110.0, "label": "תרחיש עולה", "unit": "$"}}
+             "event": {"value": "המחיר בשיא של השנה האחרונה", "label": "האירוע", "unit": ""}}
 
-    def problem(part, cites):
-        return part_problem({"part": part, "signal": "green", "text": "סגירה מעל 110.", "cites": cites},
+    def problem(part, cites, text="סגירה מעל 110."):
+        return part_problem({"part": part, "signal": "green", "text": text, "cites": cites},
                             facts, allowed_numbers(facts, RULES), fact_dates(facts))
 
-    assert "must cite up.trigger" in problem("up", ["zone_1.high"])
-    assert problem("up", ["up.trigger"]) is None
     assert "level.* facts" in problem("levels", ["zone_1.high"])
     assert problem("levels", ["level.r1.high"]) is None
-    assert problem("down", ["zone_2.low"]) is None or "down.trigger" not in facts
+    assert "must cite event" in problem("headline", ["close"], "המחיר בשיא.")
+    assert problem("headline", ["event"], "המחיר בשיא של השנה האחרונה.") is None
+    assert "unknown section" in problem("up", ["level.r1.high"])       # the program writes it
+    assert "forecast wording" in problem("levels", ["level.r1.high"], "סגירה מעל 110 תוביל למעלה.")
+    assert problem("levels", ["level.r1.high"], "המחיר ירד אל 110.") is None   # past tense is fine
 
 
 def test_the_light_must_not_contradict_the_text():
-    assert _problem("התמונה שורית: הממוצעים מסודרים.", ["ma.stack"], "green") is None
-    assert "green light on a bearish" in _problem("סטייה דובית במומנטום.", ["div_1.kind"], "green")
-    assert _problem("סטייה דובית במומנטום.", ["div_1.kind"], "red") is None
-    assert "red light on a bullish" in _problem("התמונה שורית.", ["ma.stack"], "red")
-    assert "no light" in _problem("התנגדות ב-110.", ["zone_1.high"], None)
-    # the scenarios' lights are fixed: up is green, down is red, whatever the model sent
-    assert _problem("אם תהיה סגירה מעל 110, ההתנגדות תיפרץ.", ["zone_1.high"], "red", "up") is None
+    assert _problem("התמונה שורית: הממוצעים מסודרים.", ["ma.stack"], "green", "trend") is None
+    assert "green light on a bearish" in _problem("סטייה דובית במומנטום.", ["div_1.kind"], "green", "trend")
+    assert _problem("סטייה דובית במומנטום.", ["div_1.kind"], "red", "trend") is None
+    assert "red light on a bullish" in _problem("התמונה שורית.", ["ma.stack"], "red", "trend")
+    assert "no light" in _problem("התנגדות ב-110.", ["zone_1.high"], None, "trend")
+    # the levels' light is fixed (a neutral pin), whatever the model sent
+    assert _problem("התנגדות ב-110.", ["zone_1.high"], "red", "levels") is None
 
 
 def _parts(**texts):
-    cites = {"headline": ["close"], "levels": ["zone_1.low", "zone_2.high"], "up": ["zone_1.high"],
-             "down": ["zone_2.low"], "volume": ["volume.trend"]}
+    cites = {"headline": ["close"], "levels": ["zone_1.low", "zone_2.high"], "volume": ["volume.trend"],
+             "trend": ["ma.stack"]}
     return {"parts": [{"part": k, "signal": "yellow", "text": v, "cites": cites[k]}
                       for k, v in texts.items()]}
 
 
-GOOD = dict(headline="המחיר 104.2, בין תמיכה להתנגדות.", levels="התנגדות 108.5-110, תמיכה 99-100.5.",
-            up="אם תהיה סגירה מעל 110, ההתנגדות תיפרץ.", down="אם תהיה סגירה מתחת ל-99, התמיכה תישבר.")
+GOOD = dict(headline="המחיר בין תמיכה להתנגדות.", levels="התנגדות 108.50-110.00, תמיכה 99.00-100.50.")
 
 
 def test_a_rejected_or_missing_section_gets_one_retry_with_the_reasons():
-    answers = [_parts(headline=GOOD["headline"], levels="התנגדות ב-777.", up=GOOD["up"]),
-               _parts(levels=GOOD["levels"], down=GOOD["down"], headline="שוב 555.")]
+    answers = [_parts(headline=GOOD["headline"], levels="התנגדות ב-777.", volume="הנפח 12345."),
+               _parts(levels=GOOD["levels"], headline="שוב 555.", volume="הנפח יציב.")]
     llm = SyntheticLLM(lambda s, u, schema: answers.pop(0))
     written = write(_analysis(), llm, rules=RULES)
-    assert [p["part"] for p in written["parts"]] == ["headline", "levels", "up", "down"]
+    assert [p["part"] for p in written["parts"]] == ["headline", "levels", "volume"]
     assert written["parts"][0]["text"] == GOOD["headline"]          # the first good one stays
     assert not written["omitted"] and len(written["usage"]) == 2
-    assert "- levels: numbers not in the facts" in llm.calls[1] and "- down: missing" in llm.calls[1]
-    assert "headline" not in llm.calls[1].split("ONLY these")[1]
+    retry = llm.calls[1].split("ONLY these")[1]
+    assert "- levels: numbers not in the facts" in retry and "- volume: numbers" in retry
+    assert "headline" not in retry                                    # optional ones get a rewrite too
 
 
 def test_what_fails_twice_is_left_out_and_the_message_says_so():
-    bad = _parts(**{**GOOD, "down": "כדאי למכור מתחת ל-99."})
+    bad = _parts(**{**GOOD, "levels": "כדאי לקנות מעל 110."})
     written = write(_analysis(), SyntheticLLM(lambda s, u, schema: bad), rules=RULES)
-    assert written["omitted"] == ["down"]
+    assert written["omitted"] == ["levels"]
     message = telegram_html(written)
-    assert "הושמט: תרחיש יורד" in message and "לא ייעוץ השקעות" in message
-    assert "למכור" not in message
+    assert "הושמט: רמות" in message and "לא ייעוץ השקעות" in message and "לקנות" not in message
     lines = message.split("\n")
     assert lines[0] == "<b>📊 ניתוח טכני · TEST</b>" and lines[1] == "סגירה 104.20 · 20/03/2026"
-    assert lines[3] == "🟡 " + GOOD["headline"] and "🟡 <b>תמיכה והתנגדות:</b> " + GOOD["levels"] in lines
-    assert "🟢 <b>תרחיש עולה:</b> " + GOOD["up"] in lines          # yellow sent, green shown
+    assert lines[3] == "🟡 " + GOOD["headline"]
 
 
-def test_at_most_two_optional_sections_and_they_are_not_retried():
+def test_the_scenarios_are_written_by_the_program_from_the_facts():
+    from tascreen.analyst.writer import scenario_parts
+
+    def fact(v):
+        return {"value": v, "label": "", "unit": ""}
+
+    facts = {"up.trigger": fact(110.0), "up.trigger_pct": fact(5.6), "up.trigger_what": fact("אזור ההתנגדות"),
+             "up.next": fact(120.0), "up.next_pct": fact(15.2), "up.next_what": fact("השיא השנתי"),
+             "up.cancel": fact(108.5),
+             "down.trigger": fact(99.0), "down.trigger_pct": fact(5.0), "down.trigger_what": fact("אזור התמיכה"),
+             "down.no_next": fact("מתחתיה אין רמות ממחירי השנה האחרונה"), "down.cancel": fact(100.5)}
+    up, down = scenario_parts(facts)
+    assert up["text"] == ("בסגירה מעל 110.00 (אזור ההתנגדות, 5.6% מעל הסגירה), הרמה הבאה היא 120.00 "
+                          "(השיא השנתי, 15.2% מעל הסגירה). התרחיש מתבטל בסגירה חזרה מתחת ל-108.50.")
+    assert down["text"] == ("בסגירה מתחת ל-99.00 (אזור התמיכה, 5.0% מתחת לסגירה); מתחתיה אין רמות "
+                            "ממחירי השנה האחרונה. התרחיש מתבטל בסגירה חזרה מעל 100.50.")
+    assert (up["signal"], down["signal"]) == ("up", "down") and "up.trigger" in up["cites"]
+    at_high = scenario_parts({"up.no_next": fact("המחיר בשיא השנתי; מעליו אין רמות ממחירי השנה האחרונה")})
+    assert [p["part"] for p in at_high] == ["up"] and at_high[0]["text"].endswith("האחרונה.")
+
+
+def test_at_most_two_optional_sections_and_the_ones_over_are_not_retried():
     answer = _parts(**GOOD, volume="הנפח יציב.")
-    answer["parts"][4:4] = [
+    answer["parts"][2:2] = [
         {"part": "trend", "signal": "green", "text": "סדר הממוצעים שורי.", "cites": ["ma.stack"]},
-        {"part": "fibonacci", "signal": "yellow", "text": "פיבונאצ'י 61.8% ב-101.9.", "cites": ["fib_618"]},
+        {"part": "fibonacci", "signal": "yellow", "text": "פיבונאצ'י 61.8% ב-101.90.", "cites": ["fib_618"]},
         {"part": "momentum", "signal": "green", "text": "המומנטום שורי.", "cites": ["close"]}]
     llm = SyntheticLLM(lambda s, u, schema: answer)
     written = write(_analysis(), llm, rules=RULES)
     optional = [p["part"] for p in written["parts"] if p["part"] not in ("headline", "levels", "up", "down")]
     assert optional == ["trend", "fibonacci"] and not written["omitted"]
     assert {d["reason"] for d in written["dropped"]} == {"more optional sections than allowed"}
-    assert len(llm.calls) == 1                         # nothing required failed: no retry
+    assert len(llm.calls) == 1                         # nothing failed a check: no retry
 
 
 def test_the_message_is_escaped_and_fits_one_telegram_message():
@@ -147,13 +168,13 @@ def test_the_message_is_escaped_and_fits_one_telegram_message():
     message = telegram_html(written)
     assert len(message) <= 4096 and "&lt;b&gt;" in message
     kept = [k for k in PARTS if f"<b>{PARTS[k]}:</b>" in message]
-    assert {"levels", "up", "down"} <= set(kept) and "momentum" not in kept
+    assert {"levels", "up", "down"} <= set(kept) and "momentum" not in kept    # the scenarios stay
 
 
 def test_the_prompt_carries_the_knowledge_and_its_sources():
     prompt = system_prompt()
     assert "chartschool.stockcharts.com" in prompt and "tradingview.com/support" in prompt
-    assert "יעד לפי כלל המדידה" in prompt
+    assert "גובה התבנית" in prompt and "must cite `event`" in prompt
 
 
 def test_a_typed_symbol_is_found_among_the_stored_stocks(tmp_path):

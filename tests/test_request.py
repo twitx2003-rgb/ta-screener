@@ -19,7 +19,7 @@ def _answer(system, user, schema):
     import json
 
     facts = json.loads(user.split("BRIEF (JSON):\n", 1)[1].split("\n\nYour previous", 1)[0])["facts"]
-    cites = {"headline": ["close"],
+    cites = {"headline": ["event"] if "event" in facts else ["close"],
              "levels": [k for k in facts if k.startswith("level.")][:1] or ["close"],
              "up": ["up.trigger"] if "up.trigger" in facts else ["close"],
              "down": ["down.trigger"] if "down.trigger" in facts else ["close"]}

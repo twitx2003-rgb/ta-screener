@@ -699,6 +699,29 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   header with name/close/change, round axis ticks, close tag, legend, 130 bars, profile
   clipped to the plot; the analyst runner fetches only data/scans/*/indicators.parquet from
   the state repo (sparse, blob-less) for the companies' names.
+- **Analyst training loop (plan B, owner 2026-09-25).** `run.py --analyze-eval ROUND`
+  (normal terminal: `claude -p`) writes the 12-stock `analyst/evaluate.EVAL_SET` to
+  `logs/eval/<ROUND>/`; four review agents (TA expert, beginner, Hebrew editor, trader)
+  score it with `analyst/review_rubric.md` (kept out of `knowledge/`, so not in the
+  writer's prompt). Round 1 averaged ~5/10. Fixes from it:
+  - facts: 52-week high/low (+day, distance), zone distance to the near edge, swing points,
+    divergence age, pattern breakout state (`sessions_since_breakout`,
+    `close_vs_breakout_pct`, `state`: back inside = doubtful); Fibonacci on the leg in
+    progress, none when the move is under `fib_min_atr` ATR / `fib_min_bars`.
+  - `view.key_level_facts`: scenario levels from every zone, swing highs/lows and the
+    52-week extreme, joined into bands (gap `scenario_min_gap_atr`, width <=
+    `scenario_band_max_atr`); `event` by priority (failed breakout, fresh breakout, near
+    52-week high/low, 20-day move >= 15%, inside a zone, position).
+  - writer: the model writes headline/levels (+ at most 2 optional sections); the two
+    scenarios are written by the program (`writer.scenario_parts`); the headline must cite
+    `event`, levels must cite `level.*`; forecast wording rejected; prices .2f, no $,
+    dates DD/MM; targets are "יעד לפי גובה התבנית (לא תחזית)".
+  - chart: tags laid out in price order in the gutter (no overlaps); neutral close tag;
+    the 50-day average (cyan, never Fibonacci's gold); a dashed 52-week high/low within
+    `extreme_draw_pct` that no zone holds; the outline of a chart pattern whose breakout is
+    <= 2 x `event_fresh_sessions` old, with the breakout session marked.
+  - Open: the scanner's `flat_line_max_drift` lets a rising top pass as an ascending
+    triangle (NFLX) — site-wide, to discuss with the owner.
   - **Tests never reach the real bot**: `tests/conftest.py` clears the Telegram/GitHub keys
     and points `notify.CREDENTIALS` away from ~/.ta-screener (a tick test once sent the
     owner a real report of made-up stocks before that guard existed).
