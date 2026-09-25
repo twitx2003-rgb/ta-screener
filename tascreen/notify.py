@@ -53,18 +53,21 @@ class Telegram:
     def _http(self, method: str, params: dict) -> dict:
         return self._request(method, urllib.parse.urlencode(params).encode(), {}, 30)
 
-    def _http_upload(self, method: str, params: dict, file: tuple[str, str, bytes, str]) -> dict:
-        """multipart/form-data: the fields, then one file (field, filename, content, type)."""
-        field, filename, content, content_type = file
+    def _http_upload(self, method: str, params: dict,
+                     file: tuple[str, str, bytes, str] | list[tuple[str, str, bytes, str]]) -> dict:
+        """multipart/form-data: the fields, then the file(s) (field, filename, content, type)."""
+        files = file if isinstance(file, list) else [file]
         boundary = uuid.uuid4().hex
         crlf = "\r\n"
         body = b"".join(
             f'--{boundary}{crlf}Content-Disposition: form-data; name="{k}"{crlf}{crlf}{v}{crlf}'.encode()
             for k, v in params.items())
-        body += (f'--{boundary}{crlf}Content-Disposition: form-data; name="{field}"; '
-                 f'filename="{filename}"{crlf}Content-Type: {content_type}{crlf}{crlf}').encode()
-        body += content + f"{crlf}--{boundary}--{crlf}".encode()
-        return self._request(method, body, {"Content-Type": f"multipart/form-data; boundary={boundary}"}, 90)
+        for field, filename, content, content_type in files:
+            body += (f'--{boundary}{crlf}Content-Disposition: form-data; name="{field}"; '
+                     f'filename="{filename}"{crlf}Content-Type: {content_type}{crlf}{crlf}').encode()
+            body += content + crlf.encode()
+        body += f"--{boundary}--{crlf}".encode()
+        return self._request(method, body, {"Content-Type": f"multipart/form-data; boundary={boundary}"}, 120)
 
     def _request(self, method: str, data: bytes, headers: dict, timeout: float) -> dict:
         request = urllib.request.Request(f"{API}/bot{self.token}/{method}", data=data, headers=headers)
@@ -127,9 +130,28 @@ class Telegram:
             params["parse_mode"] = "HTML"
         self.call("sendMessage", **params)
 
-    def send_photo(self, content: bytes, caption: str = "", filename: str = "chart.png") -> None:
+    def send_photo(self, content: bytes, caption: str = "", filename: str = "chart.png", *,
+                   html: bool = False) -> None:
         params = {"chat_id": self._chat(), "caption": caption[:1024]}
+        if html:
+            params["parse_mode"] = "HTML"
         self._answer("sendPhoto", self._upload("sendPhoto", params, ("photo", filename, content, "image/png")))
+
+    ALBUM = 10                          # Telegram: 2..10 photos in one media group
+
+    def send_album(self, photos: list[tuple[bytes, str]]) -> None:
+        """Photos with their HTML captions (each under 1024 characters), in albums of up
+        to ten; a lone photo goes as a plain photo (an album needs two)."""
+        for start in range(0, len(photos), self.ALBUM):
+            batch = photos[start:start + self.ALBUM]
+            if len(batch) == 1:
+                self.send_photo(batch[0][0], batch[0][1], html=True)
+                continue
+            media = [{"type": "photo", "media": f"attach://p{n}", "caption": caption[:1024],
+                      "parse_mode": "HTML"} for n, (_, caption) in enumerate(batch)]
+            files = [(f"p{n}", f"p{n}.png", content, "image/png") for n, (content, _) in enumerate(batch)]
+            params = {"chat_id": self._chat(), "media": json.dumps(media, ensure_ascii=False)}
+            self._answer("sendMediaGroup", self._upload("sendMediaGroup", params, files))
 
     def send_document(self, content: bytes, filename: str, caption: str = "") -> None:
         params = {"chat_id": self._chat(), "caption": caption[:1024]}

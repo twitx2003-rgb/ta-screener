@@ -101,7 +101,7 @@ def test_the_report_goes_once_and_starts_the_strongest_analyses(tmp_path):
     first = evening_report(store, _view(), cfg, bot=bot, min_cases=20, dispatch=dispatch,
                            can_dispatch=True, now=now)
     assert first == {"status": "sent", "breakouts": 2, "verge": 1, "analyses": 1, "messages": 1,
-                     "intraday_held": 0, "intraday_fell": 0}
+                     "intraday_held": 0, "intraday_fell": 0, "charts": 0, "charts_missing": 0}
     assert started == [("analyst.yml", {"symbol": "NYSE:BBB"}), ("analyst.yml", {"symbol": "NYSE:AAA"})]
     assert "AAA" in bot.sent[-1] and "לא הצלחתי" in bot.sent[-1]     # the refused one is told
     assert read_sent(store, DAY)["evening"]["analyses"] == ["NYSE:BBB"]

@@ -32,8 +32,19 @@ def _browser() -> str | None:
     return None
 
 
+def _size(svg: Path) -> tuple[int, int]:
+    """The chart's own size from its viewBox (the channels' charts are smaller than the
+    analyst's): a browser window of another size leaves white margins."""
+    import re
+
+    head = svg.read_text(encoding="utf-8", errors="replace")[:600]
+    found = re.search(r'viewBox="0 0 (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)"', head)
+    return (round(float(found.group(1))), round(float(found.group(2)))) if found else (W, H)
+
+
 def svg_to_png(svg: Path, png: Path, *, timeout_s: int = 60) -> Path:
     png.unlink(missing_ok=True)
+    width, height = _size(svg)
     rsvg = shutil.which("rsvg-convert")
     if rsvg:
         args = [rsvg, "--zoom", str(SCALE), "--output", str(png), str(svg)]
@@ -45,7 +56,7 @@ def svg_to_png(svg: Path, png: Path, *, timeout_s: int = 60) -> Path:
         # a fresh profile per shot: a reused one silently skipped shots (CLAUDE.md, phase 3)
         with tempfile.TemporaryDirectory(prefix="ta-shot-", ignore_cleanup_errors=True) as profile:
             args = [browser, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                    f"--user-data-dir={profile}", f"--window-size={W},{H}",
+                    f"--user-data-dir={profile}", f"--window-size={width},{height}",
                     f"--force-device-scale-factor={SCALE}", f"--screenshot={png.resolve()}",
                     svg.resolve().as_uri()]
             subprocess.run(args, capture_output=True, timeout=timeout_s)

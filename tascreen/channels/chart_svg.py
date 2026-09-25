@@ -197,8 +197,9 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
                    f'font-size="12">{price:,.2f}</text>')
     for k in range(5):
         i = first + int(k * (len(win) - 1) / 4)
-        out.append(f'<text x="{fr.x(i):.1f}" y="{H - 8}" fill="{INK["axis"]}" font-family="{MONO}" '
-                   f'font-size="12" text-anchor="middle">{pd.Timestamp(days[i]):%d/%m}</text>')
+        anchor, x = ("start", fr.x0) if k == 0 else ("middle", fr.x(i))      # the first is never cut
+        out.append(f'<text x="{x:.1f}" y="{H - 8}" fill="{INK["axis"]}" font-family="{MONO}" '
+                   f'font-size="12" text-anchor="{anchor}">{pd.Timestamp(days[i]):%d/%m}</text>')
     out.append(f'<text x="{fr.x0 + 4}" y="26" fill="{INK["title"]}" font-family="{MONO}" '
                f'font-size="14" font-weight="600">{_esc(title)}</text>')
     out.append(f'<text x="{fr.x1}" y="26" fill="{INK["axis"]}" font-family="{MONO}" font-size="12" '
@@ -228,10 +229,18 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
                    f'height="{max(1.0, bot - top):.1f}" fill="{color}"/>')
     for n, key in ((50, "sma50"), (150, "sma150")):
         line = sma(bars["close"], n).iloc[first:last + 1]
-        pts = [f"{fr.x(i):.1f},{fr.y(v):.1f}" for i, v in zip(range(first, last + 1), line) if v == v]
-        if len(pts) > 1:
-            out.append(f'<polyline points="{" ".join(pts)}" fill="none" stroke="{INK[key]}" '
-                       f'stroke-width="1.4" stroke-opacity="0.85"/>')
+        # only inside the price panel: an average far below the window's prices used to run
+        # down through the volume bars; each stretch inside is its own line
+        runs: list[list[str]] = [[]]
+        for i, v in zip(range(first, last + 1), line):
+            if v == v and fr.lo <= v <= fr.hi:
+                runs[-1].append(f"{fr.x(i):.1f},{fr.y(v):.1f}")
+            elif runs[-1]:
+                runs.append([])
+        for pts in runs:
+            if len(pts) > 1:
+                out.append(f'<polyline points="{" ".join(pts)}" fill="none" stroke="{INK[key]}" '
+                           f'stroke-width="1.4" stroke-opacity="0.85"/>')
 
     # ------------------------------------------------------------- annotations
     color = ANN["bull"] if bullish else (ANN["bear"] if det.get("direction") == "bearish" else ANN["line"])

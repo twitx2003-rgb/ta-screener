@@ -95,12 +95,13 @@ def bullish_breakouts(view: ScanView, bars_of: Callable[[str], pd.DataFrame | No
     out = []
     for row in rows.to_dict("records"):
         stock = stocks.get(row["symbol"], {})
+        record = detection_record(row)
         out.append({"symbol": row["symbol"], "pattern": row["pattern"], "name": row["name_he"],
                     "breakout": row["breakout_price"], "target": row["target"],
-                    "invalidation": invalidation(detection_record(row), bars_of(row["symbol"])),
+                    "invalidation": invalidation(record, bars_of(row["symbol"])),
                     "close": stock.get("close", math.nan),
                     "rel_volume": stock.get("rel_volume", math.nan),
-                    "hit_rate": rates.get(row["pattern"])})
+                    "hit_rate": rates.get(row["pattern"]), "record": record})
     out.sort(key=lambda b: (-(b["rel_volume"] if _finite(b["rel_volume"]) else -1.0),
                             -(b["hit_rate"] if b["hit_rate"] is not None else -1.0), b["symbol"]))
     return out
@@ -175,6 +176,26 @@ def _pack(blocks: list[str]) -> list[str]:
     return messages + ([current] if current else [])
 
 
+def breakout_block(n: int, b: dict[str, Any], site_url: str, headline: dict | None = None,
+                   limit: int | None = None) -> str:
+    """One confirmed breakout's lines (the report's list and each chart's caption). With
+    `limit`, the news and then the levels line go before a character is cut."""
+    volume = f" · נפח x{float(b['rel_volume']):.1f}" if _finite(b["rel_volume"]) else ""
+    levels = []
+    if _finite(b["target"]):
+        levels.append(f"יעד {_price(b['target'])} (כלל המדידה)")
+    if _finite(b["invalidation"]):
+        levels.append(f"ביטול {_price(b['invalidation'])}")
+    if b["hit_rate"] is not None and _finite(b["target"]):
+        levels.append(f"בעבר {b['hit_rate']:g}% מהפריצות שלה הגיעו ליעד")
+    head = (f"{n}. {_link(b['symbol'], site_url)} · {html.escape(str(b['name']))}\n"
+            f"פריצה {_price(b['breakout'])} · סגירה {_price(b['close'])}{volume}")
+    extras = [f"\n{' · '.join(levels)}" if levels else "", f"\n{news_line(headline)}" if headline else ""]
+    while limit is not None and len(head + "".join(extras)) > limit and any(extras):
+        extras[max(i for i, e in enumerate(extras) if e)] = ""
+    return head + "".join(extras)
+
+
 def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, site_url: str,
                      verge_pct: float, coverage: tuple[int, int] | None = None,
                      analyses: list[str] | None = None,
@@ -188,19 +209,7 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, sit
     if not breakouts:
         blocks.append("אין היום פריצות שוריות מאושרות של תבניות גרף.")
     for n, b in enumerate(breakouts, 1):
-        volume = f" · נפח x{float(b['rel_volume']):.1f}" if _finite(b["rel_volume"]) else ""
-        levels = []
-        if _finite(b["target"]):
-            levels.append(f"יעד {_price(b['target'])} (כלל המדידה)")
-        if _finite(b["invalidation"]):
-            levels.append(f"ביטול {_price(b['invalidation'])}")
-        if b["hit_rate"] is not None and _finite(b["target"]):
-            levels.append(f"בעבר {b['hit_rate']:g}% מהפריצות שלה הגיעו ליעד")
-        headline = news_line((news or {}).get(b["symbol"]))
-        blocks.append(f"{n}. {_link(b['symbol'], site_url)} · {html.escape(str(b['name']))}\n"
-                      f"פריצה {_price(b['breakout'])} · סגירה {_price(b['close'])}{volume}"
-                      + (f"\n{' · '.join(levels)}" if levels else "")
-                      + (f"\n{headline}" if headline else ""))
+        blocks.append(breakout_block(n, b, site_url, (news or {}).get(b["symbol"])))
     if analyses:
         blocks.append("📊 ניתוח מלא יגיע בהודעות נפרדות: "
                       + ", ".join(html.escape(s.split(":")[-1]) for s in analyses))
@@ -234,9 +243,11 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
                    dispatch: Callable[[str, dict[str, str]], int],
                    can_dispatch: bool, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                    live_summary: dict[str, Any] | None = None,
-                   news_of: Callable[[list[str]], dict[str, dict]] | None = None) -> dict[str, Any]:
-    """Send the session's report once; start the full analyses of the strongest few.
-    Returns counts for the public log (no symbols, no prices)."""
+                   news_of: Callable[[list[str]], dict[str, dict]] | None = None,
+                   images: bool = False, to_png: Callable[[str], bytes] | None = None) -> dict[str, Any]:
+    """Send the session's report once, then (with `images`) each breakout's pattern chart
+    in albums; start the full analyses of the strongest few. Returns counts for the
+    public log (no symbols, no prices)."""
     sent = read_sent(store, view.day)
     if sent.get("evening"):
         return {"status": "already sent"}
@@ -253,6 +264,16 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
                                 intraday=intraday, live_summary=live_summary, news=news)
     for message in messages:
         bot.send(message, html=True)
+    photos, no_chart = ([], 0)
+    if images and breakouts:
+        photos, no_chart = breakout_photos(breakouts, store.read_bars, cfg.site_url, news,
+                                           to_png or default_png)
+        try:
+            bot.send_album(photos)
+        except (ProviderError, OSError) as exc:          # the report itself went out
+            import logging
+            logging.getLogger(__name__).warning("breakout charts not sent: %s", type(exc).__name__)
+            no_chart, photos = no_chart + len(photos), []
     started = [s for s in chosen if dispatch("analyst.yml", {"symbol": s}) == 204]
     if len(started) < len(chosen):
         missed = [s.split(":")[-1] for s in chosen if s not in started]
@@ -262,7 +283,8 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
         "breakouts": [b["symbol"] for b in breakouts], "verge": len(verge), "analyses": started}})
     return {"status": "sent", "breakouts": len(breakouts), "verge": len(verge),
             "analyses": len(started), "messages": len(messages),
-            "intraday_held": sum(f["held"] for f in intraday), "intraday_fell": sum(not f["held"] for f in intraday)}
+            "intraday_held": sum(f["held"] for f in intraday), "intraday_fell": sum(not f["held"] for f in intraday),
+            "charts": len(photos), "charts_missing": no_chart}
 
 
 # ------------------------------------------------------------------ during the session
@@ -367,7 +389,8 @@ def live_crossings(view: ScanView, prices: dict[str, float], session_day: date,
         out.append({"key": key, "symbol": row.symbol, "pattern": row.pattern,
                     "name": first["name_he"] if first is not None else row.pattern,
                     "line": float(row.level), "price": float(row.price),
-                    "target": float(first["target"]) if first is not None and _finite(first["target"]) else math.nan})
+                    "target": float(first["target"]) if first is not None and _finite(first["target"]) else math.nan,
+                    "record": detection_record(first.to_dict()) if first is not None else None})
     out.sort(key=lambda c: -(c["price"] / c["line"]))
     return out
 
@@ -457,3 +480,104 @@ def news_line(headline: dict[str, Any] | None) -> str:
     if headline["link"].startswith("https://www.tradingview.com/"):
         text = f'<a href="{html.escape(headline["link"])}">{text}</a>'
     return f"📰 {text} ({html.escape(source)}{age})"
+
+
+# ------------------------------------------------------------------ pattern charts
+# The owner's request (2026-09-25): every bullish breakout with a chart of its pattern and
+# the breakout marked; the channels' renderer draws exactly that.
+BREAKOUT_DRAWINGS = ["pattern_lines", "pivots", "confirm_line", "breakout", "target", "failure", "volume"]
+CROSSING_DRAWINGS = ["pattern_lines", "pivots", "confirm_line", "trigger", "volume"]
+CAPTION_LIMIT = 1000                  # Telegram's caption limit is 1024
+
+
+def default_png(svg: str) -> bytes:
+    import tempfile
+
+    from .analyst.png import svg_to_png
+
+    with tempfile.TemporaryDirectory(prefix="ta-alert-", ignore_cleanup_errors=True) as folder:
+        path = Path(folder) / "chart.svg"
+        path.write_text(svg, encoding="utf-8")
+        return svg_to_png(path, Path(folder) / "chart.png").read_bytes()
+
+
+def pattern_chart(bars: pd.DataFrame, record: dict[str, Any], *, live_price: float | None = None) -> str:
+    from .channels.chart_svg import render
+
+    drawings = CROSSING_DRAWINGS if live_price is not None else BREAKOUT_DRAWINGS
+    symbol = str(record.get("symbol", ""))
+    return render(bars, record, drawings, "", seed=f"alert-{symbol}", title=symbol, live_price=live_price)
+
+
+def _photo(bars: pd.DataFrame | None, record: dict | None, caption: str, to_png: Callable[[str], bytes],
+           live_price: float | None = None) -> tuple[bytes, str] | None:
+    """A chart and its caption; None if it cannot be drawn (the text still goes out)."""
+    if bars is None or bars.empty or not record:
+        return None
+    try:
+        return to_png(pattern_chart(bars, record, live_price=live_price)), caption
+    except Exception as exc:                        # a picture is never worth a lost alert
+        import logging
+        logging.getLogger(__name__).warning("chart for %s failed: %s", record.get("symbol"),
+                                            type(exc).__name__)
+        return None
+
+
+def breakout_photos(breakouts: list[dict], bars_of: Callable[[str], pd.DataFrame | None], site_url: str,
+                    news: dict[str, dict] | None = None,
+                    to_png: Callable[[str], bytes] = default_png) -> tuple[list[tuple[bytes, str]], int]:
+    """The confirmed breakouts' charts (strongest first) with their report lines as captions."""
+    photos, failed = [], 0
+    for n, b in enumerate(breakouts, 1):
+        caption = breakout_block(n, b, site_url, (news or {}).get(b["symbol"]), limit=CAPTION_LIMIT)
+        photo = _photo(bars_of(b["symbol"]), b.get("record"), caption, to_png)
+        if photo is None:
+            failed += 1
+        else:
+            photos.append(photo)
+    return photos, failed
+
+
+def crossing_caption(c: dict[str, Any], at: datetime, market_tz: str, site_url: str,
+                     headline: dict | None = None) -> str:
+    above = (c["price"] / c["line"] - 1) * 100
+    target = f" · יעד {_price(c['target'])} (כלל המדידה)" if _finite(c["target"]) else ""
+    lines = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} ניו יורק</b>",
+             f"{_link(c['symbol'], site_url)} · {html.escape(str(c['name']))} · קו {_price(c['line'])} · "
+             f"מחיר {_price(c['price'])} (+{above:.1f}% מעל){target}"]
+    news = news_line(headline)
+    if news and len("\n".join(lines + [news])) < CAPTION_LIMIT - 80:
+        lines.append(news)
+    lines.append(f"<i>{html.escape('לא סופי עד הסגירה. לא ייעוץ השקעות.')}</i>")
+    return "\n".join(lines)
+
+
+def crossing_photos(found: list[dict], bars_of: Callable[[str], pd.DataFrame | None], at: datetime,
+                    market_tz: str, site_url: str, news: dict[str, dict] | None = None,
+                    to_png: Callable[[str], bytes] = default_png) -> list[tuple[bytes, str]]:
+    """Each live crossing's forming pattern, its breakout line and the live price."""
+    photos = []
+    for c in found:
+        caption = crossing_caption(c, at, market_tz, site_url, (news or {}).get(c["symbol"]))
+        photo = _photo(bars_of(c["symbol"]), c.get("record"), caption, to_png, live_price=c["price"])
+        if photo is not None:
+            photos.append(photo)
+    return photos
+
+
+async def fetch_bars(session: Any, symbols: list[str], before: date, count: int = 260) -> dict[str, pd.DataFrame]:
+    """Daily bars for the live watch's charts (it restores no bars): each stock's last
+    `count` sessions before `before` (today's unfinished bar left out)."""
+    from .tv.data import bars_frame
+
+    out: dict[str, pd.DataFrame] = {}
+    for symbol in dict.fromkeys(symbols):
+        try:
+            payload = await fetch_in_session(session, OHLCV_TOOL, {"symbol": symbol, "interval": "1D", "count": count})
+            bars = bars_frame(payload, symbol)
+        except (ProviderError, OSError, TimeoutError, ValueError):
+            continue
+        bars = bars.loc[bars["timestamp"].dt.date < before].reset_index(drop=True)
+        if len(bars):
+            out[symbol] = bars
+    return out

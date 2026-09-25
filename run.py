@@ -555,7 +555,8 @@ def _evening_alerts(settings, store, target) -> dict:
         return evening_report(store, ScanRepository(store, load_rules()).current(), settings.alerts,
                               bot=bot, min_cases=settings.outcomes.min_cases, dispatch=github.dispatch,
                               can_dispatch=bool(os.environ.get("GH_DISPATCH_TOKEN", "").strip()),
-                              live_summary=live, news_of=lambda symbols: _news(settings, symbols))
+                              live_summary=live, news_of=lambda symbols: _news(settings, symbols),
+                              images=True)
     except ScreenerError as exc:
         log.error("breakout report failed: %s", exc)             # the private log only
         return {"status": "failed", "error": type(exc).__name__}
@@ -665,8 +666,23 @@ def ci_live(settings, max_minutes: float) -> int:
             summary["median_call_s"] = round(statistics.median(all_seconds), 2)
         found = alerts.live_crossings(view, got["prices"], day, sent.get("live", {}))
         if found:
-            news = _news(settings, [c["symbol"] for c in found], client)
-            bot.send(alerts.live_message(found, datetime.now(timezone.utc), tz, cfg.site_url, news), html=True)
+            symbols, at = [c["symbol"] for c in found], datetime.now(timezone.utc)
+            news = _news(settings, symbols, client)
+            try:                                    # the watch restores no bars: fetch the few needed
+                bars = client.with_session(lambda session: alerts.fetch_bars(session, symbols, day))
+            except (ScreenerError, OSError, TimeoutError, ExceptionGroup):
+                bars = {}
+            photos = alerts.crossing_photos(found, bars.get, at, tz, cfg.site_url, news)
+            try:
+                if len(photos) == len(found):       # each crossing with its pattern's chart
+                    bot.send_album(photos)
+                else:
+                    bot.send(alerts.live_message(found, at, tz, cfg.site_url, news), html=True)
+                    if photos:
+                        bot.send_album(photos)
+            except (ScreenerError, OSError):
+                bot.send(alerts.live_message(found, at, tz, cfg.site_url, news), html=True)
+            summary["charts"] = summary.get("charts", 0) + len(photos)
             live = sent.setdefault("live", {})
             for c in found:
                 live[c["key"]] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

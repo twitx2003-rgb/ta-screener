@@ -685,6 +685,15 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     Shown on /scorecard (data/outcomes/backtest.json, statistics only). A running-sum
     drawdown over thousands of overlapping trades was meaningless (thousands of %), so
     the per-trade adverse excursion replaced it.
+- **Breakout charts (owner, 2026-09-25: "every bullish breakout with a picture of the
+  pattern and the breakout"):** the channels' renderer (`channels/chart_svg.render`) via
+  `alerts.pattern_chart`: confirmed breakouts (evening, after the text, albums of 10 via
+  `notify.Telegram.send_album` = sendMediaGroup, captions = the report lines, <= 1000
+  chars) and live crossings (forming pattern + trigger + live price; live.yml fetches 260
+  bars for the crossing stocks only, `alerts.fetch_bars`). A chart that fails never loses
+  the alert (text still goes). run.yml and live.yml install librsvg + Noto/Plex fonts.
+  `png.svg_to_png` sizes the browser from the SVG's viewBox (the channel charts are
+  760x440: no white margins); channel charts clip the averages to the price panel.
 - Analyst accuracy pass (owner, 2026-09-25): `view.key_level_facts` (level.s1/s2/r1/r2,
   position, up.*/down.*), the writer must cite up.trigger / down.trigger / level.*; chart:
   header with name/close/change, round axis ticks, close tag, legend, 130 bars, profile

@@ -55,7 +55,11 @@ jobs:
           cache: pip
 
       - name: Install
-        run: python -m pip install -q -r requirements.txt
+        run: |
+          python -m pip install -q -r requirements.txt
+          # the crossing charts: librsvg, Hebrew and monospace fonts (SIL OFL)
+          sudo apt-get update -qq > /dev/null
+          sudo apt-get install -y -qq --no-install-recommends librsvg2-bin fonts-noto-core fonts-ibm-plex > /dev/null
 
       - name: Restore the private state (no bars)
         env:
