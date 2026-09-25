@@ -83,3 +83,25 @@ def test_a_failure_is_told_and_raised(tmp_path):
         _request(tmp_path, "NYSE:SYN", llm=SyntheticLLM(broken))
     # the folder counts toward the daily limit, so a failing request cannot loop on the quota
     assert (tmp_path / "analyses" / "2026-03-20" / "210507-NYSE_SYN").is_dir()
+
+
+def test_the_evaluation_set_writes_every_stock_and_an_index(tmp_path, monkeypatch):
+    import json
+
+    from tascreen.analyst import evaluate
+
+    monkeypatch.setattr(evaluate, "EVAL_SET", {"NYSE:SYN": "a test", "NYSE:NONE": "no bars"})
+
+    class Store:
+        scans_dir = tmp_path / "scans"
+
+        def read_bars(self, symbol):
+            return from_knots(KNOTS) if symbol == "NYSE:SYN" else None
+
+    index = evaluate.run_eval(Store(), SyntheticLLM(_answer), tmp_path / "round1",
+                              to_png=_png, progress=lambda m: None)
+    by = {s["symbol"]: s for s in index["stocks"]}
+    assert by["NYSE:NONE"]["error"] == "no stored bars" and by["NYSE:SYN"]["omitted"] == []
+    kept = sorted(p.suffix for p in (tmp_path / "round1" / "NYSE_SYN").iterdir())
+    assert kept == [".html", ".json", ".json", ".pine", ".png", ".svg"]
+    assert json.loads((tmp_path / "round1" / "index.json").read_text(encoding="utf-8"))["stocks"]

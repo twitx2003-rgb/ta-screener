@@ -109,6 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="With --analyze: also send the chart, the text and the Pine Script "
                              "to your Telegram bot")
     parser.add_argument("--out", metavar="DIR", help="With --analyze: where to write the files")
+    parser.add_argument("--analyze-eval", nargs="?", const="", metavar="ROUND",
+                        help="Analyse the fixed evaluation set (12 stocks in different situations) "
+                             "-> logs/eval/<ROUND>/ for the review agents; nothing is sent "
+                             "(normal terminal only)")
     parser.add_argument("--telegram-webhook", metavar="URL",
                         help="Point the Telegram bot at the site's webhook (https://.../api/telegram/), "
                              "or 'off' to remove it")
@@ -839,6 +843,28 @@ def analyze(settings, text: str, out: str | None, with_llm: bool, to_telegram: b
     return 0
 
 
+def analyze_eval(settings, round_name: str | None) -> int:
+    """The evaluation set (tascreen/analyst/evaluate.py) -> logs/eval/<round>/, for the
+    review agents. Normal terminal only (Claude Code writes the texts); nothing is sent."""
+    from tascreen.analyst.evaluate import EVAL_SET, run_eval
+    from tascreen.analyst.png import svg_to_png
+    from tascreen.store import Store
+
+    folder = settings.log_dir / "eval" / (round_name or datetime_stamp())
+    print(f"\nEvaluation set: {len(EVAL_SET)} analyses -> {folder} (about a minute each)\n")
+    index = run_eval(Store(settings.data_dir), _analyst_llm(settings), folder, to_png=svg_to_png)
+    failed = [s["symbol"] for s in index["stocks"] if s.get("error")]
+    print(f"\ndone: {len(index['stocks']) - len(failed)} analyses"
+          + (f", failed: {', '.join(failed)}" if failed else "") + f" -> {folder / 'index.json'}")
+    return 1 if failed else 0
+
+
+def datetime_stamp() -> str:
+    from datetime import datetime
+
+    return datetime.now().strftime("%Y%m%d-%H%M")
+
+
 def ci_analyze(settings, text: str, archive: str, daily_limit: int) -> int:
     """GitHub Actions (analyst.yml): one requested analysis. The log is public: this
     prints one status line; the details go to the private log the workflow keeps."""
@@ -1132,6 +1158,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit)),
         (args.ci_live, lambda: ci_live(settings, args.max_minutes or 345)),
         (args.telegram_webhook, lambda: telegram_webhook(settings, args.telegram_webhook)),
+        (args.analyze_eval is not None, lambda: analyze_eval(settings, args.analyze_eval or None)),
         (args.quotes, lambda: quotes(settings)),
         (args.live, lambda: live(settings)),
         (args.channels, lambda: channels(settings, force=args.force)),
