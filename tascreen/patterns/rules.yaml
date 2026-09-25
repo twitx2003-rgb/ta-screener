@@ -30,7 +30,7 @@ general:
   inside_tolerance_atr: {value: 0.5, origin: ours, note: "inside a pattern, closes may poke this many ATRs past a trendline"}
   coverage_sessions: {value: 250, origin: ours, note: "data-quality window: the last this many bars"}
   min_recent_coverage: {value: 0.95, origin: ours, note: "no patterns on a series whose last bars cover fewer than this share of the trading sessions they span (TradingView serves some listings from a sparse feed)"}
-  flat_line_max_drift: {value: 0.25, origin: ours, note: "a trendline is horizontal if it drifts less than this share of the pattern height over the pattern"}
+  flat_line_max_drift: {value: 0.10, origin: ours, note: "a trendline is horizontal if it drifts less than this share of the pattern height over the pattern (was 0.25 until 2026-09-25: rising or falling tops passed as flat, e.g. both lines rising read as an ascending triangle)"}
   converge_max_end_width: {value: 0.75, origin: ours, note: "site: triangles and wedges have converging trendlines; at its last turning point the pattern is at most this share of its starting width (first live scan: near-parallel rising channels passed as wedges)"}
 
 chart:

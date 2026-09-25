@@ -93,6 +93,23 @@ def test_backfill_stops_before_the_first_scan_and_never_overrides_it(tmp_path):
     assert rebuilt["rows"] == len(ledger)
 
 
+def test_after_a_rule_change_the_scanned_days_are_backfilled_and_the_ledger_rebuilt(tmp_path):
+    import json
+
+    _, store, day = _setup(tmp_path)
+    path = store.scans_dir / day.isoformat() / "scan.json"
+    summary = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**summary, "rules_digest": "the old rules"}), encoding="utf-8")
+    update(store, 60)
+    assert set(store.read_ledger()["rules_digest"]) == {"the old rules"}
+    report = run_backfill(store, RULES, OutcomesSettings(backfill_workers=1, backfill_min_bars=100),
+                          ["NYSE:HS", "NASDAQ:DB"], max_sessions=60, progress=lambda m: None)
+    assert report["before"] is None and report["ledger_rebuilt"] and not report["failed"]
+    ledger = store.read_ledger()
+    assert len(ledger) and set(ledger["rules_digest"]) == {RULES.digest}
+    assert set(ledger["source"]) == {"backfill"}             # the old scan's rows are gone
+
+
 def test_the_process_pool_path(tmp_path):
     store = _bars_only_store(tmp_path)
     report = run_backfill(store, RULES, OutcomesSettings(backfill_workers=2, backfill_min_bars=100),

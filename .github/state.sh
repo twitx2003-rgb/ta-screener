@@ -8,6 +8,8 @@
 #   bash .github/state.sh save-token    only the TradingView token (a test run)
 #   bash .github/state.sh save-alerts   the token, data/alerts and the log (live.yml)
 #   SKIP_BARS=1 ... restore             without the bars (live.yml does not need them)
+#   bash .github/state.sh bars          the bars only, after a restore without them
+#                                       (backfill.yml: only when it has work to do)
 #
 # Needs STATE_REPO (owner/name) and STATE_REPO_TOKEN (a key with Contents: read and
 # write on that repository only). Bars live in a release asset, not in git: they are
@@ -16,6 +18,16 @@ set -euo pipefail
 : "${STATE_REPO:?}" "${STATE_REPO_TOKEN:?}"
 url="https://x-access-token:${STATE_REPO_TOKEN}@github.com/${STATE_REPO}.git"
 export GH_TOKEN="$STATE_REPO_TOKEN"
+
+restore_bars() {
+    if gh release download bars --repo "$STATE_REPO" --pattern bars.tar.zst \
+            --dir "$RUNNER_TEMP" --clobber > /dev/null 2>&1; then
+        tar --zstd -xf "$RUNNER_TEMP/bars.tar.zst" -C state/data
+        echo "bars: restored ($(find state/data/bars -name '*.parquet' | wc -l) files)"
+    else
+        echo "bars: none saved yet (the first run fetches them all)"
+    fi
+}
 
 case "${1:-}" in
 restore)
@@ -33,12 +45,8 @@ logs/screener.log.*
 EOF
     if [ -n "${SKIP_BARS:-}" ]; then
         echo "bars: not needed by this run"          # live.yml: it never saves the bars
-    elif gh release download bars --repo "$STATE_REPO" --pattern bars.tar.zst \
-            --dir "$RUNNER_TEMP" --clobber > /dev/null 2>&1; then
-        tar --zstd -xf "$RUNNER_TEMP/bars.tar.zst" -C state/data
-        echo "bars: restored ($(find state/data/bars -name '*.parquet' | wc -l) files)"
     else
-        echo "bars: none saved yet (the first run fetches them all)"
+        restore_bars
     fi
     python .github/mask_tokens.py state/tv_tokens.json
     cat > config.local.yaml <<EOF
@@ -51,6 +59,9 @@ web:
 live:
   update_after_close: false
 EOF
+    ;;
+bars)
+    restore_bars
     ;;
 save)
     cd state
@@ -89,7 +100,7 @@ save-alerts)
     echo "state: token, alerts and log saved"
     ;;
 *)
-    echo "usage: $0 restore|save|save-token|save-alerts" >&2
+    echo "usage: $0 restore|bars|save|save-token|save-alerts" >&2
     exit 2
     ;;
 esac

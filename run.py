@@ -75,7 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
                              "session at a time without looking ahead (hours; resumable; "
                              "--limit N for the N largest stocks) -> the outcome ledger")
     parser.add_argument("--rebuild", action="store_true",
-                        help="With --outcomes: build the ledger again from every saved scan")
+                        help="With --outcomes: build the ledger again from every saved scan "
+                             "(and the saved backfill) made with the current rules")
+    parser.add_argument("--backfill-needed", action="store_true",
+                        help="Print yes if the saved backfill was made with other rules than "
+                             "rules.yaml (or none exists), else no (backfill.yml)")
     parser.add_argument("--ci-probe", action="store_true",
                         help="Stage-0 check on a GitHub runner: TradingView (forced token refresh, "
                              "a screener pass, --limit N get-ohlcv calls, default 300) and one "
@@ -391,10 +395,11 @@ def scan(settings) -> int:
 
 def outcomes(settings, rebuild: bool = False, quiet: bool = False) -> int:
     from tascreen.outcomes import update as update_outcomes
+    from tascreen.patterns.rules import load_rules
     from tascreen.store import Store
 
     report = update_outcomes(Store(settings.data_dir), settings.outcomes.max_sessions,
-                             rebuild=rebuild)
+                             rebuild=rebuild, rules_digest=load_rules().digest)
     line = (f"Outcomes: {report['rows']} breakouts tracked ({report['new']} new, "
             f"{report['restated']} restated) {report['outcomes']}")
     if quiet:
@@ -456,6 +461,25 @@ def backfill_outcomes(settings, limit: int | None) -> int:
     if report["failed"]:
         print(f"  failed: {len(report['failed'])} symbol(s), see logs/backfill_last_run.json")
     return 1 if report["failed"] else 0
+
+
+def backfill_needed(settings) -> int:
+    """yes / no on stdout: the breakout history is out of date when rules.yaml changed
+    since the saved backfill was made, or a backfill with these rules never finished (a
+    run cut short resumes where it stopped). backfill.yml asks every Saturday."""
+    import json
+
+    from tascreen.patterns.rules import load_rules
+    from tascreen.store import Store
+
+    digest = load_rules().digest
+    saved = Store(settings.data_dir).read_backfill_manifest().get("rules_digest")
+    try:
+        finished = json.loads((settings.log_dir / "backfill_last_run.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        finished = {}
+    print("yes" if saved != digest or finished.get("rules_digest") != digest else "no")
+    return 0
 
 
 def ci_probe(settings, calls: int | None) -> int:
@@ -1147,6 +1171,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.outcomes, lambda: outcomes(settings, rebuild=args.rebuild)),
         (args.backtest, lambda: backtest(settings)),
         (args.backfill_outcomes, lambda: backfill_outcomes(settings, args.limit)),
+        (args.backfill_needed, lambda: backfill_needed(settings)),
         (args.ci_probe, lambda: ci_probe(settings, args.limit)),
         (args.ci_tick, lambda: ci_tick(settings, args.limit, args.max_minutes,
                                        with_channels=not args.no_channels)),

@@ -32,7 +32,7 @@ import pandas as pd
 
 from .config import OutcomesSettings
 from .contracts import OUTCOMES
-from .outcomes import TRACKED_STATUSES, empty_ledger, merge_backfill, rows_from_scan
+from .outcomes import TRACKED_STATUSES, empty_ledger, merge_backfill, rows_from_scan, update
 from .patterns.chart import detect_chart
 from .patterns.rules import Rules, load_rules
 from .scan import patterns_allowed, patterns_frame
@@ -99,8 +99,11 @@ def _one(job: tuple[str, str, str, int, int, str | None]) -> tuple[str, int, flo
 def run_backfill(store: Store, rules: Rules, cfg: OutcomesSettings, symbols: list[str], *,
                  max_sessions: int, report_path: Path | None = None,
                  progress: Callable[[str], None] = print) -> dict[str, Any]:
-    """Backfill every symbol not done yet, then merge the rows into the ledger."""
-    scans = store.scan_days()
+    """Backfill every symbol not done yet, then merge the rows into the ledger. The cuts
+    stop before the first saved scan made with these rules (scans made with other rules
+    do not count: their days are backfilled too). A ledger holding rows found by other
+    rules is rebuilt instead, so each breakout is counted under one definition."""
+    scans = [d for d in store.scan_days() if store.scan_rules_digest(d) == rules.digest]
     before = scans[0].isoformat() if scans else None
     manifest = {"rules_digest": rules.digest, "step": cfg.backfill_step,
                 "min_bars": cfg.backfill_min_bars, "before": before}
@@ -147,12 +150,18 @@ def run_backfill(store: Store, rules: Rules, cfg: OutcomesSettings, symbols: lis
             except KeyboardInterrupt:
                 pool.shutdown(wait=False, cancel_futures=True)
                 raise
-    merged = merge_backfill(store, max_sessions)
+    ledger = store.read_ledger()
+    rebuilt = ledger is not None and bool((ledger["rules_digest"] != rules.digest).any())
+    if rebuilt:
+        merged = update(store, max_sessions, rebuild=True, rules_digest=rules.digest)
+    else:
+        merged = merge_backfill(store, max_sessions)
     report = {"finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
               **manifest, "symbols": len(jobs), "breakouts_found": found, "failed": failed,
               "seconds": round(time.monotonic() - started, 1),
               "seconds_per_symbol": round(sum(seconds) / len(seconds), 2) if seconds else None,
               "added_to_ledger": merged.get("backfill", 0), "ledger_rows": merged["rows"],
+              "ledger_rebuilt": rebuilt,
               "outcomes": merged["outcomes"]}
     if report_path is not None:
         report_path.parent.mkdir(parents=True, exist_ok=True)

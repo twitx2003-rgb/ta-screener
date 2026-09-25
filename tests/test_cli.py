@@ -28,3 +28,30 @@ def test_write_tool_from_the_command_line_is_refused(tmp_path, capsys):
     config.write_text(f"paths:\n  logs: '{(tmp_path / 'logs').as_posix()}'\n", encoding="utf-8")
     assert run.main(["--config", str(config), "--tradingview-call", "mcp-tv-create-alert",
                      "symbol=NASDAQ:X"]) == 1
+
+
+def test_the_history_is_rebuilt_after_a_rule_change_until_a_run_finishes(tmp_path, capsys):
+    import json
+
+    from tascreen.patterns.rules import load_rules
+
+    config = tmp_path / "config.yaml"
+    config.write_text(f"paths:\n  logs: '{(tmp_path / 'logs').as_posix()}'\n"
+                      f"  data: '{(tmp_path / 'data').as_posix()}'\n", encoding="utf-8")
+
+    def needed():
+        assert run.main(["--config", str(config), "--backfill-needed"]) == 0
+        return capsys.readouterr().out.strip()
+
+    assert needed() == "yes"                                   # never made
+    backfill = tmp_path / "data" / "outcomes" / "backfill"
+    backfill.mkdir(parents=True)
+    digest = load_rules().digest
+    (backfill / "manifest.json").write_text(json.dumps({"rules_digest": digest}), encoding="utf-8")
+    assert needed() == "yes"                                   # started, never finished
+    (tmp_path / "logs").mkdir(exist_ok=True)
+    (tmp_path / "logs" / "backfill_last_run.json").write_text(json.dumps({"rules_digest": digest}),
+                                                             encoding="utf-8")
+    assert needed() == "no"
+    (backfill / "manifest.json").write_text(json.dumps({"rules_digest": "older rules"}), encoding="utf-8")
+    assert needed() == "yes"                                   # rules.yaml changed since

@@ -251,6 +251,14 @@ class Store:
                 days.append(day)
         return sorted(days)
 
+    def scan_rules_digest(self, day: date) -> str | None:
+        """The rule set a saved scan was made with (its scan.json), without reading its tables."""
+        try:
+            summary = json.loads((self.scans_dir / day.isoformat() / "scan.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return summary.get("rules_digest")
+
     def read_scan(self, day: date) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
         folder = self.scans_dir / day.isoformat()
         indicators = INDICATORS.validate(pd.read_parquet(folder / "indicators.parquet"))

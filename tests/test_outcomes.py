@@ -173,6 +173,17 @@ def test_a_scan_run_again_for_the_same_day_is_read_again(tmp_path):
     assert update(store, 60)["scan_days_read"] == []
 
 
+def test_a_rebuild_leaves_out_what_other_rules_found(tmp_path):
+    _, store, day = _setup(tmp_path)
+    assert update(store, 60)["new"] >= 1
+    rebuilt = update(store, 60, rebuild=True, rules_digest="made with other rules")
+    assert rebuilt["rows"] == 0 and rebuilt["scans_other_rules"] == [day.isoformat()]
+    assert update(store, 60)["scan_days_read"] == []          # marked read: never taken in later
+    same = update(store, 60, rebuild=True, rules_digest=RULES.digest)
+    assert same["rows"] >= 1 and same["scans_other_rules"] == []
+    assert set(store.read_ledger()["rules_digest"]) == {RULES.digest}
+
+
 def test_a_new_tracking_window_evaluates_every_row_again(tmp_path):
     _, store, _ = _setup(tmp_path)
     update(store, 60)

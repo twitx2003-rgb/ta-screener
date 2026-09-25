@@ -83,13 +83,15 @@ def simple_view(analysis: Analysis, rules: dict[str, Any] | None = None) -> dict
     view["ma"] = {"type": "ma", "periods": [50]}
     for key, label, price_key in (("hi52", "שיא שנתי", "high_52w"), ("lo52", "שפל שנתי", "low_52w")):
         price = (facts.get(price_key) or {}).get("value")
-        if isinstance(price, (int, float)) and abs(price / close - 1) * 100 <= rules["extreme_draw_pct"]                 and zone_at(price) is None:
+        near_close = isinstance(price, (int, float)) and abs(price / close - 1) * 100 <= rules["extreme_draw_pct"]
+        if near_close and zone_at(price) is None:
             view[key] = {"type": "extreme", "price": float(price), "label": label,
                          "day": (facts.get(f"{price_key}_day") or {}).get("value")}
     recent = []
     for key, item in drawings.items():
         since = (facts.get(f"{key}.sessions_since_breakout") or {}).get("value")
-        if item["type"] == "pattern" and item["family"] == "chart" and isinstance(since, int)                 and since <= 2 * rules["event_fresh_sessions"]:
+        fresh = isinstance(since, int) and since <= 2 * rules["event_fresh_sessions"]
+        if item["type"] == "pattern" and item["family"] == "chart" and fresh:
             recent.append((since, key))
     if recent:
         key = min(recent)[1]

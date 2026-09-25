@@ -1,0 +1,93 @@
+# The breakout history (outcome ledger) after a change to the pattern rules.
+# The ledger must count every breakout under one definition: when rules.yaml changed
+# since the saved backfill was made, every stock's bars are replayed session by session
+# with the current rules (tascreen/backfill.py, ~2 h), the ledger is rebuilt from what
+# those rules found, and the site is published again (run.yml). Saturdays, when no
+# live watch or daily update needs the state; any other Saturday only checks and stops.
+# This repository is public, and so is this log: counts only.
+name: backfill
+
+on:
+  schedule:
+    - cron: "0 8 * * 6"          # Saturday: after run.yml's last catch-up (05:10)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: state            # one run at a time uses the state
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      STATE_REPO: twitx2003-rgb/ta-screener-state
+      STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+      TA_TV_TOKEN_PATH: ${{ github.workspace }}/state/tv_tokens.json
+      TA_STATE_DIR: ${{ github.workspace }}/state
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -q -r requirements.txt
+
+      - name: Is the history out of date?
+        id: check
+        run: |
+          SKIP_BARS=1 bash .github/state.sh restore
+          needed=$(python run.py --backfill-needed | tail -n 1)
+          echo "rules changed since the last backfill: $needed"
+          echo "needed=$needed" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild the history
+        if: ${{ steps.check.outputs.needed == 'yes' }}
+        timeout-minutes: 300      # cut short: the finished stocks are still saved, next Saturday resumes
+        run: |
+          set +e
+          bash .github/state.sh bars
+          log="state/logs/backfill-$(date -u +%Y%m%dT%H%M).log"
+          python -u run.py --backfill-outcomes > "$log" 2>&1
+          code=$?
+          python -u run.py --backtest >> "$log" 2>&1
+          python .github/mask_tokens.py state/tv_tokens.json
+          python - <<'EOF'
+          import json
+          r = json.load(open("state/logs/backfill_last_run.json", encoding="utf-8"))
+          print(json.dumps({k: r.get(k) for k in ("symbols", "breakouts_found", "ledger_rows",
+                            "ledger_rebuilt", "outcomes", "seconds")} | {"failed": len(r.get("failed") or {})}))
+          EOF
+          exit $code
+
+      - name: Save the state
+        if: ${{ !cancelled() && steps.check.outputs.needed == 'yes' }}
+        run: bash .github/state.sh save
+
+      - name: Publish the site again and tell the owner
+        if: ${{ success() && steps.check.outputs.needed == 'yes' }}
+        env:
+          GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'EOF'
+          import json
+          from tascreen.github import dispatch
+          from tascreen.notify import from_environment
+          # run.yml waits for this run (same concurrency group), then exports and deploys
+          print("publish: run.yml dispatch", dispatch("run.yml", {"save": "true"}))
+          r = json.load(open("state/logs/backfill_last_run.json", encoding="utf-8"))
+          bot = from_environment()
+          if bot is not None:
+              bot.send(f"📚 היסטוריית הפריצות נבנתה מחדש לפי כללי התבניות המעודכנים: "
+                       f"{r['ledger_rows']:,} פריצות. לוח התוצאות באתר יתעדכן בדקות הקרובות.")
+          EOF

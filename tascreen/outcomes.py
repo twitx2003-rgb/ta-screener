@@ -199,11 +199,14 @@ def evaluate(ledger: pd.DataFrame, bars_of: Callable[[str], pd.DataFrame | None]
 
 
 def update(store: Store, max_sessions: int, *, rebuild: bool = False,
-           now: datetime | None = None) -> dict[str, Any]:
+           now: datetime | None = None, rules_digest: str | None = None) -> dict[str, Any]:
     """Take in the scans not read yet, then evaluate. Rebuild starts from the saved scans,
-    then adds the saved backfill (the scans' rows win)."""
+    then adds the saved backfill (the scans' rows win). A rebuild given `rules_digest`
+    keeps only what that rule set found: scans and backfill rows made with other rules
+    are left out (scans are marked read, so later updates do not take them in either).
+    A pattern renamed by a rule change would otherwise be counted under both names."""
     with store.ledger_lock():
-        return _update(store, max_sessions, rebuild=rebuild, now=now)
+        return _update(store, max_sessions, rebuild=rebuild, now=now, rules_digest=rules_digest)
 
 
 def merge_backfill(store: Store, max_sessions: int, now: datetime | None = None) -> dict[str, Any]:
@@ -213,7 +216,7 @@ def merge_backfill(store: Store, max_sessions: int, now: datetime | None = None)
 
 
 def _update(store: Store, max_sessions: int, *, rebuild: bool, now: datetime | None,
-            backfill: bool = False) -> dict[str, Any]:
+            backfill: bool = False, rules_digest: str | None = None) -> dict[str, Any]:
     meta = {} if rebuild else store.read_outcomes_meta()
     ledger = None if rebuild else store.read_ledger()
     if ledger is None:
@@ -233,6 +236,12 @@ def _update(store: Store, max_sessions: int, *, rebuild: bool, now: datetime | N
     counts = {"new": 0, "restated": 0}
     days = [d for d in store.scan_days()
             if d.isoformat() not in seen or seen[d.isoformat()] != _scan_created(store, d)]
+    other_rules = []
+    if rebuild and rules_digest:
+        other_rules = [d for d in days if store.scan_rules_digest(d) != rules_digest]
+        for day in other_rules:
+            seen[day.isoformat()] = _scan_created(store, day)
+        days = [d for d in days if d not in other_rules]
     for day in days:
         _, patterns, summary = store.read_scan(day)
         ledger, got = merge(ledger, rows_from_scan(patterns, day, summary.get("rules_digest", ""),
@@ -241,6 +250,8 @@ def _update(store: Store, max_sessions: int, *, rebuild: bool, now: datetime | N
         seen[day.isoformat()] = summary.get("created_at")
     if rebuild or backfill:
         saved = store.read_backfill_rows()
+        if saved is not None and rebuild and rules_digest:
+            saved = saved[saved["rules_digest"] == rules_digest]
         if saved is not None:
             ledger, counts["backfill"] = add_new(ledger, saved.to_dict("records"))
     # a changed tracking window changes what "expired" means: evaluate every row again
@@ -250,6 +261,7 @@ def _update(store: Store, max_sessions: int, *, rebuild: bool, now: datetime | N
     store.write_ledger(ledger, {"ingested": dict(sorted(seen.items())), "max_sessions": max_sessions,
                                 "updated_at": now.isoformat(timespec="seconds")})
     return {"scan_days_read": [d.isoformat() for d in days], "rows": len(ledger), **counts,
+            "scans_other_rules": [d.isoformat() for d in other_rules],
             "outcomes": {k: int(v) for k, v in ledger["outcome"].value_counts().items()}}
 
 

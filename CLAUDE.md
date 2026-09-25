@@ -59,8 +59,9 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --channels --force    # write them again
 .venv\Scripts\python.exe run.py --redraw-charts      # redraw stored chart posts after a chart_svg change
 .venv\Scripts\python.exe run.py --outcomes           # breakout ledger from the saved scans (also after every scan)
-.venv\Scripts\python.exe run.py --outcomes --rebuild # rebuild it from every saved scan (+ saved backfill)
+.venv\Scripts\python.exe run.py --outcomes --rebuild # rebuild it from the saved scans (+ backfill) made with the current rules
 .venv\Scripts\python.exe run.py --backfill-outcomes [--limit N]  # past breakouts, no look-ahead (~1.5 h, resumable)
+.venv\Scripts\python.exe run.py --backfill-needed    # yes/no: rules changed since the backfill (backfill.yml)
 .venv\Scripts\python.exe run.py --analyze NVDA --no-llm    # facts, chart, Pine Script -> logs/analyses/
 .venv\Scripts\python.exe run.py --analyze NVDA --telegram  # + Hebrew text, sent to the bot (normal terminal only)
 ```
@@ -720,11 +721,27 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     the 50-day average (cyan, never Fibonacci's gold); a dashed 52-week high/low within
     `extreme_draw_pct` that no zone holds; the outline of a chart pattern whose breakout is
     <= 2 x `event_fresh_sessions` old, with the breakout session marked.
-  - Open: the scanner's `flat_line_max_drift` lets a rising top pass as an ascending
-    triangle (NFLX) — site-wide, to discuss with the owner.
-  - **Tests never reach the real bot**: `tests/conftest.py` clears the Telegram/GitHub keys
-    and points `notify.CREDENTIALS` away from ~/.ta-screener (a tick test once sent the
-    owner a real report of made-up stocks before that guard existed).
+- **Flat lines are flat (owner, 2026-09-25): `flat_line_max_drift` 0.25 -> 0.10.** At 0.25 a
+  top that rose (NFLX, both lines rising) passed as an ascending triangle and a falling top
+  with a rising bottom too. Measured on every stored stock (scratch script, not kept):
+  ascending / descending triangles and rectangles 102/157/57 at 0.25, 58/88/17 at 0.15,
+  40/52/9 at 0.10; they become wedges and symmetrical triangles; all patterns 1,637 ->
+  1,598 (the lost ones: tilted "rectangles" = channels, not in v1). Charts checked by eye:
+  0.15 still passed visibly tilted lines; 0.10 kept only flat ones.
+  - A rule change renames patterns, so the ledger must not mix definitions:
+    `outcomes.update(rebuild=True, rules_digest=...)` (and `--outcomes --rebuild`) takes in
+    only scans and backfill rows made with the current rules (other scans are marked read);
+    `run_backfill` cuts up to the first scan made with the current rules and rebuilds the
+    ledger when it holds rows of other rules.
+  - `.github/workflows/backfill.yml`: Saturdays 08:00 UTC (no live watch or daily run then;
+    same `state` group). `--backfill-needed` = rules changed since the saved backfill, or no
+    finished run with these rules (`logs/backfill_last_run.json`); if yes: bars
+    (`state.sh bars`), `--backfill-outcomes`, `--backtest`, save, dispatch run.yml
+    (publish), one Telegram line. The step stops at 300 min; the saved per-stock rows let
+    the next Saturday resume. First run due 2026-09-26.
+- **Tests never reach the real bot**: `tests/conftest.py` clears the Telegram/GitHub keys
+  and points `notify.CREDENTIALS` away from ~/.ta-screener (a tick test once sent the
+  owner a real report of made-up stocks before that guard existed).
 
 ## Plan (user-approved 2026-09-23; stop for review after each phase)
 
