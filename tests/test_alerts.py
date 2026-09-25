@@ -74,7 +74,11 @@ def test_the_messages_are_escaped_linked_and_fit_telegram():
     assert "(נסרקו 5 מתוך 6 מניות)" in text and "ניתוח מלא יגיע" in text and "ועוד 50 באתר" in text
     assert "לא ייעוץ השקעות" in messages[-1] and "(כלל המדידה)" in text
     empty = "\n".join(evening_messages(DAY, [], [], site_url="https://s.example", verge_pct=2.0))
-    assert "אין היום פריצות שוריות" in empty
+    assert "אין היום פריצות שוריות" in empty and "מעקב המסחר" not in empty
+    watched = "\n".join(evening_messages(DAY, [], [], site_url="https://s.example", verge_pct=2.0,
+                                         live_summary={"passes": 78, "watched": 60, "alerts": 3,
+                                                       "data_delay_min": 15.5}))
+    assert "78 סבבים · 60 מניות במעקב · 3 התראות · עיכוב הנתונים כ-15.5 דק'" in watched
 
 
 class _Bot:

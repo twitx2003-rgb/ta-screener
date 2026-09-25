@@ -178,7 +178,8 @@ def _pack(blocks: list[str]) -> list[str]:
 def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, site_url: str,
                      verge_pct: float, coverage: tuple[int, int] | None = None,
                      analyses: list[str] | None = None,
-                     intraday: list[dict] | None = None) -> list[str]:
+                     intraday: list[dict] | None = None,
+                     live_summary: dict[str, Any] | None = None) -> list[str]:
     head = f"<b>🚀 פריצות שוריות · {_day(day)}</b>\nאחרי הסגירה, מהחזקה לחלשה (לפי הנפח ביום הפריצה)."
     if coverage and coverage[0] < coverage[1]:
         head += f"\n(נסרקו {coverage[0]:,} מתוך {coverage[1]:,} מניות)"
@@ -216,6 +217,11 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, sit
     if len(verge) > VERGE_SHOWN:
         lines.append(f"ועוד {len(verge) - VERGE_SHOWN} באתר.")
     blocks.append("\n".join(lines))
+    if live_summary and live_summary.get("passes"):
+        delay = live_summary.get("data_delay_min")
+        blocks.append(f"🔎 מעקב המסחר היום: {live_summary['passes']} סבבים · "
+                      f"{live_summary.get('watched', 0)} מניות במעקב · {live_summary.get('alerts', 0)} התראות"
+                      + (f" · עיכוב הנתונים כ-{float(delay):g} דק'" if _finite(delay) else ""))
     blocks.append(f"<i>{html.escape(DISCLAIMER)}</i>")
     return _pack(blocks)
 
@@ -223,8 +229,8 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, sit
 # ------------------------------------------------------------------ the evening report
 def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: Any, min_cases: int,
                    dispatch: Callable[[str, dict[str, str]], int],
-                   can_dispatch: bool, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
-                   ) -> dict[str, Any]:
+                   can_dispatch: bool, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                   live_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     """Send the session's report once; start the full analyses of the strongest few.
     Returns counts for the public log (no symbols, no prices)."""
     sent = read_sent(store, view.day)
@@ -239,7 +245,7 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
     intraday = intraday_followup(view, sent.get("live") or {})
     messages = evening_messages(view.day, breakouts, verge, site_url=cfg.site_url,
                                 verge_pct=cfg.verge_pct, coverage=coverage, analyses=chosen,
-                                intraday=intraday)
+                                intraday=intraday, live_summary=live_summary)
     for message in messages:
         bot.send(message, html=True)
     started = [s for s in chosen if dispatch("analyst.yml", {"symbol": s}) == 204]

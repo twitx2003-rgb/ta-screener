@@ -514,10 +514,14 @@ def _evening_alerts(settings, store, target) -> dict:
     bot = notify.from_environment()
     if bot is None:
         return {"status": "telegram not configured"}
+    live = _read_log_json(settings, "live_summary.json")         # the session's watch, if it ran
+    if not str(live.get("started", "")).startswith(target.isoformat()):
+        live = {}
     try:
         return evening_report(store, ScanRepository(store, load_rules()).current(), settings.alerts,
                               bot=bot, min_cases=settings.outcomes.min_cases, dispatch=github.dispatch,
-                              can_dispatch=bool(os.environ.get("GH_DISPATCH_TOKEN", "").strip()))
+                              can_dispatch=bool(os.environ.get("GH_DISPATCH_TOKEN", "").strip()),
+                              live_summary=live)
     except ScreenerError as exc:
         log.error("breakout report failed: %s", exc)             # the private log only
         return {"status": "failed", "error": type(exc).__name__}
