@@ -27,6 +27,16 @@ restore)
         if [ "$attempt" = 6 ]; then echo "bars: could not download them"; exit 1; fi
         sleep 15
     done
+    # the companies' names: only the scans' indicators files from the state repository
+    # (a sparse, blob-less clone: nothing else is downloaded, the sign-in file included)
+    if git clone -q --depth 1 --filter=blob:none --no-checkout "$url" "$RUNNER_TEMP/state-names" 2> /dev/null; then
+        git -C "$RUNNER_TEMP/state-names" sparse-checkout set --no-cone '/data/scans/*/indicators.parquet'
+        git -C "$RUNNER_TEMP/state-names" checkout -q 2> /dev/null || true
+        if [ -d "$RUNNER_TEMP/state-names/data/scans" ]; then
+            cp -r "$RUNNER_TEMP/state-names/data/scans" data/
+        fi
+        echo "names: $(find data/scans -name indicators.parquet 2> /dev/null | wc -l) scan files"
+    fi
     if git clone -q --branch analyses --single-branch "$url" analyses 2> /dev/null; then
         echo "analyses: $(find analyses -mindepth 2 -maxdepth 2 -type d -name '[0-9]*' | wc -l) kept so far"
     else

@@ -30,13 +30,29 @@ from .pine import pine_script
 DAILY_LIMIT = 10
 
 
+def company_name(scans_dir: Path, symbol: str) -> str | None:
+    """The company's name from the newest scan's indicators (None when there is none)."""
+    days = sorted(p.name for p in scans_dir.glob("????-??-??") if (p / "indicators.parquet").exists()) \
+        if scans_dir.exists() else []
+    if not days:
+        return None
+    try:
+        frame = pd.read_parquet(scans_dir / days[-1] / "indicators.parquet", columns=["symbol", "description"])
+    except (OSError, ValueError, KeyError):
+        return None
+    names = frame.loc[frame["symbol"] == symbol, "description"]
+    value = names.iloc[0] if len(names) else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
 def produce(symbol: str, bars: pd.DataFrame, folder: Path, *, llm: LLM | None = None,
-            bot: Telegram | None = None, to_png: Callable[[Path, Path], Path] | None = None) -> dict[str, Any]:
+            bot: Telegram | None = None, to_png: Callable[[Path, Path], Path] | None = None,
+            name: str | None = None) -> dict[str, Any]:
     analysis = analyse(bars, symbol)
     folder.mkdir(parents=True, exist_ok=True)
     stem = f"{symbol_file_stem(symbol)}-{analysis.last_day}"
     svg, pine = folder / f"{stem}.svg", folder / f"{stem}.pine"
-    svg.write_text(render(bars, analysis), encoding="utf-8")
+    svg.write_text(render(bars, analysis, name=name), encoding="utf-8")
     (folder / f"{stem}.json").write_text(analysis.as_json(), encoding="utf-8")
     pine.write_text(pine_script(analysis, bars), encoding="utf-8")
     written = message = None
@@ -66,6 +82,7 @@ def shown(text: str) -> str:
 def handle_request(text: str, *, bars_dir: Path, read_bars: Callable[[str], pd.DataFrame | None],
                    archive: Path, bot: Telegram, make_llm: Callable[[], LLM],
                    daily_limit: int = DAILY_LIMIT, to_png: Callable[[Path, Path], Path] | None = None,
+                   name_of: Callable[[str], str | None] = lambda symbol: None,
                    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> str:
     """Answer one request; returns a short status for the public log."""
     stamp = now()
@@ -85,7 +102,7 @@ def handle_request(text: str, *, bars_dir: Path, read_bars: Callable[[str], pd.D
         return "not in the list"
     folder = today / f"{stamp:%H%M%S}-{symbol_file_stem(symbol)}"
     try:
-        produce(symbol, bars, folder, llm=make_llm(), bot=bot, to_png=to_png)
+        produce(symbol, bars, folder, llm=make_llm(), bot=bot, to_png=to_png, name=name_of(symbol))
     except Exception as exc:
         try:
             bot.send(f"הניתוח של {symbol} נכשל ({type(exc).__name__}). הפרטים נשמרו ביומן.")

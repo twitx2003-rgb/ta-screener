@@ -65,6 +65,22 @@ def test_bullish_and_trend_words_need_a_fact_that_says_so():
     assert "falling trend" in _problem("המניה במגמה יורדת.", ["volume.trend"])
 
 
+def test_the_scenarios_and_levels_must_use_the_charts_own_facts():
+    facts = {**_analysis().facts,
+             "level.r1.high": {"value": 110.0, "label": "התנגדות", "unit": "$"},
+             "up.trigger": {"value": 110.0, "label": "תרחיש עולה", "unit": "$"}}
+
+    def problem(part, cites):
+        return part_problem({"part": part, "signal": "green", "text": "סגירה מעל 110.", "cites": cites},
+                            facts, allowed_numbers(facts, RULES), fact_dates(facts))
+
+    assert "must cite up.trigger" in problem("up", ["zone_1.high"])
+    assert problem("up", ["up.trigger"]) is None
+    assert "level.* facts" in problem("levels", ["zone_1.high"])
+    assert problem("levels", ["level.r1.high"]) is None
+    assert problem("down", ["zone_2.low"]) is None or "down.trigger" not in facts
+
+
 def test_the_light_must_not_contradict_the_text():
     assert _problem("התמונה שורית: הממוצעים מסודרים.", ["ma.stack"], "green") is None
     assert "green light on a bearish" in _problem("סטייה דובית במומנטום.", ["div_1.kind"], "green")
@@ -106,7 +122,8 @@ def test_what_fails_twice_is_left_out_and_the_message_says_so():
     assert "הושמט: תרחיש יורד" in message and "לא ייעוץ השקעות" in message
     assert "למכור" not in message
     lines = message.split("\n")
-    assert lines[2] == "🟡 " + GOOD["headline"] and "🟡 <b>תמיכה והתנגדות:</b> " + GOOD["levels"] in lines
+    assert lines[0] == "<b>📊 ניתוח טכני · TEST</b>" and lines[1] == "סגירה 104.20 · 20/03/2026"
+    assert lines[3] == "🟡 " + GOOD["headline"] and "🟡 <b>תמיכה והתנגדות:</b> " + GOOD["levels"] in lines
     assert "🟢 <b>תרחיש עולה:</b> " + GOOD["up"] in lines          # yellow sent, green shown
 
 

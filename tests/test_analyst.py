@@ -166,3 +166,17 @@ def test_fibonacci_and_the_profile_stay_off_when_they_do_not_matter_now():
     assert not view["fib"]["show"] and not view["vp"]["show"]
     assert all(not v.get("notes") for v in view.values())
     assert set(view["fib"]["levels"]) == {"fib_382", "fib_500", "fib_618"}
+
+
+def test_the_scenarios_are_built_from_the_zones_the_chart_shows():
+    from tascreen.analyst.view import key_level_facts
+
+    facts = {k: v["value"] for k, v in key_level_facts(_view_case(108.0), RULES).items()}
+    assert (facts["level.r1.low"], facts["level.r1.high"], facts["level.r2.low"]) == (112, 113, 119)
+    assert (facts["level.s1.low"], facts["level.s1.high"], facts["level.s2.high"]) == (104.5, 105.5, 100)
+    assert (facts["up.trigger"], facts["up.next"], facts["up.cancel"]) == (113, 119, 104.5)
+    assert (facts["down.trigger"], facts["down.next"], facts["down.cancel"]) == (104.5, 100, 113)
+    assert facts["position"] == "בין התמיכה להתנגדות, קרוב יותר לתמיכה"      # 2.5 below vs 4 above
+    assert facts["level.r1.distance_pct"] == 3.7 and facts["level.s1.distance_pct"] == 2.3
+    inside = {k: v["value"] for k, v in key_level_facts(_view_case(105.0), RULES).items()}
+    assert inside["position"] == "בתוך אזור התמיכה הקרוב" and inside["level.s1.distance_pct"] == 0

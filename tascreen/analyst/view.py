@@ -76,3 +76,58 @@ def simple_view(analysis: Analysis, rules: dict[str, Any] | None = None) -> dict
             zone["notes"].append("poc")
         view["vp"] = {**vp, "show": show, "poc_label": zone is None}
     return view
+
+
+def key_level_facts(analysis: Analysis, rules: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Facts for exactly what the chart shows, and the two scenarios built on it, so the
+    written analysis quotes the reader's levels and never picks its own:
+    - level.s1 / level.s2 (supports, nearest first), level.r1 / level.r2 (resistances):
+      low, high, touches, and the close's distance to the zone's near edge;
+    - position: where the close stands, in words;
+    - up.trigger (a close above the nearest resistance), up.next (the next resistance),
+      up.cancel (a close below the nearest support), and down.* the other way round."""
+    from .facts import _Facts
+
+    view = simple_view(analysis, rules)
+    close = float(analysis.facts["close"]["value"])
+    zones = [v for v in view.values() if v["type"] == "zone"]
+    res = sorted((z for z in zones if z["kind"] == "resistance"), key=lambda z: z["low"])
+    sup = sorted((z for z in zones if z["kind"] == "support"), key=lambda z: -z["high"])
+    f = _Facts()
+    for kind, name, found in (("r", "התנגדות", res), ("s", "תמיכה", sup)):
+        for n, z in enumerate(found[:2], 1):
+            key, ordinal = f"level.{kind}{n}", "הקרוב" if n == 1 else "השני"
+            edge = z["low"] if kind == "r" else z["high"]
+            distance = max(0.0, (edge / close - 1) * 100 if kind == "r" else (1 - edge / close) * 100)
+            f.add(f"{key}.low", z["low"], f"אזור ה{name} {ordinal}: גבול תחתון", "$")
+            f.add(f"{key}.high", z["high"], f"אזור ה{name} {ordinal}: גבול עליון", "$")
+            f.add(f"{key}.touches", z["touches"], f"אזור ה{name} {ordinal}: נגיעות", "", 0)
+            f.add(f"{key}.distance_pct", distance, f"המרחק מהסגירה אל אזור ה{name} {ordinal}", "%", 1)
+    s1, r1 = (sup[0] if sup else None), (res[0] if res else None)
+    if s1 and s1["low"] <= close <= s1["high"]:
+        position = "בתוך אזור התמיכה הקרוב"
+    elif r1 and r1["low"] <= close <= r1["high"]:
+        position = "בתוך אזור ההתנגדות הקרוב"
+    elif s1 and r1:
+        nearer = "להתנגדות" if r1["low"] - close < close - s1["high"] else "לתמיכה"
+        position = f"בין התמיכה להתנגדות, קרוב יותר {nearer}"
+    elif r1:
+        position = "מתחת להתנגדות, בלי אזור תמיכה מסומן מתחת"
+    elif s1:
+        position = "מעל התמיכה, בלי אזור התנגדות מסומן מעל"
+    else:
+        position = ""
+    f.add("position", position, "איפה הסגירה ביחס לאזורים בגרף")
+    if r1:
+        f.add("up.trigger", r1["high"], "תרחיש עולה: סגירה מעל הרמה הזו", "$")
+        if len(res) > 1:
+            f.add("up.next", res[1]["low"], "תרחיש עולה: הרמה הבאה בדרך", "$")
+        if s1:
+            f.add("up.cancel", s1["low"], "תרחיש עולה: סגירה מתחת לרמה הזו מבטלת אותו", "$")
+    if s1:
+        f.add("down.trigger", s1["low"], "תרחיש יורד: סגירה מתחת לרמה הזו", "$")
+        if len(sup) > 1:
+            f.add("down.next", sup[1]["high"], "תרחיש יורד: הרמה הבאה בדרך", "$")
+        if r1:
+            f.add("down.cancel", r1["high"], "תרחיש יורד: סגירה מעל הרמה הזו מבטלת אותו", "$")
+    return f.out

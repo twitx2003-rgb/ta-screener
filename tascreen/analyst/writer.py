@@ -72,12 +72,15 @@ These rules are checked by a program; a section that breaks one is thrown away:
 
 Keep it very short: the whole analysis is read in half a minute. ONE short sentence per
 section, at most one of each:
-- headline (required, <= 150 characters): the picture now: where the price stands between
-  the nearest support and the nearest resistance.
-- levels (required, <= 220 characters): the nearest support and resistance zones on the chart.
-- up (required, <= 170 characters): conditional: which close would start it and the next
-  level on the way; it may name the level that cancels it.
-- down (required, <= 170 characters): the same, downward.
+- headline (required, <= 150 characters): the picture now, from the `position` fact and the
+  last close ("נסגרה ב-..."; a close, never "trades at").
+- levels (required, <= 220 characters): the zones on the chart, from the level.* facts
+  (level.r1 = the nearest resistance, level.s1 = the nearest support), nearest first.
+- up (required, <= 170 characters): conditional, from the up.* facts ONLY: a close above
+  up.trigger; the next level up.next (if the fact exists; otherwise say there is no further
+  marked level); it may name up.cancel. It must cite up.trigger.
+- down (required, <= 170 characters): the same from the down.* facts; it must cite down.trigger.
+The program computed these levels from the chart; never choose another level for them.
 - At most TWO of these optional sections, only when they change the picture now, the more
   important first (<= 130 characters each): trend (the moving averages, a trendline),
   fibonacci (only if the chart shows Fibonacci lines or a zone carries a Fibonacci note),
@@ -227,6 +230,13 @@ def part_problem(part: dict, facts: dict[str, dict], numbers: list[float],
     words = banned(text)
     if words:
         return f"advice or forecast wording: {words[:3]}"
+    # the scenarios and the levels come from the facts the chart was drawn from
+    needed = {"up": "up.trigger", "down": "down.trigger"}.get(name)
+    if needed and needed in facts and needed not in cites:
+        return f"must cite {needed} (the level the chart shows)"
+    if name == "levels" and any(k.startswith("level.") for k in facts) \
+            and not any(c.startswith("level.") for c in cites):
+        return "must cite the level.* facts (the zones the chart shows)"
     problem = direction_problem(text, [facts[c] for c in cites])
     if problem or name in FIXED_LIGHT:
         return problem
@@ -283,7 +293,9 @@ def write(analysis: Analysis, llm: LLM, *, rules: dict[str, Any] | None = None,
                 kept[name] = part
         dropped += [{**d, "retry": True} for d in dropped2]
     parts = [{**kept[name], "title": PARTS[name]} for name in PARTS if name in kept]
+    value = lambda key: (analysis.facts.get(key) or {}).get("value")      # noqa: E731
     return {"symbol": analysis.symbol, "last_day": analysis.last_day, "parts": parts,
+            "close": value("close"), "change_1d_pct": value("change_1d_pct"),
             "omitted": [name for name in REQUIRED if name not in kept],
             "dropped": dropped, "model": getattr(llm, "name", "?"), "usage": usages,
             "seconds": round(time.monotonic() - started, 1),
@@ -307,8 +319,16 @@ def telegram_html(written: dict[str, Any]) -> str:
     for one message: optional sections go, last first (never cut in the middle of a tag)."""
     ticker = written["symbol"].split(":")[-1]
     parts = list(written["parts"])
+    close, change = written.get("close"), written.get("change_1d_pct")
+    quote = ""
+    if isinstance(close, (int, float)):
+        quote = f"סגירה {close:,.2f}"
+        if isinstance(change, (int, float)):
+            quote += f" ({'🔺' if change >= 0 else '🔻'} {abs(change):.2f}%)"
+        quote += " · "
     while True:
-        lines = [f"<b>ניתוח טכני · {html.escape(ticker)} · {_day(written['last_day'])}</b>"]
+        lines = [f"<b>📊 ניתוח טכני · {html.escape(ticker)}</b>",
+                 html.escape(f"{quote}{_day(written['last_day'])}")]
         group = None
         for part in parts:
             light = LIGHTS.get(part.get("signal"), "")
@@ -332,13 +352,22 @@ def telegram_html(written: dict[str, Any]) -> str:
 
 
 def photo_caption(analysis: Analysis) -> str:
-    view = simple_view(analysis)
-    shown = ["תמיכה והתנגדות"]
-    if (view.get("fib") or {}).get("show"):
-        shown.append("פיבונאצ'י")
-    if (view.get("vp") or {}).get("show"):
-        shown.append("פרופיל נפח")
-    return f"{analysis.symbol} · {_day(analysis.last_day)} · {', '.join(shown)}"
+    """The chart's caption: the close and the nearest levels, the ones the chart draws."""
+    facts = analysis.facts
+
+    def zone(key: str) -> str | None:
+        low, high = (facts.get(f"{key}.low") or {}).get("value"), (facts.get(f"{key}.high") or {}).get("value")
+        return f"{low:,.2f}-{high:,.2f}" if isinstance(low, (int, float)) and isinstance(high, (int, float)) else None
+
+    parts = [analysis.symbol.split(":")[-1], _day(analysis.last_day)]
+    close = (facts.get("close") or {}).get("value")
+    if isinstance(close, (int, float)):
+        parts.append(f"סגירה {close:,.2f}")
+    if zone("level.r1"):
+        parts.append(f"🔴 התנגדות {zone('level.r1')}")
+    if zone("level.s1"):
+        parts.append(f"🟢 תמיכה {zone('level.s1')}")
+    return " · ".join(parts)
 
 
 def pine_caption(analysis: Analysis) -> str:

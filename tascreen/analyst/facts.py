@@ -96,6 +96,8 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
 
     f.add("close", price, "סגירה אחרונה", "$")
     f.add("last_date", _day(bars, last), "יום המסחר האחרון")
+    if last >= 1:
+        f.add("change_1d_pct", _pct(price, float(close.iloc[-2])), "השינוי ביום המסחר האחרון", "%", 2)
     if last >= 20:
         f.add("change_20d_pct", _pct(price, float(close.iloc[-21])), "שינוי ב-20 ימי מסחר", "%", 1)
     f.add("atr", atr_now, "ATR (תנודה יומית ממוצעת, 14)", "$")
@@ -206,6 +208,9 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
                   "invalidation": _num(invalidation(record, bars), 4),
                   "points": det.points, "lines": det.lines}
     result.facts = f.out
+    # the levels the chart shows and the scenarios on them, as facts (view.py)
+    from .view import key_level_facts
+    result.facts.update(key_level_facts(result, rules))
     return result
 
 

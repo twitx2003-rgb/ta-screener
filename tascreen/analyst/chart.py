@@ -19,9 +19,10 @@ from .view import note_parts, simple_view
 
 W, H = 1040, 560
 LEFT, AXIS, PROFILE, TOP, BOTTOM = 14, 66, 96, 48, 28
-GUTTER = 190                    # right of the last candle: the drawings' labels, never over the candles
+GUTTER = 220                    # right of the last candle: the drawings' labels, never over the candles
+                                # (a zone label with a note is ~210 px: it stays clear of the profile)
 VOLUME_SHARE = 0.15
-SHOW_BARS = 180
+SHOW_BARS = 130                 # about six months: wide enough candles on a phone
 MA_COLORS = {50: INK["sma50"], 150: INK["sma150"], 200: "#A78BFA"}
 ZONE = {"support": ANN["bull"], "resistance": ANN["bear"]}
 
@@ -39,10 +40,35 @@ def _ltr(text: str) -> str:
     return f"\u2066{text}\u2069"
 
 
+def _ticks(lo: float, hi: float, count: int = 6) -> tuple[list[float], float]:
+    """Round price-axis values (steps of 1, 2, 2.5 or 5 times a power of ten)."""
+    raw = max((hi - lo) / count, 1e-9)
+    magnitude = 10 ** math.floor(math.log10(raw))
+    step = min((m * magnitude for m in (1, 2, 2.5, 5, 10)), key=lambda s: abs(s - raw))
+    values, v = [], math.ceil(lo / step) * step
+    while v <= hi + step * 1e-6:
+        values.append(round(v, 10))
+        v += step
+    return values, step
+
+
+def _tick_label(value: float, step: float) -> str:
+    decimals = 0 if step >= 1 else 1 if step >= 0.1 else 2
+    return f"{value:,.{decimals}f}"
+
+
+def _finite(x: Any) -> bool:
+    try:
+        return math.isfinite(float(x))
+    except (TypeError, ValueError):
+        return False
+
+
 class _Plot:
-    def __init__(self, first: int, count: int, lo: float, hi: float):
+    def __init__(self, first: int, count: int, lo: float, hi: float, profile: bool = True):
         self.first, self.count, self.lo, self.hi = first, count, lo, hi
-        self.x0, self.x1 = LEFT, W - AXIS - PROFILE - 6
+        # the volume-profile panel takes its room only when the profile is drawn
+        self.x0, self.x1 = LEFT, W - AXIS - (PROFILE if profile else 0) - 6
         self.xc = self.x1 - GUTTER                               # the last candle ends here
         plot = H - TOP - BOTTOM
         self.y0, self.y1 = TOP, TOP + plot * (1 - VOLUME_SHARE) - 6
@@ -95,7 +121,8 @@ class _Tags:
 
 
 def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = None, *,
-           title: str | None = None) -> str:
+           title: str | None = None, name: str | None = None) -> str:
+    """The chart. `name` (the company's) goes beside the ticker in the header."""
     if drawings is None:
         items = {k: v for k, v in simple_view(analysis).items() if v.get("show", True)}
     else:
@@ -127,27 +154,60 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
     levels = [float(v) for v in levels if keep(v)]
     lo, hi = min([lo, *levels]), max([hi, *levels])
     pad = (hi - lo) * 0.06 or 1.0
-    plot = _Plot(first, len(win), lo - pad, hi + pad)
+    plot = _Plot(first, len(win), lo - pad, hi + pad, profile="vp" in items)
     tags = _Tags(plot)
     right = plot.xc + 4
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" class="shot-svg" role="img" '
            f'aria-label="{_esc(title or analysis.symbol)}" direction="ltr">',
            f'<rect width="{W}" height="{H}" rx="12" fill="{INK["bg"]}"/>']
 
-    for k in range(7):                                      # grid and price scale
-        price = plot.lo + (plot.hi - plot.lo) * k / 6
+    close = float(bars["close"].iloc[-1])
+    change = (analysis.facts.get("change_1d_pct") or {}).get("value")
+    day_color = INK["down"] if _finite(change) and float(change) < 0 else INK["up"]
+    close_y = plot.y(close)
+    ticks, step = _ticks(plot.lo, plot.hi)
+    for price in ticks:                                     # grid and a round price scale
         y = plot.y(price)
         out.append(f'<line x1="{plot.x0}" x2="{plot.x1}" y1="{y:.1f}" y2="{y:.1f}" stroke="{INK["grid"]}"/>')
-        out.append(f'<text x="{W - AXIS + 6}" y="{y + 4:.1f}" fill="{INK["axis"]}" font-family="{MONO}" '
-                   f'font-size="12">{_fmt(price)}</text>')
+        if abs(y - close_y) > 14:                           # never under the close's tag
+            out.append(f'<text x="{W - AXIS + 6}" y="{y + 4:.1f}" fill="{INK["axis"]}" font-family="{MONO}" '
+                       f'font-size="12">{_tick_label(price, step)}</text>')
     for k in range(6):
         i = first + int(k * (len(win) - 1) / 5)
-        out.append(f'<text x="{plot.x(i):.1f}" y="{H - 9}" fill="{INK["axis"]}" font-family="{MONO}" '
-                   f'font-size="12" text-anchor="middle">{pd.Timestamp(days[i]):%d/%m/%y}</text>')
-    out.append(f'<text x="{plot.x0 + 4}" y="28" fill="{INK["title"]}" font-family="{MONO}" '
-               f'font-size="15" font-weight="600">{_esc(title or analysis.symbol)}</text>')
-    out.append(f'<text x="{W - AXIS - PROFILE}" y="28" fill="{INK["axis"]}" font-family="{MONO}" '
-               f'font-size="12" text-anchor="end">1D · {pd.Timestamp(days[last]):%d/%m/%Y}</text>')
+        anchor, x = ("start", plot.x0) if k == 0 else ("middle", plot.x(i))
+        out.append(f'<text x="{x:.1f}" y="{H - 9}" fill="{INK["axis"]}" font-family="{MONO}" '
+                   f'font-size="12" text-anchor="{anchor}">{pd.Timestamp(days[i]):%d/%m/%y}</text>')
+    # the header: ticker and name; close, the day's change, the date
+    ticker = analysis.symbol.split(":")[-1]
+    out.append(f'<text x="{plot.x0 + 4}" y="25" fill="{INK["title"]}" font-family="{MONO}" '
+               f'font-size="17" font-weight="700">{_esc(ticker)}</text>')
+    if name:
+        out.append(f'<text x="{plot.x0 + 16 + 10.5 * len(ticker):.1f}" y="25" fill="{INK["axis"]}" '
+                   f'font-family="{SANS}" font-size="13">{_esc(str(name)[:42])}</text>')
+    sub = (f'<tspan fill="{INK["title"]}">{_fmt(close)}</tspan>'
+           + (f'  <tspan fill="{day_color}">{float(change):+.2f}%</tspan>' if _finite(change) else "")
+           + f'  ·  1D  ·  {pd.Timestamp(days[last]):%d/%m/%Y}')
+    out.append(f'<text x="{plot.x0 + 4}" y="43" fill="{INK["axis"]}" font-family="{MONO}" '
+               f'font-size="12" xml:space="preserve">{sub}</text>')
+    # the legend (right to left, as it is read): only what is drawn
+    kinds = {v.get("kind") for v in items.values() if v.get("type") == "zone"}
+    legend = [(ZONE["support"], "תמיכה") if "support" in kinds else None,
+              (ZONE["resistance"], "התנגדות") if "resistance" in kinds else None,
+              (ANN["target"], "פיבונאצ'י") if "fib" in items else None,
+              (ANN["accent"], "פרופיל נפח") if "vp" in items else None]
+    cursor = W - 18
+    for color, word in (e for e in legend if e):
+        out.append(f'<circle cx="{cursor - 4:.1f}" cy="21" r="4.5" fill="{color}"/>')
+        out.append(f'<text x="{cursor - 13:.1f}" y="25" fill="{INK["axis"]}" font-family="{SANS}" '
+                   f'font-size="12" text-anchor="end">{_esc(word)}</text>')
+        cursor -= 13 + 7.2 * len(word) + 16
+    # the last close: a dotted line across and a tag on the price axis
+    out.append(f'<line x1="{plot.x0}" x2="{plot.x1}" y1="{close_y:.1f}" y2="{close_y:.1f}" stroke="{day_color}" '
+               f'stroke-width="1" stroke-opacity="0.55" stroke-dasharray="2 3"/>')
+    out.append(f'<rect x="{W - AXIS + 2}" y="{close_y - 10:.1f}" width="{AXIS - 6}" height="20" rx="4" '
+               f'fill="{day_color}"/>')
+    out.append(f'<text x="{W - AXIS + 2 + (AXIS - 6) / 2:.1f}" y="{close_y + 4:.1f}" fill="{INK["bg"]}" '
+               f'font-family="{MONO}" font-size="12" font-weight="700" text-anchor="middle">{_fmt(close)}</text>')
 
     # zones first (behind the candles)
     for item in items.values():
@@ -267,7 +327,10 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
         px0, px1 = plot.x1 + 8, plot.x1 + 8 + PROFILE - 12
         vmax = max(vp["volume"]) or 1
         for n, vol in enumerate(vp["volume"]):
-            y_top, y_bot = plot.y(vp["edges"][n + 1]), plot.y(vp["edges"][n])
+            # the profile covers the whole analysed year; the chart shows less of it
+            if vp["edges"][n] >= plot.hi or vp["edges"][n + 1] <= plot.lo:
+                continue
+            y_top, y_bot = plot.y(min(vp["edges"][n + 1], plot.hi)), plot.y(max(vp["edges"][n], plot.lo))
             inside = vp["val"] <= vp["edges"][n] < vp["vah"]
             width = (px1 - px0) * vol / vmax
             out.append(f'<rect x="{px0:.1f}" y="{y_top:.1f}" width="{width:.1f}" height="{max(1.0, y_bot - y_top - 1):.1f}" '
@@ -275,8 +338,6 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
         y = plot.y(vp["poc"])
         out.append(f'<line class="ann" x1="{plot.x0:.1f}" y1="{y:.1f}" x2="{px1:.1f}" y2="{y:.1f}" '
                    f'stroke="{ANN["accent"]}" stroke-width="1" stroke-opacity="0.7" stroke-dasharray="1 3"/>')
-        out.append(f'<text x="{(px0 + px1) / 2:.1f}" y="{TOP - 8}" fill="{INK["axis"]}" font-family="{SANS}" '
-                   f'font-size="11" text-anchor="middle">נפח לפי מחיר</text>')
         if vp.get("poc_label", True):
             tags.add(right, y, f"שליטה (POC) {_ltr(_fmt(vp['poc']))}", ANN["accent"])
 
