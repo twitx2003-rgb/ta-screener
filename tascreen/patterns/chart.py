@@ -260,15 +260,22 @@ def _head_shoulders(s: Series, top: bool) -> list[tuple[Detection, frozenset]]:
         def neck(i: int) -> float:
             return a1.price + slope * (i - a1.i)
 
+        # the neckline runs between the head and shoulders and the armpits: a steep one that
+        # had passed a shoulder "confirmed" a bottom below both shoulders (review round 2)
+        sides = all((neck(p.i) < p.price) if top else (neck(p.i) > p.price) for p in (ls, head, rs))
+        if not ck.need("neckline_side", "קו הצוואר בצד הנכון של הראש והכתפיים", sides, True, sides):
+            continue
+
         # Bulkowski's confirmation: through the neckline when it slopes the helpful
-        # way, otherwise through the right armpit.
+        # way, otherwise through the right armpit; a line extended past the head's price
+        # confirms nothing.
         if top:
             level = neck if slope > 0 else (lambda i: a2.price)
-            confirm = lambda i: s.c[i] < level(i)                  # noqa: E731
+            confirm = lambda i: level(i) < head.price and s.c[i] < level(i)     # noqa: E731
             failed = lambda i: s.c[i] > head.price                 # noqa: E731
         else:
             level = neck if slope < 0 else (lambda i: a2.price)
-            confirm = lambda i: s.c[i] > level(i)                  # noqa: E731
+            confirm = lambda i: level(i) > head.price and s.c[i] > level(i)     # noqa: E731
             failed = lambda i: s.c[i] < head.price                 # noqa: E731
         brk = s.first_close(rs.i + 1, s.last, confirm)
         if s.first_close(rs.i + 1, (brk - 1) if brk is not None else s.last, failed) is not None:

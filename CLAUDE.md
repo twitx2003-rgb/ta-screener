@@ -721,6 +721,33 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     the 50-day average (cyan, never Fibonacci's gold); a dashed 52-week high/low within
     `extreme_draw_pct` that no zone holds; the outline of a chart pattern whose breakout is
     <= 2 x `event_fresh_sessions` old, with the breakout session marked.
+- **Review round 2 (2026-09-25/26):** 12 stocks, 4 reviewers in 3 batches (12 at once hit
+  the Claude session limit). Average 5.9/10; the round-1 stocks 5.2 -> 6.0 (novice 5.5->6.4,
+  editor 5.6->6.6, trader 4.5->5.5, TA 5.2->5.8). Fixes:
+  - facts: 52-week high/low sessions ago, last-day volume ratio, MA direction/slope, stretch
+    (>= 3 ATR from the 50-day), MA spread + 6-month range, zone breaks (crossed from the other
+    side, held; day, volume), failed divergences dropped, pattern state against the broken
+    line carried to today (a retest from the other side is not a failure; past the cancel
+    level = failed), breakout-day volume, target already reached, trendline side/crossed.
+  - scenarios: next = the next band as a range (never skipping a drawn zone), pattern target
+    or Fibonacci extension when nothing is beyond ("not a forecast"), cancel a real level
+    >= 1 ATR from the trigger (else >= 0.5), risk % and room % from the trigger; touching
+    zones (< 0.4 ATR) join; "closer to" only with a 0.5 ATR difference.
+  - events: failed pattern, retest, day-0 breakout ("סגר היום לראשונה"), rejection/bounce at
+    a zone today, zone break, new 52-week extreme (also appended to any event), pullback to a
+    rising 50-day, range; pattern names as "תבנית ...".
+  - writer: new rules (direction words, Latin start, momentum only when extreme, overbought
+    is yellow, no repeats, plain words) with checks; $ / "דולר" / this year's dates stripped;
+    bold headline, U+200F after the light; scenarios measured from the trigger.
+  - chart: drawn after the text (`render(cited=...)`): Fibonacci/profile only if cited, every
+    cited chart pattern (window widened to its start); 50/150/200 averages; legend on two
+    rows; pattern levels lavender, "ביטול התבנית" only within 3 ATR, no target when forming,
+    failed, doubtful or reached; lines from their first touch; broken line dashed to today;
+    ▲/▼ breakout marker off the candle, its label only where no candle is; near labels merge;
+    half-step axis labels; "נפח מרבי", "פיבונאצ'י"; company name without Inc./(The).
+  - scanner (site-wide): a head-and-shoulders neckline must stay on the right side of the
+    head and shoulders, and a line extended past the head confirms nothing (a real stock
+    "broke out" below both shoulders). Goes into the Saturday backfill with the 10% rule.
 - **Flat lines are flat (owner, 2026-09-25): `flat_line_max_drift` 0.25 -> 0.10.** At 0.25 a
   top that rose (NFLX, both lines rising) passed as an ascending triangle and a falling top
   with a rising bottom too. Measured on every stored stock (scratch script, not kept):

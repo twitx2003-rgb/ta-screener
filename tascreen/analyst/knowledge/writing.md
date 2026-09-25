@@ -11,8 +11,12 @@ someone who knows only the words "support" and "resistance" understands.
   where it adds something.
 - Skip a section that has nothing meaningful to say rather than filling it.
 - Never invent a number.
-- Dates: DD/MM (the year only if it is not the current one), only dates that appear in the facts.
+- Dates: DD/MM, never the year; the last session is "היום". Only dates that appear in the facts.
 - Prices with two decimals as in the facts, no $ sign (the header shows the close).
 - The two scenarios are written by the program from the up.* / down.* facts: never
   repeat them, never say which is more likely or where the price will go.
 - Neutral tone: no hype, no emojis, no exclamation marks.
+- Each number once in the message: what the headline said, a section does not repeat.
+- Always above or below: every level and line is "מעל הסגירה" or "מתחת לסגירה".
+- Consistent terms: "ה-RSI", "ה-MACD", "קו האפס", "אזור" (never "רצועה"), "פריצה" up and
+  "שבירה" down, prices without $ or "דולר".

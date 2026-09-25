@@ -151,7 +151,7 @@ def test_the_simple_view_keeps_the_nearest_levels_and_joins_the_ones_that_meet()
 
     view = simple_view(_view_case(108.0), RULES)
     assert {k for k, v in view.items() if v["type"] == "zone"} == {"zone_2", "zone_3", "zone_4", "zone_5"}
-    assert "tl_1" not in view and view["ma"]["periods"] == [50]   # the 50-day average only
+    assert "tl_1" not in view and view["ma"]["periods"] == [50, 150, 200]   # all three the text names
     fib = view["fib"]                                   # 108 is 40% back into the 90 -> 120 move
     assert fib["show"] and "fib_ext_1618" not in fib["levels"]
     assert view["zone_4"]["notes"] == ["fib_500", "poc"]    # 105 is on the 104.5-105.5 zone
@@ -195,16 +195,20 @@ def test_the_scenarios_are_built_from_the_zones_the_chart_shows():
     facts = {k: v["value"] for k, v in key_level_facts(_view_case(108.0), RULES).items()}
     assert (facts["level.r1.low"], facts["level.r1.high"], facts["level.r2.low"]) == (112, 113, 119)
     assert (facts["level.s1.low"], facts["level.s1.high"], facts["level.s2.high"]) == (104.5, 105.5, 100)
-    # a close back through the zone that started a scenario cancels it (review round 1)
-    assert (facts["up.trigger"], facts["up.next"], facts["up.cancel"]) == (113, 119, 112)
-    assert (facts["down.trigger"], facts["down.next"], facts["down.cancel"]) == (104.5, 100, 105.5)
+    # a close back through a real level at least 1 ATR from the trigger cancels it (review
+    # round 2: the zone's other edge, 1 point = 0.5 ATR away, was noise)
+    assert (facts["up.trigger"], facts["up.next"], facts["up.cancel"]) == (113, 119, 105.5)
+    assert (facts["down.trigger"], facts["down.next"], facts["down.cancel"]) == (104.5, 100, 112)
     assert (facts["up.trigger_pct"], facts["up.next_pct"], facts["down.trigger_pct"]) == (4.6, 10.2, 3.2)
+    assert (facts["up.risk_pct"], facts["up.room_pct"], facts["up.next_far"]) == (6.6, 5.3, 120)
+    assert facts["up.trigger_what"] == "הקצה העליון של אזור ההתנגדות"
+    assert facts["up.next_what"] == "אזור ההתנגדות הבא"
     assert facts["event.kind"] == "position"
     assert facts["position"] == "בין התמיכה להתנגדות, קרוב יותר לתמיכה"      # 2.5 below vs 4 above
     assert facts["level.r1.distance_pct"] == 3.7 and facts["level.s1.distance_pct"] == 2.3
     inside = {k: v["value"] for k, v in key_level_facts(_view_case(105.0), RULES).items()}
     assert inside["position"] == "בתוך אזור התמיכה הקרוב" and inside["level.s1.distance_pct"] == 0
-    assert (inside["down.trigger"], inside["down.cancel"], inside["event.kind"]) == (104.5, 105.5, "inside_zone")
+    assert (inside["down.trigger"], inside["down.cancel"], inside["event.kind"]) == (104.5, 112, "inside_zone")
 
 
 def test_near_levels_join_into_a_band_and_the_next_level_is_never_right_behind():
@@ -226,3 +230,71 @@ def test_near_levels_join_into_a_band_and_the_next_level_is_never_right_behind()
     assert (f["up.next"], f["up.next_what"]) == (112, "השיא השנתי")
     assert (f["down.trigger"], f["down.next"]) == (95.4, 90)          # the swing low of 10/01
     assert f["down.next_what"] == "השפל מ-10/01"
+
+
+def _event_case(**facts):
+    from tascreen.analyst.view import key_event
+
+    rules = {**RULES, "event_fresh_sessions": 10}
+    return key_event({k: {"value": v} for k, v in facts.items()}, "בין התמיכה להתנגדות", rules)
+
+
+def test_the_key_event_names_what_happened_this_week():
+    # a zone the price just closed through, with the new high it made (review round 2)
+    zone = _event_case(**{"zone_2.broken": "נפרץ כלפי מעלה (התנגדות שהפכה לתמיכה)", "zone_2.low": 50.0,
+                          "zone_2.high": 52.0, "zone_2.broken_day": "2026-03-16",
+                          "zone_2.broken_sessions_ago": 3, "high_52w_sessions_ago": 0,
+                          "high_52w_day": "2026-03-19", "high_52w": 60.0})
+    assert zone == ("המחיר פרץ מעל אזור ההתנגדות שבין 50.00 ל-52.00 ב-16/03, ורשם שיא שנתי חדש היום",
+                    "zone_break")
+    # a new 52-week low today, on a day that closed up
+    low = _event_case(low_52w_sessions_ago=0, low_52w_day="2026-03-19", low_52w=40.0,
+                      low_52w_distance_pct=2.8, change_1d_pct=2.0)
+    assert low == ("שפל שנתי חדש היום (40.00); הסגירה 2.8% מעליו, והיום נסגר בעלייה של 2.0%", "new_low")
+    # a retest of the broken line from below is not a failure
+    retest = _event_case(**{"pat_1.state": "המחיר חזר לבדוק את קו השבירה מלמטה", "pat_1.name": "טריז עולה",
+                            "pat_1.direction": "דובי", "pat_1.breakout_day": "2026-03-10",
+                            "pat_1.sessions_since_breakout": 9, "pat_1.line_now": 120.0})
+    assert retest == ("אחרי השבירה מתבנית טריז עולה ב-10/03, המחיר חזר לבדוק את קו השבירה (120.00) מלמטה",
+                      "retest")
+    fresh = _event_case(**{"pat_1.state": "המחיר מעל קו הפריצה", "pat_1.name": "משולש עולה",
+                           "pat_1.direction": "שורי", "pat_1.breakout_day": "2026-03-19",
+                           "pat_1.sessions_since_breakout": 0, "pat_1.close_vs_breakout_pct": 1.3})
+    assert fresh == ("המחיר סגר היום לראשונה מעל קו הפריצה של תבנית משולש עולה", "fresh_breakout")
+    later = _event_case(**{"pat_1.state": "המחיר מעל קו הפריצה", "pat_1.name": "משולש עולה",
+                           "pat_1.direction": "שורי", "pat_1.breakout_day": "2026-03-16",
+                           "pat_1.sessions_since_breakout": 3, "pat_1.close_vs_breakout_pct": 1.3})
+    assert later == ("המחיר פרץ כלפי מעלה מתבנית משולש עולה ב-16/03, ונמצא 1.3% מעל קו הפריצה", "fresh_breakout")
+    failed = _event_case(**{"pat_2.state": "התבנית נכשלה: המחיר עבר את רמת הביטול שלה (95.00)",
+                            "pat_2.name": "משולש סימטרי", "pat_2.direction": "דובי",
+                            "pat_2.breakout_day": "2026-03-09", "pat_2.sessions_since_breakout": 8})
+    assert failed[1] == "failed_pattern" and failed[0].startswith("תבנית משולש סימטרי נכשלה")
+    # turned back at a zone today by more than an ATR
+    rejected = _event_case(**{"zone_3.low": 10.0, "zone_3.high": 11.0, "close": 9.5,
+                              "change_1d_pct": -7.8, "atr": 0.3})
+    assert rejected == ("המחיר נדחה היום מאזור ההתנגדות שבין 10.00 ל-11.00: ירידה של 7.8%", "rejected")
+    # an uptrend back at its rising 50-day average; a range
+    pullback = _event_case(**{"sma50.direction": "עולה", "sma50.distance_atr": 0.6, "sma50": 50.0,
+                              "vs_sma50_pct": 0.9, "high_52w_distance_pct": 4.8})
+    assert pullback == ("מגמת עלייה: המחיר ירד חזרה אל ממוצע 50 העולה (50.00, 0.9% מתחת לסגירה), "
+                        "4.8% מתחת לשיא השנתי", "pullback_ma50")
+    ranged = _event_case(**{"range.low": 30.0, "range.high": 36.0, "range.sessions": 120})
+    assert ranged[1] == "range" and ranged[0].startswith("דשדוש: המחיר נע בין 30.00 ל-36.00 ב-6 החודשים")
+
+
+def test_with_nothing_past_the_trigger_a_fresh_pattern_target_is_the_next_level():
+    from tascreen.analyst.facts import Analysis
+    from tascreen.analyst.view import key_level_facts
+
+    a = Analysis("TEST:SYN", "2026-01-30", 0)
+    a.facts = {"close": {"value": 51.0}, "atr": {"value": 2.0}, "high_52w": {"value": 52.0},
+               "low_52w": {"value": 30.0}, "pat_1.target": {"value": 60.0}, "pat_1.direction": {"value": "שורי"},
+               "pat_1.sessions_since_breakout": {"value": 0}}
+    a.drawings = {"zone_1": {"type": "zone", "kind": "support", "low": 49.0, "high": 50.0,
+                             "first_day": "2026-01-02", "last_day": "2026-01-20", "touches": 3}}
+    f = {k: v["value"] for k, v in key_level_facts(a, RULES).items()}
+    assert (f["up.trigger"], f["up.next"], f["up.next_what"]) == (52.0, 60.0, "יעד התבנית לפי גובהה (לא תחזית)")
+    assert f["up.cancel"] == 50.0 and "up.no_next" not in f      # never the trigger itself (review round 2)
+    a.facts.pop("pat_1.target")
+    f = {k: v["value"] for k, v in key_level_facts(a, RULES).items()}
+    assert f["up.no_next"] == "מעליו אין רמות מהשנה האחרונה"

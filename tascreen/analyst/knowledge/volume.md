@@ -14,12 +14,18 @@ What the engine computes:
 - vp.val / vp.vah: the bottom and top of the value area, the range holding 70% of the volume.
 - volume.ratio: average volume of the last 20 sessions divided by the last 50;
   volume.trend: rising / falling / steady.
+- volume.last_ratio, pat_N.breakout_volume_ratio, zone_N.broken_volume_ratio: one
+  session's volume divided by the average of the 50 sessions before it (1.5 = half as much
+  again as usual).
 
 How to read it:
 - Traditional volume says when trading happened; the profile says at which prices.
 - The POC and the value-area edges often act as support or resistance: many shares changed
   hands there. A price above the value area trades above where most of the volume was done.
 - Rising volume on a move gives it more weight; a breakout on low volume is less convincing.
+  With a fresh breakout, say its day's volume against the average ("בנפח גבוה פי 1.8 מהממוצע"
+  from 1.5, "בנפח נמוך מהממוצע" under 1).
+- The POC in plain words: "נפח מרבי: המחיר שבו נסחר הכי הרבה".
 - Never state a volume number the facts do not give.
 
 Hebrew terms: פרופיל נפח, מחיר השליטה (POC), אזור הערך, נפח ממוצע.

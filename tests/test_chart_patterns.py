@@ -171,3 +171,11 @@ def test_every_detection_is_json_ready():
     for det in detect(from_knots(HS_TOP)) + detect(from_knots(CUP)):
         row = det.row()
         json.loads(row["checks_json"]), json.loads(row["points_json"]), json.loads(row["lines_json"])
+
+
+def test_a_neckline_that_passed_a_shoulder_confirms_nothing():
+    # an inverse head-and-shoulders whose falling neckline had dropped below the right
+    # shoulder "broke out" under both shoulders (review round 2, a real stock)
+    steep = from_knots([(0, 145), (90, 100), (105, 118), (120, 90), (135, 101), (150, 99.5),
+                        (165, 112), (168, 113)])
+    assert not [d for d in detect_chart(steep, "TEST:SYN", RULES) if d.pattern == "head_shoulders_bottom"]

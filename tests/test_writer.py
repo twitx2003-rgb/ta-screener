@@ -121,10 +121,10 @@ def test_what_fails_twice_is_left_out_and_the_message_says_so():
     written = write(_analysis(), SyntheticLLM(lambda s, u, schema: bad), rules=RULES)
     assert written["omitted"] == ["levels"]
     message = telegram_html(written)
-    assert "הושמט: רמות" in message and "לא ייעוץ השקעות" in message and "לקנות" not in message
+    assert "הושמט: רמות" in message and "אין באמור ייעוץ השקעות" in message and "לקנות" not in message
     lines = message.split("\n")
     assert lines[0] == "<b>📊 ניתוח טכני · TEST</b>" and lines[1] == "סגירה 104.20 · 20/03/2026"
-    assert lines[3] == "🟡 " + GOOD["headline"]
+    assert lines[3] == "🟡\u200f <b>" + GOOD["headline"] + "</b>"      # bold, right to left
 
 
 def test_the_scenarios_are_written_by_the_program_from_the_facts():
@@ -133,18 +133,21 @@ def test_the_scenarios_are_written_by_the_program_from_the_facts():
     def fact(v):
         return {"value": v, "label": "", "unit": ""}
 
-    facts = {"up.trigger": fact(110.0), "up.trigger_pct": fact(5.6), "up.trigger_what": fact("אזור ההתנגדות"),
-             "up.next": fact(120.0), "up.next_pct": fact(15.2), "up.next_what": fact("השיא השנתי"),
-             "up.cancel": fact(108.5),
-             "down.trigger": fact(99.0), "down.trigger_pct": fact(5.0), "down.trigger_what": fact("אזור התמיכה"),
-             "down.no_next": fact("מתחתיה אין רמות ממחירי השנה האחרונה"), "down.cancel": fact(100.5)}
+    facts = {"up.trigger": fact(110.0), "up.trigger_what": fact("הקצה העליון של אזור ההתנגדות"),
+             "up.next": fact(118.0), "up.next_far": fact(120.0), "up.next_what": fact("אזור ההתנגדות הבא"),
+             "up.room_pct": fact(7.3), "up.cancel": fact(104.0), "up.risk_pct": fact(5.5),
+             "down.trigger": fact(99.0), "down.trigger_what": fact("השפל השנתי"),
+             "down.no_next": fact("מתחתיו אין רמות מהשנה האחרונה"), "down.cancel": fact(104.0),
+             "down.risk_pct": fact(5.1)}
     up, down = scenario_parts(facts)
-    assert up["text"] == ("בסגירה מעל 110.00 (אזור ההתנגדות, 5.6% מעל הסגירה), הרמה הבאה היא 120.00 "
-                          "(השיא השנתי, 15.2% מעל הסגירה). התרחיש מתבטל בסגירה חזרה מתחת ל-108.50.")
-    assert down["text"] == ("בסגירה מתחת ל-99.00 (אזור התמיכה, 5.0% מתחת לסגירה); מתחתיה אין רמות "
-                            "ממחירי השנה האחרונה. התרחיש מתבטל בסגירה חזרה מעל 100.50.")
+    # prices, the next level as a range, the room and the risk from the trigger (review round 2)
+    assert up["text"] == ("סגירה מעל 110.00, הקצה העליון של אזור ההתנגדות. הרמה הבאה: אזור ההתנגדות הבא, "
+                          "בין 118.00 ל-120.00 (7.3% מעל רמת הכניסה). סגירה חזרה מתחת ל-104.00 מבטלת "
+                          "את התרחיש (5.5% מרמת הכניסה).")
+    assert down["text"] == ("סגירה מתחת ל-99.00, השפל השנתי. מתחתיו אין רמות מהשנה האחרונה. "
+                            "סגירה חזרה מעל 104.00 מבטלת את התרחיש (5.1% מרמת הכניסה).")
     assert (up["signal"], down["signal"]) == ("up", "down") and "up.trigger" in up["cites"]
-    at_high = scenario_parts({"up.no_next": fact("המחיר בשיא השנתי; מעליו אין רמות ממחירי השנה האחרונה")})
+    at_high = scenario_parts({"up.no_next": fact("המחיר בשיא השנתי; מעליו אין רמות מהשנה האחרונה")})
     assert [p["part"] for p in at_high] == ["up"] and at_high[0]["text"].endswith("האחרונה.")
 
 
@@ -206,3 +209,26 @@ def test_photos_and_files_go_up_as_multipart():
     body = captured["data"]
     assert body.startswith(f"--{boundary}\r\n".encode()) and body.endswith(f"--{boundary}--\r\n".encode())
     assert b'name="photo"; filename="chart.png"\r\nContent-Type: image/png\r\n\r\n\x89PNG-bytes' in body
+
+
+def test_round_two_wording_rules_are_checked():
+    facts = {**_analysis().facts, "rsi14": {"value": 55.0, "label": "RSI 14", "unit": ""},
+             "pat_1.direction": {"value": "דובי", "label": "", "unit": ""}}
+
+    def problem(part, text, cites, light="yellow"):
+        return part_problem({"part": part, "signal": light, "text": text, "cites": cites},
+                            facts, allowed_numbers(facts, RULES), fact_dates(facts))
+
+    assert "שבירה" in problem("patterns", "המחיר פרץ מהתבנית.", ["pat_1.direction"])
+    assert problem("patterns", "המחיר שבר כלפי מטה את קו התבנית.", ["pat_1.direction"]) is None
+    assert "Latin" in problem("trend", "XYZ במגמה.", ["close"])
+    assert "neutral momentum" in problem("momentum", "ה-RSI ניטרלי.", ["rsi14"])
+    facts["rsi14"]["value"] = 71.0
+    assert "yellow" in problem("momentum", "ה-RSI בקניית יתר.", ["rsi14"], "green")
+    assert problem("momentum", "ה-RSI בקניית יתר.", ["rsi14"], "yellow") is None
+
+
+def test_dollars_and_this_years_dates_are_taken_out():
+    from tascreen.analyst.writer import _finish
+
+    assert _finish("התנגדות ב-110.00$ מ-10/09/2026, 5 דולר") == "התנגדות ב-110.00 מ-10/09, 5"

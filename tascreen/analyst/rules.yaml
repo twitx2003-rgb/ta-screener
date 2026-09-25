@@ -57,3 +57,16 @@ event_big_move_pct: {value: 15.0, origin: ours, note: "a 20-session move this la
 scenario_min_gap_atr: {value: 1.0, origin: ours, note: "a next level closer than this to its trigger is skipped"}
 extreme_draw_pct: {value: 10.0, origin: ours, note: "the 52-week high or low is drawn when this close to the price"}
 scenario_band_max_atr: {value: 1.5, origin: ours, note: "levels join into one band only up to this width (no chains of near levels)"}
+
+# review round 2 (2026-09-25): new highs and zone breaks were missed, a retest read as a
+# failure, cancel levels sat on their triggers, ranges and pullbacks had no headline
+stretch_atr: {value: 3.0, origin: ours, note: "this many ATRs from the 50-day average: the price is stretched"}
+congestion_ma_spread_pct: {value: 2.0, origin: ours, note: "the 50/150/200 averages within this of each other: no trend, a range"}
+range_sessions: {value: 120, origin: ours, note: "the range a congested stock has traded in (about six months)"}
+retest_away_atr: {value: 1.0, origin: ours, note: "after moving this far past the broken line, a return to within 1 ATR of it is a retest"}
+new_extreme_sessions: {value: 5, origin: ours, note: "a 52-week high or low this recent is news"}
+pullback_ma50_atr: {value: 1.0, origin: ours, note: "an uptrend's price within this of a rising 50-day average: a pullback to it"}
+scenario_cancel_min_atr: {value: 1.0, origin: ours, note: "a cancel level at least this far from its trigger, from a real level (review round 2: cancel = trigger)"}
+scenario_merge_atr: {value: 0.4, origin: ours, note: "levels this close join one band whatever its width (touching zones)"}
+closer_min_atr: {value: 0.5, origin: ours, note: "the price is 'closer' to one side only when the gap differs by this much"}
+view_trendline_atr: {value: 2.0, origin: ours, note: "a trendline of 3+ touches this close to the price is drawn and is a level"}

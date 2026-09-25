@@ -16,9 +16,14 @@ What the engine computes:
 
 How to read it:
 - Overbought is not a sell signal and oversold is not a buy signal: a strong trend can
-  stay overbought for a long time. "קניית יתר" is a state, not a prediction.
+  stay overbought for a long time. "קניית יתר" is a state, not a prediction: "קניית יתר =
+  המחיר עלה מהר; מצב, לא אות". Its light is yellow.
+- RSI between 30 and 35 is "קרוב לאזור מכירת היתר", between 65 and 70 "קרוב לאזור קניית
+  היתר"; between 35 and 65 it says nothing: leave the momentum section out.
+- A divergence the price has already overridden (it closed past the second turning point)
+  has failed; the engine drops it.
 - MACD above its signal line means momentum is improving; above 0, the short average is
-  above the long one.
+  above the long one. Say what it means ("התנופה משתפרת" / "התנופה נחלשת"), not "קו האות".
 - A divergence says momentum is weakening against the price. It is known only after the
   second turning point, so it is always late, and it does not time a reversal.
 

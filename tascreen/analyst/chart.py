@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from typing import Any
 
 import pandas as pd
@@ -23,6 +24,8 @@ GUTTER = 220                    # right of the last candle: the drawings' labels
                                 # (a zone label with a note is ~210 px: it stays clear of the profile)
 VOLUME_SHARE = 0.15
 SHOW_BARS = 130                 # about six months: wide enough candles on a phone
+MAX_BARS = 250                  # a named pattern that started earlier widens the window up to this
+PATTERN_LEVEL_ATR = 3.0         # a pattern's cancel level farther than this is left off the chart
 MA_COLORS = {50: INK["sma150"], 150: "#F0ABFC", 200: "#A78BFA"}   # never Fibonacci's gold
 ZONE = {"support": ANN["bull"], "resistance": ANN["bear"]}
 
@@ -53,8 +56,16 @@ def _ticks(lo: float, hi: float, count: int = 6) -> tuple[list[float], float]:
 
 
 def _tick_label(value: float, step: float) -> str:
-    decimals = 0 if step >= 1 else 1 if step >= 0.1 else 2
+    decimals = 0
+    while decimals < 4 and abs(step * 10 ** decimals - round(step * 10 ** decimals)) > 1e-6:
+        decimals += 1
     return f"{value:,.{decimals}f}"
+
+
+def _company(name: str) -> str:
+    """The header's company name without "(The)" or a trailing Inc./Corp. (review round 2)."""
+    name = re.sub(r"\s*\(The\)|,?\s+(?:Inc|Corp|Corporation|Ltd|plc)\.?$", "", str(name)).strip()
+    return name if len(name) <= 42 else name[:41].rstrip() + "…"
 
 
 def _finite(x: Any) -> bool:
@@ -110,7 +121,12 @@ class _Tags:
         """Place the gutter labels: in price order, each as near its level as the ones
         above it allow, pushed up from the bottom if the column overflows."""
         lowest, highest = self.plot.y0 + 11, self.plot.y1 - 11
-        tags = sorted(self.pending, key=lambda t: t[0])
+        tags: list[tuple[float, str, str]] = []
+        for y, text, color in sorted(self.pending, key=lambda t: t[0]):
+            if tags and y - tags[-1][0] < 10:            # two levels at one height: one label
+                tags[-1] = ((tags[-1][0] + y) / 2, f"{tags[-1][1]} · {text}", tags[-1][2])
+            else:
+                tags.append((y, text, color))
         ys: list[float] = []
         for wanted, _, _ in tags:
             y = max(min(max(wanted, lowest), highest), (ys[-1] + self.GAP) if ys else lowest)
@@ -142,18 +158,50 @@ class _Tags:
 
 
 def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = None, *,
-           title: str | None = None, name: str | None = None) -> str:
-    """The chart. `name` (the company's) goes beside the ticker in the header."""
+           title: str | None = None, name: str | None = None, cited: set[str] | None = None) -> str:
+    """The chart. `name` (the company's) goes beside the ticker in the header. `cited`, the
+    fact keys the written text relies on, makes the chart draw what the text names (review
+    round 2): Fibonacci and the volume profile only when a section cites them, and every
+    chart pattern the text names."""
+    facts = analysis.facts
+    fact = lambda key: (facts.get(key) or {}).get("value")          # noqa: E731
     if drawings is None:
         items = {k: v for k, v in simple_view(analysis).items() if v.get("show", True)}
+        if cited is not None:
+            if not any(c.startswith("fib") for c in cited):
+                items.pop("fib", None)
+            if not any(c.startswith("vp.") for c in cited):
+                items.pop("vp", None)
+            for key in sorted({c.split(".")[0] for c in cited if c.startswith("pat_")}):
+                item = analysis.drawings.get(key)
+                if item and item.get("family") == "chart":
+                    items[key] = item
     else:
         items = {k: analysis.drawings[k] for k in drawings if k in analysis.drawings}
     bars = bars.reset_index(drop=True)
     last = len(bars) - 1
-    first = max(0, len(bars) - SHOW_BARS)
-    win = bars.iloc[first:]
     days = bars["timestamp"].dt.strftime("%Y-%m-%d").tolist()
     index = {d: i for i, d in enumerate(days)}
+    first = max(0, len(bars) - SHOW_BARS)
+    for item in items.values():                  # a pattern is shown whole (review round 2)
+        if item.get("type") == "pattern" and item.get("family") == "chart" and item.get("start") in index:
+            first = max(0, len(bars) - MAX_BARS, min(first, index[item["start"]] - 5))
+    win = bars.iloc[first:]
+    atr = float(fact("atr") or math.nan)
+    close = float(bars["close"].iloc[-1])
+
+    def pattern_levels(key: str, item: dict[str, Any]) -> dict[str, float]:
+        """The target, unless the pattern is still forming, failed, doubtful or already
+        there; the cancel level, when it is near enough to matter."""
+        state = str(fact(f"{key}.state") or "")
+        out: dict[str, float] = {}
+        target, cancel_at = item.get("target"), item.get("invalidation")
+        if (_finite(target) and item.get("status") == "breakout" and not fact(f"{key}.target_reached_day")
+                and "נכשלה" not in state and "בספק" not in state):
+            out["target"] = float(target)
+        if _finite(cancel_at) and (not math.isfinite(atr) or abs(float(cancel_at) - close) <= PATTERN_LEVEL_ATR * atr):
+            out["invalidation"] = float(cancel_at)
+        return out
     lo, hi = float(win["low"].min()), float(win["high"].max())
     span = hi - lo or 1.0
     near = (lo - 0.3 * span, hi + 0.3 * span)      # levels farther away stay facts, not drawings
@@ -170,10 +218,11 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
             levels += [item["low"], item["high"]]
         elif item["type"] == "fib":
             levels += [v for v in item["levels"].values()]
-        elif item["type"] == "pattern":
-            levels += [item.get("target"), item.get("invalidation")]
         elif item["type"] == "extreme":
             levels.append(item["price"])
+    for key, item in items.items():
+        if item["type"] == "pattern" and item.get("family") == "chart":
+            levels += list(pattern_levels(key, item).values())
     levels = [float(v) for v in levels if keep(v)]
     lo, hi = min([lo, *levels]), max([hi, *levels])
     pad = (hi - lo) * 0.06 or 1.0
@@ -184,8 +233,7 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
            f'aria-label="{_esc(title or analysis.symbol)}" direction="ltr">',
            f'<rect width="{W}" height="{H}" rx="12" fill="{INK["bg"]}"/>']
 
-    close = float(bars["close"].iloc[-1])
-    change = (analysis.facts.get("change_1d_pct") or {}).get("value")
+    change = fact("change_1d_pct")
     day_color = INK["down"] if _finite(change) and float(change) < 0 else INK["up"]
     close_y = plot.y(close)
     ticks, step = _ticks(plot.lo, plot.hi)
@@ -206,26 +254,37 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                f'font-size="17" font-weight="700">{_esc(ticker)}</text>')
     if name:
         out.append(f'<text x="{plot.x0 + 16 + 10.5 * len(ticker):.1f}" y="25" fill="{INK["axis"]}" '
-                   f'font-family="{SANS}" font-size="13">{_esc(str(name)[:42])}</text>')
+                   f'font-family="{SANS}" font-size="13">{_esc(_company(name))}</text>')
     sub = (f'<tspan fill="{INK["title"]}">{_fmt(close)}</tspan>'
            + (f'  <tspan fill="{day_color}">{float(change):+.2f}%</tspan>' if _finite(change) else "")
            + f'  ·  1D  ·  {pd.Timestamp(days[last]):%d/%m/%Y}')
     out.append(f'<text x="{plot.x0 + 4}" y="43" fill="{INK["axis"]}" font-family="{MONO}" '
                f'font-size="12" xml:space="preserve">{sub}</text>')
-    # the legend (right to left, as it is read): only what is drawn
+    # the legend (right to left, as it is read): only what is drawn, on a second row when
+    # the first reaches the company's name
     kinds = {v.get("kind") for v in items.values() if v.get("type") == "zone"}
+    periods = (items.get("ma") or {}).get("periods", [])
+    extremes = [v["label"] for v in items.values() if v["type"] == "extreme"]
     legend = [(ZONE["support"], "תמיכה") if "support" in kinds else None,
               (ZONE["resistance"], "התנגדות") if "resistance" in kinds else None,
+              *[(MA_COLORS[n], f"ממוצע {n} יום") for n in periods if n in MA_COLORS],
+              (ANN["line"], "תבנית") if any(v["type"] == "pattern" and v.get("family") == "chart"
+                                            for v in items.values()) else None,
+              (INK["title"], " / ".join(extremes)) if extremes else None,
               (ANN["target"], "פיבונאצ'י") if "fib" in items else None,
-              (ANN["accent"], "פרופיל נפח") if "vp" in items else None,
-              (MA_COLORS[50], "ממוצע 50") if 50 in (items.get("ma") or {}).get("periods", []) else None,
-              (INK["title"], "שיא/שפל שנתי") if any(v["type"] == "extreme" for v in items.values()) else None]
-    cursor = W - 18
+              (ANN["accent"], "נפח לפי מחיר") if "vp" in items else None]
+    header_end = plot.x0 + 30 + 10.5 * len(ticker) + (7.2 * len(_company(name)) if name else 0)
+    rows = [(21, 25, header_end), (39, 43, plot.x0 + 340)]
+    row, cursor = 0, W - 18
     for color, word in (e for e in legend if e):
-        out.append(f'<circle cx="{cursor - 4:.1f}" cy="21" r="4.5" fill="{color}"/>')
-        out.append(f'<text x="{cursor - 13:.1f}" y="25" fill="{INK["axis"]}" font-family="{SANS}" '
+        width = 13 + 7.2 * len(word) + 16
+        if cursor - width < rows[row][2] and row + 1 < len(rows):
+            row, cursor = row + 1, W - 18
+        cy, ty, _ = rows[row]
+        out.append(f'<circle cx="{cursor - 4:.1f}" cy="{cy}" r="4.5" fill="{color}"/>')
+        out.append(f'<text x="{cursor - 13:.1f}" y="{ty}" fill="{INK["axis"]}" font-family="{SANS}" '
                    f'font-size="12" text-anchor="end">{_esc(word)}</text>')
-        cursor -= 13 + 7.2 * len(word) + 16
+        cursor -= width
     # the last close: a dotted line across and a tag on the price axis, in a neutral colour
     # (review round 1: a red or green price tag read as a signal)
     out.append(f'<line x1="{plot.x0}" x2="{plot.x1}" y1="{close_y:.1f}" y2="{close_y:.1f}" stroke="{INK["axis"]}" '
@@ -273,10 +332,11 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
             pts = [f"{plot.x(i):.1f},{plot.y(v):.1f}" for i, v in zip(range(first, last + 1), values)
                    if math.isfinite(v) and plot.inside(v)]
             if len(pts) > 1:
+                width, opacity = (1.6, 0.9) if n == 50 else (1.0, 0.65)
                 out.append(f'<polyline points="{" ".join(pts)}" fill="none" stroke="{MA_COLORS.get(n, INK["axis"])}" '
-                           f'stroke-width="1.4" stroke-opacity="0.85"/>')
+                           f'stroke-width="{width}" stroke-opacity="{opacity}"/>')
 
-    for item in items.values():
+    for key, item in items.items():
         kind = item["type"]
         if kind == "line":
             i1 = index.get(item["day1"], first)
@@ -288,6 +348,8 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
             out.append(f'<line class="ann" x1="{plot.x(a_i):.1f}" y1="{plot.y(ya):.1f}" x2="{plot.x(b_i):.1f}" '
                        f'y2="{plot.y(yb):.1f}" stroke="{color}" stroke-width="2.2" stroke-linecap="round"/>')
             name = "קו תמיכה" if item["kind"] == "support" else "קו התנגדות"
+            if (item["kind"] == "support") == (item["price2"] > close):     # the price crossed it
+                name += " (נחצה)"
             tags.add(right, plot.y(yb), name, color)
         elif kind == "fib":
             a_i = max(first, index.get(item["start_day"], first))
@@ -303,7 +365,7 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
                 y = plot.y(price)
                 out.append(f'<line class="ann" x1="{plot.x(b_i):.1f}" y1="{y:.1f}" x2="{right:.1f}" y2="{y:.1f}" '
                            f'stroke="{ANN["target"]}" stroke-width="1" stroke-opacity="0.8" stroke-dasharray="6 4"/>')
-                tags.add(right, y, f"פיבו {_ltr(f'{ratio:g}%')} · {_ltr(_fmt(price))}", ANN["target"])
+                tags.add(right, y, f"פיבונאצ'י {_ltr(f'{ratio:g}%')} · {_ltr(_fmt(price))}", ANN["target"])
         elif kind == "extreme":
             if not keep(item["price"]):
                 continue
@@ -327,35 +389,70 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
             tags.add(plot.x(i2), plot.y(item["price2"]) + (22 if item["kind"] == "bullish" else -22),
                      f"{name} {item['indicator'].upper()}", color, "middle")
         elif kind == "pattern" and item["family"] == "chart":
-            color = ANN["bull"] if item["direction"] == "bullish" else ANN["bear"] if item["direction"] == "bearish" else ANN["line"]
+            color = ANN["line"]                             # the pattern's own colour (review round 2)
+            tol = 0.5 * atr if math.isfinite(atr) else 0.015 * close
             for line in item["lines"]:
                 i1, i2 = index.get(line["x1"]), index.get(line["x2"])
-                if i1 is None or i2 is None or i2 < first:
+                if i1 is None or i2 is None or i2 < first or i2 == i1:
                     continue
-                out.append(f'<line class="ann" x1="{plot.x(max(i1, first)):.1f}" y1="{plot.y(line["y1"]):.1f}" '
-                           f'x2="{plot.x(i2):.1f}" y2="{plot.y(line["y2"]):.1f}" stroke="{ANN["line"]}" '
-                           f'stroke-width="1.8"/>')
+                slope = (line["y2"] - line["y1"]) / (i2 - i1)
+                touches = [index[pt["date"]] for pt in item["points"] if pt["date"] in index
+                           and i1 <= index[pt["date"]] <= i2
+                           and abs(pt["price"] - (line["y1"] + slope * (index[pt["date"]] - i1))) <= tol]
+                a_i = max(min(touches) if touches else i1, first)
+                ya = line["y1"] + slope * (a_i - i1)
+                out.append(f'<line class="ann" x1="{plot.x(a_i):.1f}" y1="{plot.y(ya):.1f}" '
+                           f'x2="{plot.x(i2):.1f}" y2="{plot.y(line["y2"]):.1f}" stroke="{color}" stroke-width="1.8"/>')
             for point in item["points"]:
                 i = index.get(point["date"])
                 if i is not None and i >= first:
                     out.append(f'<circle class="ann" cx="{plot.x(i):.1f}" cy="{plot.y(point["price"]):.1f}" '
-                               f'r="4" fill="{INK["bg"]}" stroke="{ANN["line"]}" stroke-width="1.8"/>')
-            i = index.get(item.get("breakout_day") or "")
-            if i is not None and i >= first and item.get("breakout") is not None:
-                # where the price broke out: a mark on the breakout line at that session
-                y, x = plot.y(float(item["breakout"])), plot.x(i)
-                out.append(f'<circle class="ann" cx="{x:.1f}" cy="{y:.1f}" r="6.5" fill="{color}" '
-                           f'fill-opacity="0.25" stroke="{color}" stroke-width="2"/>')
-                word = "פריצה" if item["direction"] == "bullish" else "שבירה"
-                tags.add(x, y + (24 if item["direction"] == "bearish" else -16), word, color, "middle")
-            for level, name, dash in ((item.get("target"), "יעד (גובה התבנית)", "7 4"),
-                                      (item.get("invalidation"), "ביטול", "2 4")):
-                if level is not None and keep(level):
-                    y = plot.y(level)
-                    out.append(f'<line class="ann" x1="{plot.x(max(first, index.get(item["end"], first))):.1f}" '
-                               f'y1="{y:.1f}" x2="{right:.1f}" y2="{y:.1f}" stroke="{color}" '
-                               f'stroke-width="1.4" stroke-dasharray="{dash}"/>')
-                    tags.add(right, y, f"{name} {_ltr(_fmt(level))}", color)
+                               f'r="4" fill="{INK["bg"]}" stroke="{color}" stroke-width="1.8"/>')
+            b = index.get(item.get("breakout_day") or "")
+            if b is not None and b >= first and _finite(item.get("breakout")):
+                up = item["direction"] == "bullish"
+                now = fact(f"{key}.line_now")
+                if _finite(now) and b < last:              # the broken line, carried to today, dashed
+                    out.append(f'<line class="ann" x1="{plot.x(b):.1f}" y1="{plot.y(float(item["breakout"])):.1f}" '
+                               f'x2="{plot.x(last):.1f}" y2="{plot.y(float(now)):.1f}" stroke="{color}" '
+                               f'stroke-width="1.3" stroke-dasharray="5 4" stroke-opacity="0.8"/>')
+                mark = ANN["bull"] if up else ANN["bear"]
+                x = plot.x(b)
+                if up:                                     # below the candle: never over it
+                    y = plot.y(float(bars["low"].iloc[b])) + 10
+                    tri = f"M{x:.1f},{y:.1f} L{x - 6:.1f},{y + 9:.1f} L{x + 6:.1f},{y + 9:.1f} Z"
+                else:
+                    y = plot.y(float(bars["high"].iloc[b])) - 10
+                    tri = f"M{x:.1f},{y:.1f} L{x - 6:.1f},{y - 9:.1f} L{x + 6:.1f},{y - 9:.1f} Z"
+                out.append(f'<path class="ann" d="{tri}" fill="{mark}"/>')
+                day = days[b]
+                text = f"{'פריצה' if up else 'שבירה'} {_ltr(day[8:10] + '/' + day[5:7])}"
+                # the label goes where no candle is (review round 2: it covered the last
+                # candles); with no free place the marker stands alone
+                half = (16 + 6.9 * 11) / 2
+                span = [i for i in range(first, last + 1) if abs(plot.x(i) - x) <= half + plot.step]
+                for offset in (26, 50, 74, 98):
+                    label_y = y + offset if up else y - offset
+                    if not plot.y0 + 11 <= label_y <= plot.y1 - 11:
+                        break
+                    if all(plot.y(float(bars["low"].iloc[i])) < label_y - 12 or
+                           plot.y(float(bars["high"].iloc[i])) > label_y + 12 for i in span):
+                        if offset > 26:                    # a thin leader back to the marker
+                            tip, edge = (y + 9, label_y - 10) if up else (y - 9, label_y + 10)
+                            out.append(f'<line class="ann" x1="{x:.1f}" y1="{tip:.1f}" x2="{x:.1f}" '
+                                       f'y2="{edge:.1f}" stroke="{mark}" stroke-width="0.8" stroke-opacity="0.7"/>')
+                        tags.add(x, label_y, text, mark, "middle")
+                        break
+            names = {"target": ("יעד (גובה התבנית)", "7 4"), "invalidation": ("ביטול התבנית", "2 4")}
+            for which, level in pattern_levels(key, item).items():
+                if not keep(level):
+                    continue
+                label, dash = names[which]
+                y = plot.y(level)
+                out.append(f'<line class="ann" x1="{plot.x(max(first, index.get(item["end"], first))):.1f}" '
+                           f'y1="{y:.1f}" x2="{right:.1f}" y2="{y:.1f}" stroke="{color}" '
+                           f'stroke-width="1.4" stroke-dasharray="{dash}"/>')
+                tags.add(right, y, f"{label} {_ltr(_fmt(level))}", color)
         elif kind == "pattern":                           # a candlestick signal: a marker
             i = index.get(item["end"])
             if i is not None and i >= first:
@@ -381,7 +478,7 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
         out.append(f'<line class="ann" x1="{plot.x0:.1f}" y1="{y:.1f}" x2="{px1:.1f}" y2="{y:.1f}" '
                    f'stroke="{ANN["accent"]}" stroke-width="1" stroke-opacity="0.7" stroke-dasharray="1 3"/>')
         if vp.get("poc_label", True):
-            tags.add(right, y, f"שליטה (POC) {_ltr(_fmt(vp['poc']))}", ANN["accent"])
+            tags.add(right, y, f"נפח מרבי {_ltr(_fmt(vp['poc']))}", ANN["accent"])
 
     out += tags.finish()
     out.append("</svg>")

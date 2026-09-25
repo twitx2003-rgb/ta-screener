@@ -51,6 +51,11 @@ LIGHTS = {"green": "🟢", "red": "🔴", "yellow": "🟡", "pin": "📍", "up":
 FIXED_LIGHT = {"levels": "pin", "up": "up", "down": "down"}
 EFFORT = "high"
 
+DOWN_BREAK = re.compile(r"(?<![א-ת])(?:ו?)(?:נפרץ|נפרצה|פרץ|פרצה)(?![א-ת])")
+PRICE_BROKEN = re.compile(r"המחיר נשבר")
+LATIN_START = re.compile(r"^[A-Za-z]")
+YEAR = re.compile(r"(?<![\d/])(\d{1,2}/\d{1,2})/(?:20)?\d{2}(?![\d/])")
+DOLLAR = re.compile(r"\s*\$|\s*דולר(?![א-ת])")
 FORECAST = re.compile(r"(?<![א-ת])(?:[וש]?)(?:תוביל|יוביל|תגיע|יגיע|יעלה|תעלה|תרד)(?![א-ת])")
 INTERNAL_ID = re.compile(r"\b(?:zone|tl|div|pat)_\d+\b|\bfib(?:_ext)?_\d+\b|\b[a-z]+[0-9]*\.[a-z_]+\b")
 DATE_TEXT = re.compile(r"\d{4}-\d{2}-\d{2}|(?<![\d.])\d{1,2}/\d{1,2}(?:/\d{2,4})?(?![\d/])")
@@ -67,48 +72,63 @@ These rules are checked by a program; a section that breaks one is thrown away:
 1. Use only the facts in the brief. Each section lists in "cites" the fact keys it relies on:
    at least one, spelled exactly as in the brief.
 2. Every number you write must be the value of one of the facts. Prices exactly as in the
-   facts, with two decimals, without a $ sign; percentages as in the facts. Do not compute
-   new numbers: no differences, sums or percentages of your own.
-3. Dates only as they appear in the facts, written DD/MM (the year only if it is not this one).
-4. The words שורי / דובי, and "מגמה עולה" / "מגמה יורדת", only when a fact you cite says so.
+   facts, with two decimals, never with $ or "דולר"; percentages as in the facts. Do not
+   compute new numbers: no differences, sums or percentages of your own.
+3. Dates only as they appear in the facts, written DD/MM, never with the year; the last
+   session is "היום".
+4. The words שורי / דובי, and "מגמת עלייה" / "מגמת ירידה", only when a fact you cite says so.
    Never a pattern's textbook bias ("usually bullish"): only what its facts say.
 5. No advice and no forecasts. Never tell anyone to buy, sell, enter, exit or set a stop; never
    say where the price will go or which scenario is more likely; no "will lead to", "will reach".
-6. A target is "יעד לפי גובה התבנית (לא תחזית)", never a forecast.
+6. A target is "יעד לפי גובה התבנית (לא תחזית)", never a forecast, and only for a pattern that
+   has broken out: for a pattern still forming, give its breakout line only.
 7. Nothing outside the facts: no news, earnings, fundamentals, other stocks or market talk.
 8. Never write a fact key or id in the text (zone_2, tl_1, fib_618, ma.stack): name things in
    Hebrew ("אזור התמיכה", "קו ההתנגדות").
+9. Direction words: up is "פריצה" / "פרץ מעל", down is "שבירה" / "שבר מתחת ל". The price is the
+   subject ("המחיר פרץ מעל קו התבנית", "המחיר שבר כלפי מטה את קו השבירה"); never "נפרץ" or
+   "פרץ" for a downward break, never "המחיר נשבר".
+10. After the light, a section starts with a Hebrew word, never with the ticker or a Latin
+   term (a right-to-left line that starts in Latin letters is shown left to right).
+11. The momentum section only when the RSI is 70 or more, 30 or less, or a divergence
+   exists; overbought and oversold are states, not signals: that section's light is yellow.
 
 The reader's message already opens with the ticker, the close, the day's change and the date,
 and ends with the two scenarios, which the program writes from the up.* and down.* facts.
 You write, ONE short sentence each, at most one of each:
-- headline (required, <= 170 characters): the story now: the trend in words (ma.stack) and
-  the key event, quoting the `event` fact as given; it must cite `event`. Never repeat the
-  close, the date or the day's change.
+- headline (required, <= 170 characters): the trend in plain words ("מגמת עלייה", "מגמת
+  ירידה", "אין מגמה ברורה") and the key event, quoting the `event` fact as given (it
+  must cite `event`). Never repeat the close, the date or the day's change.
 - levels (required, <= 230 characters): the nearest resistance (level.r1) and support
-  (level.s1) with their distance in %; the second ones only if close. With no level.r1 the
-  price is at or near its yearly high (high_52w): say so; never "no resistance marked".
+  (level.s1) as "בין X ל-Y", with the distance to the near edge ("הקצה הקרוב, X% מעל
+  הסגירה"); the second ones only if close. With no level.r1 the price is at or near its
+  yearly high (high_52w): say so; never "no resistance marked". Say "ההתנגדות הקרובה" /
+  "התמיכה הקרובה"; always "אזור", never "רצועה".
 - At most TWO of these optional sections, only when they add to the picture now, the more
-  important first (<= 150 characters each): patterns (a pat_* breakout: "המחיר פרץ מ.../
-  נשבר מ..." (the price breaks out of a pattern, a pattern does not break out), with its
-  state today from pat_N.state), trend (the averages or a trendline), momentum (RSI, MACD, a
-  divergence: only if div_* facts exist), volume (the profile, the volume trend), fibonacci
-  (only if the chart shows Fibonacci lines).
+  important first (<= 150 characters each): patterns (a pat_* breakout or failure, with its
+  state today from pat_N.state and, for a fresh breakout, the breakout day's volume against
+  the average: pat_N.breakout_volume_ratio), trend (the averages, their direction, the
+  stretch fact, a trendline, always saying whether a line is above or below the price),
+  momentum (see rule 11), volume, fibonacci (only if the chart shows Fibonacci lines).
 
-Plain words for an ordinary reader: explain a technical term in a few words the first time
-("RSI (מדד המומנטום)", "סטייה (המחיר קבע שיא חדש והמומנטום לא)", "ממוצע 50 הימים").
-Overbought and oversold are states, not signals. No filler, no repetition between sections.
+Never repeat between sections: a number the headline gave is not given again; the order of
+the averages only under trend; the pattern's day only once. A section that would only repeat
+the headline is left out.
+
+Plain words for an ordinary reader, the term at most once in brackets: "ה-RSI (מדד
+המומנטום)"; for the MACD say what it means ("התנופה חיובית" / "התנופה נחלשת"), never "קו
+האות"; "סטייה חיובית: המחיר רשם שפל חדש והמומנטום לא"; "תבנית ראש וכתפיים (שלוש פסגות,
+האמצעית הגבוהה)". Always "ה-RSI", "ה-MACD".
 
 Each written section has a light ("signal"): "green" when the facts it cites lean positive
-for the price (price above the averages, MACD above its signal line, a bullish divergence, a
-breakout that holds), "red" when they lean negative (a breakdown that holds, a bearish
-divergence), "yellow" when they are neutral or mixed (a breakout the price has already
-undone). The levels section's light is fixed. A section whose text says bearish (דובי)
-cannot be green, one that says bullish (שורי) cannot be red.
+for the price (price above the averages, a breakout that holds), "red" when they lean negative
+(a breakdown that holds, a failed bullish pattern), "yellow" when they are neutral or mixed (a
+breakout the price has undone, overbought or oversold, a stretched price). The headline's
+light follows the key event. The levels section's light is fixed. A section whose text says
+bearish (דובי) cannot be green, one that says bullish (שורי) cannot be red.
 
 "chart" in the brief lists exactly what the reader sees on the chart. Something that is not
-drawn gets at most one short sentence. Name a line by what it does and its direction
-together: "קו התנגדות עולה", "קו תמיכה יורד".
+drawn gets at most one short sentence.
 
 KNOWLEDGE (how the engine computes each fact, and how to talk about it):
 """
@@ -258,7 +278,21 @@ def part_problem(part: dict, facts: dict[str, dict], numbers: list[float],
     if name == "levels" and any(k.startswith("level.") for k in facts) \
             and not any(c.startswith("level.") for c in cites):
         return "must cite the level.* facts (the zones the chart shows)"
-    problem = direction_problem(text, [facts[c] for c in cites])
+    cited = [facts[c] for c in cites]
+    directions = {str(f.get("value")) for c, f in zip(cites, cited) if c.endswith(".direction")}
+    if (DOWN_BREAK.search(text) and "דובי" in directions and "שורי" not in directions) or PRICE_BROKEN.search(text):
+        return 'a downward break is "שבירה" / "המחיר שבר מתחת ל", never "פרץ" or "נשבר"'
+    if LATIN_START.match(text):
+        return "starts with Latin letters: start with a Hebrew word"
+    if name == "momentum":
+        rsi = (facts.get("rsi14") or {}).get("value")
+        divergence = any(c.startswith("div_") for c in cites)
+        extreme = isinstance(rsi, (int, float)) and not 30 < rsi < 70
+        if not divergence and not extreme:
+            return "neutral momentum (RSI between 30 and 70, no divergence) adds nothing: leave it out"
+        if extreme and not divergence and part.get("signal") in ("green", "red"):
+            return "overbought or oversold is a state, not a signal: a yellow light"
+    problem = direction_problem(text, cited)
     if problem or name in FIXED_LIGHT:
         return problem
     light = part.get("signal")
@@ -272,7 +306,7 @@ def part_problem(part: dict, facts: dict[str, dict], numbers: list[float],
 
 
 def _finish(text: str) -> str:
-    text = " ".join(text.split())
+    text = YEAR.sub(r"\1", DOLLAR.sub("", " ".join(text.split())))
     if "יעד" in text and "גובה התבנית" not in text and "כלל המדידה" not in text:
         text += " (יעד לפי גובה התבנית, לא תחזית)"
     return text
@@ -280,31 +314,36 @@ def _finish(text: str) -> str:
 
 def scenario_parts(facts: dict[str, dict]) -> list[dict[str, Any]]:
     """The two scenarios, written by the program from the up.* / down.* facts: always
-    conditional, always with the trigger, the next level and what cancels it, in % from
-    the close (review round 1: model-written ones were empty, circular or forecasts)."""
+    conditional, with the trigger, the next level and what cancels it (review round 1:
+    model-written ones were empty, circular or forecasts). Distances are from the trigger
+    (round 2: the room to the next level and the risk to the cancel were never visible,
+    and the same zone got two distances from the close)."""
     value = lambda key: (facts.get(key) or {}).get("value")          # noqa: E731
     out = []
     for side, up in (("up", True), ("down", False)):
         trigger, cites = value(f"{side}.trigger"), []
-        where = "מעל הסגירה" if up else "מתחת לסגירה"
+        over, back = ("מעל", "מתחת ל-") if up else ("מתחת ל-", "מעל")
         if isinstance(trigger, (int, float)):
-            text = (f"בסגירה {'מעל ' if up else 'מתחת ל-'}{trigger:.2f} "
-                    f"({value(f'{side}.trigger_what')}, {value(f'{side}.trigger_pct'):.1f}% {where})")
-            cites += [f"{side}.trigger", f"{side}.trigger_pct"]
-            nxt = value(f"{side}.next")
+            what = value(f"{side}.trigger_what")
+            text = f"סגירה {over}{' ' if up else ''}{trigger:.2f}" + (f", {what}." if what else ".")
+            cites += [f"{side}.trigger", f"{side}.trigger_what"]
+            nxt, far = value(f"{side}.next"), value(f"{side}.next_far")
             if isinstance(nxt, (int, float)):
-                text += (f", הרמה הבאה היא {nxt:.2f} ({value(f'{side}.next_what')}, "
-                         f"{value(f'{side}.next_pct'):.1f}% {where})")
-                cites += [f"{side}.next", f"{side}.next_pct"]
+                where = (f"בין {min(nxt, far):.2f} ל-{max(nxt, far):.2f}" if isinstance(far, (int, float))
+                         else f"{nxt:.2f}")
+                text += f" הרמה הבאה: {value(f'{side}.next_what')}, {where}"
+                room = value(f"{side}.room_pct")
+                text += (f" ({room:.1f}% {'מעל ' if up else 'מתחת ל'}רמת הכניסה)." if isinstance(room, (int, float))
+                         else ".")
+                cites += [f"{side}.next", f"{side}.next_what"]
             elif value(f"{side}.no_next"):
-                text += f"; {value(f'{side}.no_next')}"
+                text += f" {value(f'{side}.no_next')}."
                 cites.append(f"{side}.no_next")
-            cancel = value(f"{side}.cancel")
+            cancel, risk = value(f"{side}.cancel"), value(f"{side}.risk_pct")
             if isinstance(cancel, (int, float)):
-                text += f". התרחיש מתבטל בסגירה חזרה {'מתחת ל-' if up else 'מעל '}{cancel:.2f}."
+                text += f" סגירה חזרה {back}{' ' if not up else ''}{cancel:.2f} מבטלת את התרחיש"
+                text += (f" ({risk:.1f}% מרמת הכניסה)." if isinstance(risk, (int, float)) else ".")
                 cites.append(f"{side}.cancel")
-            else:
-                text += "."
         elif value(f"{side}.no_next"):
             text, cites = f"{value(f'{side}.no_next')}.", [f"{side}.no_next"]
         else:
@@ -326,6 +365,13 @@ def check_parts(raw: dict, facts: dict[str, dict], rules: dict[str, Any]) -> tup
                    and optional >= MAX_OPTIONAL else part_problem(part, facts, numbers, dates))
         if problem:
             dropped.append({"part": name, "reason": problem, "text": str(part.get("text", ""))[:300]})
+            continue
+        head = kept.get("headline")
+        repeated = (set(NUMBER.findall(DATE_TEXT.sub(" ", head["text"]))) &
+                    set(NUMBER.findall(DATE_TEXT.sub(" ", str(part.get("text", "")))))) if head else set()
+        if len(repeated) >= 2 and name not in REQUIRED:
+            dropped.append({"part": name, "reason": f"repeats the headline's numbers {sorted(repeated)[:3]}",
+                            "text": str(part.get("text", ""))[:300]})
             continue
         kept[name] = {"part": name, "signal": FIXED_LIGHT.get(name, part.get("signal")),
                       "text": _finish(part["text"]),
@@ -372,7 +418,7 @@ def write(analysis: Analysis, llm: LLM, *, rules: dict[str, Any] | None = None,
 
 
 # ------------------------------------------------------------------ the message
-DISCLAIMER = "לא ייעוץ השקעות. כל הרמות מחושבות ממחירי עבר, והן אינן תחזית."
+DISCLAIMER = "אין באמור ייעוץ השקעות. כל הרמות מחושבות ממחירי עבר, והן אינן תחזית."
 
 
 def _day(day: str) -> str:
@@ -406,8 +452,11 @@ def telegram_html(written: dict[str, Any]) -> str:
             if now != group:
                 lines.append("")                 # a blank line between the three groups
                 group = now
-            title = "" if now == "head" else f"<b>{html.escape(part['title'])}:</b> "
-            lines.append(f"{light} {title}{html.escape(part['text'])}".strip())
+            text = html.escape(part["text"])
+            if now == "head":
+                lines.append(f"{light}\u200f <b>{text}</b>".strip())
+            else:
+                lines.append(f"{light}\u200f <b>{html.escape(part['title'])}:</b> {text}".strip())
         lines.append("")
         if written["omitted"]:
             names = ", ".join(PARTS[n] for n in written["omitted"])

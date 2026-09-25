@@ -11,10 +11,16 @@ What the engine computes:
   zone_N.touches the number of turning points in it.
 - A zone above the last close is resistance (התנגדות), one below is support (תמיכה).
   Only the 3 nearest on each side are kept; the chart draws the 2 nearest.
-- zone_N.distance_pct: how far the zone's middle is from the close, in percent.
+- zone_N.distance_pct and level.*.distance_pct: how far the zone's NEAR edge is from the
+  close, in percent (0 when the price is inside it). Say which edge: "הקצה הקרוב".
+- zone_N.broken (with broken_day, broken_sessions_ago, broken_volume_ratio): the price
+  closed through the zone lately, coming from the other side, and has stayed beyond it:
+  a resistance broken upward now sits under the price, a support broken downward above it.
 
 How to read it:
-- A zone is an area, not an exact line: give its range ("בין X ל-Y").
+- A zone is an area, not an exact line: give its range ("בין X ל-Y"); never a dash
+  range in the text, it can flip in right-to-left text.
+- Say "ההתנגדות הקרובה" / "התמיכה הקרובה" and "האזור הבא"; always "אזור", never "רצועה".
 - More touches means the level was tested more times, not that it is certain to hold.
 - A level that breaks often switches role: broken support can act as resistance later and
   broken resistance as support. Say this as a possibility ("עשויה"), never as a certainty.

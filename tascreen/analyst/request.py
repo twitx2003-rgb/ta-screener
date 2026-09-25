@@ -52,7 +52,6 @@ def produce(symbol: str, bars: pd.DataFrame, folder: Path, *, llm: LLM | None = 
     folder.mkdir(parents=True, exist_ok=True)
     stem = f"{symbol_file_stem(symbol)}-{analysis.last_day}"
     svg, pine = folder / f"{stem}.svg", folder / f"{stem}.pine"
-    svg.write_text(render(bars, analysis, name=name), encoding="utf-8")
     (folder / f"{stem}.json").write_text(analysis.as_json(), encoding="utf-8")
     pine.write_text(pine_script(analysis, bars), encoding="utf-8")
     written = message = None
@@ -62,6 +61,9 @@ def produce(symbol: str, bars: pd.DataFrame, folder: Path, *, llm: LLM | None = 
         (folder / f"{stem}.written.json").write_text(json.dumps(written, ensure_ascii=False, indent=1),
                                                      encoding="utf-8")
         (folder / f"{stem}.telegram.html").write_text(message, encoding="utf-8")
+    # drawn after the text, so the chart shows what the text names (review round 2)
+    cited = None if written is None else {c for part in written["parts"] for c in part.get("cites", [])}
+    svg.write_text(render(bars, analysis, name=name, cited=cited), encoding="utf-8")
     if bot is not None:
         if to_png is None:
             from .png import svg_to_png as to_png

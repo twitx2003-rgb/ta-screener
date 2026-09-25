@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from ..indicators import atr as atr_series
+from ..indicators import sma
 from ..patterns.candles import detect_candles
 from ..patterns.chart import detect_chart
 from ..patterns.levels import invalidation
@@ -27,9 +28,11 @@ from .signals import divergences, ma_stack, macd, rsi_series, volume_profile, vo
 from .zones import fibonacci, pivots, sr_zones, trendlines
 
 KIND_HE = {"support": "תמיכה", "resistance": "התנגדות"}
-STACK_HE = {"bullish": "שורי (50 מעל 150 מעל 200, המחיר מעליהם)",
-            "bearish": "דובי (50 מתחת ל-150 מתחת ל-200, המחיר מתחתיהם)",
-            "mixed": "מעורב", "unknown": "לא ידוע (אין מספיק היסטוריה)"}
+# plain words (review round 2: "the averages' order is mixed" told a reader nothing)
+STACK_HE = {"bullish": "מגמת עלייה: המחיר מעל הממוצעים של 50, 150 ו-200 יום, והם מסודרים 50 מעל 150 מעל 200 (שורי)",
+            "bearish": "מגמת ירידה: המחיר מתחת לממוצעים של 50, 150 ו-200 יום, והם מסודרים 50 מתחת ל-150 מתחת ל-200 (דובי)",
+            "mixed": "אין מגמה ברורה: הממוצעים של 50, 150 ו-200 יום לא מסודרים בכיוון אחד",
+            "unknown": "לא ידוע (אין מספיק היסטוריה)"}
 TREND_HE = {"rising": "עולה", "falling": "יורד", "flat": "יציב"}
 STATUS_HE = {"forming": "בבנייה", "breakout": "פריצה", "busted": "פריצה כושלת", "signal": "אות נר"}
 DIRECTION_HE = {"bullish": "שורי", "bearish": "דובי", "either": "כיוון לא ידוע עדיין"}
@@ -79,6 +82,46 @@ def _day(bars: pd.DataFrame, i: int) -> str:
     return bars["timestamp"].iloc[i].date().isoformat()
 
 
+def _volume_ratio(bars: pd.DataFrame, i: int, sessions: int = 50) -> float:
+    """Session i's volume over the average of the `sessions` before it."""
+    before = bars["volume"].iloc[max(0, i - sessions):i].to_numpy(float)
+    avg = float(np.nanmean(before)) if len(before) else math.nan
+    return float(bars["volume"].iloc[i]) / avg if avg and math.isfinite(avg) else math.nan
+
+
+def _broken_line_now(lines: list[dict], level: float, index: dict[str, int], at_i: int, last: int) -> float:
+    """The pattern line the breakout crossed (the one worth `level` on the breakout
+    session), extended to the last session. A wedge's or triangle's line keeps its slope:
+    review round 2 found a close measured against the flat breakout price called
+    "back inside" while it was still under the rising line (a retest from below)."""
+    best, best_gap = None, math.inf
+    for line in lines or []:
+        i1, i2 = index.get(str(line.get("x1"))), index.get(str(line.get("x2")))
+        if i1 is None or i2 is None or i2 == i1:
+            continue
+        slope = (float(line["y2"]) - float(line["y1"])) / (i2 - i1)
+        value = float(line["y1"]) + slope * (at_i - i1)
+        if abs(value - level) < best_gap:
+            best, best_gap = (float(line["y1"]), slope, i1), abs(value - level)
+    if best is None:
+        return level
+    y1, slope, i1 = best
+    return y1 + slope * (last - i1)
+
+
+def _zone_break(close: np.ndarray, low: float, high: float, last: int, fresh: int) -> tuple[str, int] | None:
+    """A zone the price closed through in the last `fresh` sessions and has not closed
+    back into since: ("up", session) or ("down", session)."""
+    price = close[last]
+    for j in range(last, max(0, last - fresh), -1):
+        before = close[max(0, j - 5):j]           # it came from the other side, not from inside
+        if price > high and close[j] > high >= close[j - 1] and (before < low).any():
+            return ("up", j) if (close[j:last + 1] > high).all() else None
+        if price < low and close[j] < low <= close[j - 1] and (before > high).any():
+            return ("down", j) if (close[j:last + 1] < low).all() else None
+    return None
+
+
 def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = None,
             pattern_rules: Rules | None = None) -> Analysis:
     rules = rules or load_rules()
@@ -110,9 +153,12 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
     f.add("high_52w", high52, "השיא של 52 השבועות", "$")
     f.add("high_52w_day", _day(bars, hi_i), "יום השיא השנתי")
     f.add("high_52w_distance_pct", max(0.0, (1 - price / high52) * 100), "כמה הסגירה מתחת לשיא השנתי", "%", 1)
+    f.add("high_52w_sessions_ago", last - hi_i, "לפני כמה ימי מסחר נקבע השיא השנתי", "", 0)
     f.add("low_52w", low52, "השפל של 52 השבועות", "$")
     f.add("low_52w_day", _day(bars, lo_i), "יום השפל השנתי")
     f.add("low_52w_distance_pct", max(0.0, (price / low52 - 1) * 100), "כמה הסגירה מעל השפל השנתי", "%", 1)
+    f.add("low_52w_sessions_ago", last - lo_i, "לפני כמה ימי מסחר נקבע השפל השנתי", "", 0)
+    f.add("volume.last_ratio", _volume_ratio(bars, last), "הנפח ביום האחרון חלקי ממוצע 50 הימים שלפניו", "x", 2)
 
     # moving averages
     stack = ma_stack(close, list(rules["ma_periods"]))
@@ -121,6 +167,34 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
         if value is not None and math.isfinite(value):
             f.add(f"vs_sma{n}_pct", _pct(price, value), f"המרחק מממוצע {n}", "%", 1)
     f.add("ma.stack", STACK_HE[stack["state"]], "סדר הממוצעים")
+    known_ma = [v for v in stack["values"].values() if v is not None and math.isfinite(v)]
+    if known_ma:
+        f.add("ma.price_vs", ("המחיר מעל כל הממוצעים" if price > max(known_ma) else
+                              "המחיר מתחת לכל הממוצעים" if price < min(known_ma) else "המחיר בין הממוצעים"),
+              "המחיר ביחס לממוצעים של 50, 150 ו-200 יום")
+    for n in stack["values"]:
+        line_n = sma(close, n)
+        if last >= 10 and math.isfinite(float(line_n.iloc[-11])):
+            slope = _pct(float(line_n.iloc[-1]), float(line_n.iloc[-11]))
+            f.add(f"sma{n}.slope_pct", slope, f"שיפוע ממוצע {n} (אחוז ב-10 ימי מסחר)", "%", 2)
+            f.add(f"sma{n}.direction", "עולה" if slope > 0.3 else "יורד" if slope < -0.3 else "שטוח",
+                  f"כיוון ממוצע {n}")
+    sma50 = stack["values"].get(50)
+    if sma50 is not None and math.isfinite(sma50) and math.isfinite(atr_now) and atr_now > 0:
+        stretch = (price - sma50) / atr_now
+        f.add("sma50.distance_atr", stretch, "המרחק מממוצע 50 ביחידות ATR", "ATR", 1)
+        if abs(stretch) >= rules["stretch_atr"]:
+            f.add("stretch", f"המחיר מתוח: {abs(stretch):.1f} ATR {'מעל ' if stretch > 0 else 'מתחת ל'}ממוצע 50",
+                  "המחיר רחוק מממוצע 50 (תנועה מהירה; מקום פחות נוח להיכנס)")
+    known = [v for v in stack["values"].values() if v is not None and math.isfinite(v)]
+    if len(known) == len(stack["values"]):
+        spread = (max(known) - min(known)) / price * 100
+        f.add("ma.spread_pct", spread, "הפער בין הממוצע הגבוה לנמוך", "%", 1)
+        if spread <= rules["congestion_ma_spread_pct"]:
+            span = bars.iloc[max(0, last - int(rules["range_sessions"]) + 1):]
+            f.add("range.high", float(span["high"].max()), "ראש הטווח (החודשים האחרונים)", "$")
+            f.add("range.low", float(span["low"].min()), "תחתית הטווח (החודשים האחרונים)", "$")
+            f.add("range.sessions", len(span), "אורך הטווח בימי מסחר", "", 0)
     d["ma"] = {"type": "ma", "periods": list(rules["ma_periods"])}
 
     # RSI and MACD
@@ -155,10 +229,21 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
         f.add(f"{key}.distance_pct", near, f"המרחק מהסגירה אל {key}", "%", 1)
         d[key] = {"type": "zone", "kind": zone.kind, "low": zone.low, "high": zone.high,
                   "first_day": zone.days[0], "last_day": zone.days[-1], "touches": zone.touches}
+        crossed = _zone_break(close.to_numpy(float), zone.low, zone.high, last, int(rules["event_fresh_sessions"]))
+        if crossed is not None:
+            way, j = crossed
+            f.add(f"{key}.broken", "נפרץ כלפי מעלה (התנגדות שהפכה לתמיכה)" if way == "up" else
+                  "נשבר כלפי מטה (תמיכה שהפכה להתנגדות)", f"המחיר נסגר מעבר ל-{key} לאחרונה")
+            f.add(f"{key}.broken_day", _day(bars, j), f"יום הפריצה/השבירה של {key}")
+            f.add(f"{key}.broken_sessions_ago", last - j, f"ימי מסחר מאז הפריצה/השבירה של {key}", "", 0)
+            f.add(f"{key}.broken_volume_ratio", _volume_ratio(bars, j),
+                  f"הנפח ביום הפריצה/השבירה של {key} חלקי ממוצע 50 יום", "x", 2)
     for tl in trendlines(bars, minor, atr, rules):
         key, now_value = tl.id, tl.at(last)
         slope10 = _pct(tl.at(last), tl.at(last - 10)) if last >= 10 else math.nan
-        f.add(f"{key}.kind", KIND_HE[tl.kind], f"סוג קו המגמה {key}")
+        crossed = (tl.kind == "resistance" and now_value < price) or (tl.kind == "support" and now_value > price)
+        f.add(f"{key}.kind", KIND_HE[tl.kind] + (" שהמחיר כבר חצה" if crossed else ""), f"סוג קו המגמה {key}")
+        f.add(f"{key}.side", "מתחת למחיר" if now_value < price else "מעל המחיר", f"צד קו המגמה {key}")
         f.add(f"{key}.value", now_value, f"קו המגמה {key} ביום האחרון", "$")
         f.add(f"{key}.touches", tl.touches, f"נגיעות בקו {key}", "", 0)
         f.add(f"{key}.slope_pct", slope10, f"שיפוע {key} (אחוז ל-10 ימים)", "%", 2)
@@ -188,6 +273,8 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
                     "end_day": fib.end_day, "start": fib.start, "end": fib.end, "levels": fib.levels}
     for div in divergences(bars, minor, rsi_values, line, int(rules["divergence_recent_sessions"])):
         key = div.id
+        if (div.kind == "bullish" and price < float(div.price2)) or (div.kind == "bearish" and price > float(div.price2)):
+            continue                                    # the price went past it: it failed
         f.add(f"{key}.kind", "שורית" if div.kind == "bullish" else "דובית", f"סוג הסטייה {key}")
         f.add(f"{key}.indicator", div.indicator.upper(), f"המתנד בסטייה {key}")
         f.add(f"{key}.day1", div.day1, f"הנקודה הראשונה של {key}")
@@ -223,16 +310,41 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
             f.add(f"{key}.breakout_day", det.breakout_date.date().isoformat(), f"יום הפריצה של {key}")
         f.add(f"{key}.breakout", det.breakout_price, f"קו הפריצה של {key}", "$")
         if det.status == "breakout" and det.breakout_date is not None and det.direction in ("bullish", "bearish"):
-            # where the price is now against the breakout (review round 1: a breakdown the
-            # price had already closed back above was told as live)
-            level, up = float(det.breakout_price), det.direction == "bullish"
-            since = int((bars["timestamp"] > det.breakout_date).sum())
+            # where the price is now against the broken line, extended to today (review
+            # round 1: a breakdown the price had closed back above was told as live;
+            # round 2: a throwback still under a rising line was told as failed)
+            up = det.direction == "bullish"
+            word, line_word = ("הפריצה", "קו הפריצה") if up else ("השבירה", "קו השבירה")
+            b = int((bars["timestamp"] <= det.breakout_date).sum()) - 1
+            since = last - b
+            index = {day: i for i, day in enumerate(bars["timestamp"].dt.strftime("%Y-%m-%d"))}
+            level = _broken_line_now(det.lines, float(det.breakout_price), index, b, last)
             back = price < level if up else price > level
-            f.add(f"{key}.sessions_since_breakout", since, f"ימי מסחר מאז הפריצה של {key}", "", 0)
-            f.add(f"{key}.close_vs_breakout_pct", _pct(price, level), f"הסגירה ביחס לקו הפריצה של {key}", "%", 1)
-            f.add(f"{key}.state", ("המחיר חזר אל תוך התבנית: הפריצה מוטלת בספק" if back else
-                                   "המחיר מעל קו הפריצה" if up else "המחיר מתחת לקו השבירה"),
-                  f"מצב הפריצה של {key} היום")
+            after = bars.iloc[b + 1:]
+            went = (float(after["high"].max()) - level if up else level - float(after["low"].min())) if len(after) else 0.0
+            far_i = int(after["high"].idxmax() if up else after["low"].idxmin()) if len(after) else last
+            retest = (not back and math.isfinite(atr_now) and abs(price - level) <= atr_now
+                      and went >= rules["retest_away_atr"] * atr_now
+                      and last - far_i >= 3)             # it moved away, then came back over days
+            f.add(f"{key}.sessions_since_breakout", since, f"ימי מסחר מאז {word} של {key}", "", 0)
+            f.add(f"{key}.line_now", level, f"{line_word} של {key}, ממשיך עד היום", "$")
+            f.add(f"{key}.close_vs_breakout_pct", _pct(price, level), f"הסגירה ביחס ל{line_word} של {key} היום", "%", 1)
+            cancel_at = invalidation(record, bars)
+            dead = cancel_at is not None and math.isfinite(float(cancel_at)) and (
+                price < float(cancel_at) if up else price > float(cancel_at))
+            f.add(f"{key}.state", (f"התבנית נכשלה: המחיר עבר את רמת הביטול שלה ({float(cancel_at):.2f})" if dead else
+                                   f"המחיר חזר אל תוך התבנית: {word} מוטלת בספק" if back else
+                                   f"המחיר חזר לבדוק את {line_word} מ{'למעלה' if up else 'למטה'}" if retest else
+                                   f"המחיר מעל {line_word}" if up else f"המחיר מתחת ל{line_word}"),
+                  f"מצב {word} של {key} היום")
+            f.add(f"{key}.breakout_volume_ratio", _volume_ratio(bars, b),
+                  f"הנפח ביום {word} של {key} חלקי ממוצע 50 יום", "x", 2)
+            target = float(det.target) if det.target is not None and math.isfinite(float(det.target)) else None
+            if target is not None and len(after):
+                hit = after[(after["high"] >= target) if up else (after["low"] <= target)]
+                if len(hit):
+                    f.add(f"{key}.target_reached_day", _day(bars, int(hit.index[0])),
+                          f"היעד של {key} לפי גובה התבנית כבר הושג ביום")
         f.add(f"{key}.target", det.target, f"יעד {key} לפי כלל המדידה (לא תחזית)", "$")
         f.add(f"{key}.invalidation", invalidation(record, bars), f"רמת הביטול של {key}", "$")
         d[key] = {"type": "pattern", "pattern": det.pattern, "family": det.family,
