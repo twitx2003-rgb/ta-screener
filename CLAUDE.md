@@ -660,6 +660,15 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     (`push_token_file(path, what)`); a slow pass (median call > 5 s) doubles the interval;
     after 345 minutes it dispatches its own continuation. `state.sh restore` with
     SKIP_BARS=1, `save-alerts`. Not yet run live: measure call times on its first day.
+  - **Owner wants it as close to real time as possible; chose TradingView every 5 min**
+    (over a Finnhub stream, which would need a new account; its free tier's websocket
+    terms were unclear). `live_interval_minutes: 5`; stocks within verge_pct of their line
+    every pass, the farther ones every `far_every` (3) passes (`watch_tiers`). Each pass
+    also reads the first stock's newest 1-minute bar (`bar_age_minutes`) and the summary
+    shows `data_delay_min`: ~1 = real-time data, ~15 = delayed. If it is delayed, a
+    faster source (Finnhub/Alpaca stream) is the next step to offer.
+  - The evening report adds how the day's intraday crossings closed (held above the
+    line / fell back: `intraday_followup`).
   - **Tests never reach the real bot**: `tests/conftest.py` clears the Telegram/GitHub keys
     and points `notify.CREDENTIALS` away from ~/.ta-screener (a tick test once sent the
     owner a real report of made-up stocks before that guard existed).

@@ -567,10 +567,12 @@ def ci_live(settings, max_minutes: float) -> int:
     view = ScanRepository(store, load_rules()).current()
     if view is None:
         return finish("no scan")
-    watch = alerts.watch_list(view, cfg.watch_pct, cfg.live_max_symbols)
-    summary["watched"] = len(watch)
-    if not watch:
+    near, far = alerts.watch_tiers(view, cfg.verge_pct, cfg.watch_pct, cfg.live_max_symbols)
+    summary.update(watched=len(near) + len(far), watched_near=len(near), watched_far=len(far),
+                   data_delay_min=None)
+    if not near and not far:
         return finish("nothing near a breakout line")
+    delays: list[float] = []
     ends = session_bounds(day, tz)[1] + timedelta(minutes=after)
     hand_over = started + timedelta(minutes=max_minutes)
     interval = cfg.live_interval_minutes
@@ -585,14 +587,19 @@ def ci_live(settings, max_minutes: float) -> int:
             status = github.dispatch("live.yml", {"continued": "yes"})
             return finish(f"handed over ({status})", 0 if status == 204 else 1)
         pass_started = clock.monotonic()
+        # the stocks near their line every pass; the farther ones every `far_every`-th
+        watch = near + (far if summary["passes"] % cfg.far_every == 0 else [])
         try:
             got = client.with_session(lambda session: alerts.fetch_live_prices(
-                session, watch, day, tz, concurrency=settings.bars.concurrency))
+                session, watch, day, tz, concurrency=settings.bars.concurrency, measure_delay=True))
         except (ProviderError, OSError, TimeoutError, ExceptionGroup) as exc:
             log.warning("a price pass failed: %s", type(exc).__name__)
             summary["failed_passes"] += 1
-            got = {"prices": {}, "seconds": [], "failed": 0}
+            got = {"prices": {}, "seconds": [], "failed": 0, "delay_min": None}
         summary["passes"] += 1
+        if got.get("delay_min") is not None:
+            delays.append(got["delay_min"])
+            summary["data_delay_min"] = round(statistics.median(delays), 1)
         summary["calls"] += len(got["seconds"]) + got["failed"]
         summary["failed_calls"] += got["failed"]
         all_seconds += got["seconds"]

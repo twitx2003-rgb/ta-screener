@@ -96,13 +96,40 @@ def test_the_report_goes_once_and_starts_the_strongest_analyses(tmp_path):
     now = lambda: datetime(2026, 3, 20, 22, tzinfo=timezone.utc)
     first = evening_report(store, _view(), cfg, bot=bot, min_cases=20, dispatch=dispatch,
                            can_dispatch=True, now=now)
-    assert first == {"status": "sent", "breakouts": 2, "verge": 1, "analyses": 1, "messages": 1}
+    assert first == {"status": "sent", "breakouts": 2, "verge": 1, "analyses": 1, "messages": 1,
+                     "intraday_held": 0, "intraday_fell": 0}
     assert started == [("analyst.yml", {"symbol": "NYSE:BBB"}), ("analyst.yml", {"symbol": "NYSE:AAA"})]
     assert "AAA" in bot.sent[-1] and "לא הצלחתי" in bot.sent[-1]     # the refused one is told
     assert read_sent(store, DAY)["evening"]["analyses"] == ["NYSE:BBB"]
     again = evening_report(store, _view(), cfg, bot=bot, min_cases=20, dispatch=dispatch,
                            can_dispatch=True, now=now)
     assert again == {"status": "already sent"} and len(started) == 2
+
+
+def test_the_report_says_which_intraday_breakouts_held_at_the_close(tmp_path):
+    from tascreen.alerts import write_sent
+
+    store, bot = Store(tmp_path), _Bot()
+    write_sent(store, DAY, {"live": {"NYSE:DDD|rectangle": {"line": 49.0, "price": 49.5},
+                                     "NYSE:AAA|double_bottom": {"line": 105.0, "price": 105.4}}})
+    result = evening_report(store, _view(), AlertsSettings(top_analyses=0), bot=bot, min_cases=20,
+                            dispatch=lambda w, i: 204, can_dispatch=False)
+    assert (result["intraday_held"], result["intraday_fell"]) == (1, 1)
+    text = "\n".join(bot.sent)
+    assert "✅ החזיקה מעל הקו" in text and "DDD</a>" in text        # closed 50.0 above 49.0
+    assert "❌ חזרה מתחת לקו" in text and "AAA</a>" in text         # closed 101.0 below 105.0
+    assert "live" in read_sent(store, DAY)                         # kept beside the evening entry
+
+
+def test_the_near_stocks_every_pass_and_the_delay_measure():
+    from tascreen.alerts import bar_age_minutes, watch_tiers
+
+    view = _view()
+    assert watch_tiers(view, 2.0, 5.0, 10) == (["NYSE:DDD"], [])          # 1.8% away: near
+    assert watch_tiers(view, 1.0, 5.0, 10) == ([], ["NYSE:DDD"])
+    now = datetime(2026, 3, 20, 15, 0, tzinfo=timezone.utc)
+    bar = {"bars": [{"t": int(datetime(2026, 3, 20, 14, 44, tzinfo=timezone.utc).timestamp())}]}
+    assert bar_age_minutes(bar, now) == 16.0 and bar_age_minutes({"bars": []}, now) is None
 
 
 def test_dispatch_posts_the_workflow_and_its_inputs():

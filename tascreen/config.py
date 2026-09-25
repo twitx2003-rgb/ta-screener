@@ -265,15 +265,20 @@ class AlertsSettings:
     verge_pct: float = 2.0             # "on the verge": the close this far below the breakout line
     watch_pct: float = 5.0             # watched in the session: the line this far above the close
     top_analyses: int = 3              # full analyses (analyst.yml) for the strongest breakouts
-    live_interval_minutes: float = 15.0
+    live_interval_minutes: float = 5.0
+    # stocks farther than verge_pct from their line need a bigger move to cross it: they
+    # are priced every `far_every`-th pass only (fewer calls; TradingView slows down)
+    far_every: int = 3
     live_max_symbols: int = 120        # get-ohlcv calls per pass, at most
     site_url: str = "https://ta-screener.vercel.app"
 
     def __post_init__(self):
         for name in ("verge_pct", "watch_pct", "live_interval_minutes"):
             object.__setattr__(self, name, float(getattr(self, name)))
-        for name in ("top_analyses", "live_max_symbols"):
+        for name in ("top_analyses", "live_max_symbols", "far_every"):
             object.__setattr__(self, name, int(getattr(self, name)))
+        if not 1 <= self.far_every <= 6:
+            raise ConfigError("alerts.far_every must be 1..6")
         if not 0 < self.verge_pct <= 10:
             raise ConfigError("alerts.verge_pct must be above 0 and at most 10")
         if not self.verge_pct <= self.watch_pct <= 20:

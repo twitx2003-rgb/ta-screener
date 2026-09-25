@@ -188,7 +188,8 @@ def test_the_tick_sends_the_breakout_report_once_and_logs_counts_only(tmp_path, 
     run.ci_tick(settings, None, None, with_channels=False)
     summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
     assert summary["alerts"]["status"] == "sent" and sent and "פריצות שוריות" in sent[0]
-    assert set(summary["alerts"]) == {"status", "breakouts", "verge", "analyses", "messages"}
+    assert set(summary["alerts"]) == {"status", "breakouts", "verge", "analyses", "messages",
+                                      "intraday_held", "intraday_fell"}
     run.ci_tick(settings, None, None, with_channels=False)
     summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
     assert summary["alerts"] == {"status": "already sent"} and len(sent) == 1

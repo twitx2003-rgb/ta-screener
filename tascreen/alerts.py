@@ -132,6 +132,23 @@ def on_the_verge(view: ScanView, pct: float) -> list[dict[str, Any]]:
     return [v for v in forming_bullish(view) if v["gap_pct"] <= pct]
 
 
+def intraday_followup(view: ScanView, live: dict[str, Any]) -> list[dict[str, Any]]:
+    """The crossings sent during the session, against the session's close: held (closed
+    above the line) or fell back. Held ones first."""
+    stocks = _stocks(view)
+    d = view.detections
+    names = dict(zip(zip(d["symbol"], d["pattern"]), d["name_he"]))
+    out = []
+    for key, info in live.items():
+        symbol, _, pattern = key.partition("|")
+        close, line = stocks.get(symbol, {}).get("close"), (info or {}).get("line")
+        if _finite(close) and _finite(line):
+            out.append({"symbol": symbol, "name": names.get((symbol, pattern), pattern),
+                        "line": float(line), "close": float(close), "held": float(close) > float(line)})
+    out.sort(key=lambda f: (not f["held"], f["symbol"]))
+    return out
+
+
 # ------------------------------------------------------------------ messages
 def _price(x: Any) -> str:
     return f"{float(x):,.2f}" if _finite(x) else "-"
@@ -160,7 +177,8 @@ def _pack(blocks: list[str]) -> list[str]:
 
 def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, site_url: str,
                      verge_pct: float, coverage: tuple[int, int] | None = None,
-                     analyses: list[str] | None = None) -> list[str]:
+                     analyses: list[str] | None = None,
+                     intraday: list[dict] | None = None) -> list[str]:
     head = f"<b>🚀 פריצות שוריות · {_day(day)}</b>\nאחרי הסגירה, מהחזקה לחלשה (לפי הנפח ביום הפריצה)."
     if coverage and coverage[0] < coverage[1]:
         head += f"\n(נסרקו {coverage[0]:,} מתוך {coverage[1]:,} מניות)"
@@ -182,6 +200,13 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, sit
     if analyses:
         blocks.append("📊 ניתוח מלא יגיע בהודעות נפרדות: "
                       + ", ".join(html.escape(s.split(":")[-1]) for s in analyses))
+    if intraday:
+        lines = ["<b>⚡ הפריצות מהמסחר של היום, בסגירה</b>"]
+        for f in intraday:
+            mark = "✅ החזיקה מעל הקו" if f["held"] else "❌ חזרה מתחת לקו"
+            lines.append(f"{mark}: {_link(f['symbol'], site_url)} · {html.escape(str(f['name']))} · "
+                         f"קו {_price(f['line'])} · סגירה {_price(f['close'])}")
+        blocks.append("\n".join(lines))
     lines = [f"<b>⏳ על סף פריצה</b> (הסגירה עד {verge_pct:g}% מתחת לקו הפריצה)"]
     if not verge:
         lines.append("אין היום.")
@@ -211,8 +236,10 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
     summary = view.summary or {}
     coverage = ((int(summary["symbols_scanned"]), int(summary["symbols_in_universe"]))
                 if summary.get("symbols_scanned") and summary.get("symbols_in_universe") else None)
+    intraday = intraday_followup(view, sent.get("live") or {})
     messages = evening_messages(view.day, breakouts, verge, site_url=cfg.site_url,
-                                verge_pct=cfg.verge_pct, coverage=coverage, analyses=chosen)
+                                verge_pct=cfg.verge_pct, coverage=coverage, analyses=chosen,
+                                intraday=intraday)
     for message in messages:
         bot.send(message, html=True)
     started = [s for s in chosen if dispatch("analyst.yml", {"symbol": s}) == 204]
@@ -223,7 +250,8 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
         "sent_at": now().isoformat(timespec="seconds"), "messages": len(messages),
         "breakouts": [b["symbol"] for b in breakouts], "verge": len(verge), "analyses": started}})
     return {"status": "sent", "breakouts": len(breakouts), "verge": len(verge),
-            "analyses": len(started), "messages": len(messages)}
+            "analyses": len(started), "messages": len(messages),
+            "intraday_held": sum(f["held"] for f in intraday), "intraday_fell": sum(not f["held"] for f in intraday)}
 
 
 # ------------------------------------------------------------------ during the session
@@ -235,6 +263,28 @@ def watch_list(view: ScanView, watch_pct: float, max_symbols: int) -> list[str]:
         if item["gap_pct"] <= watch_pct and item["symbol"] not in out:
             out.append(item["symbol"])
     return out[:max_symbols]
+
+
+def watch_tiers(view: ScanView, verge_pct: float, watch_pct: float,
+                max_symbols: int) -> tuple[list[str], list[str]]:
+    """The watch list split in two: stocks whose nearest line is within `verge_pct`
+    (priced every pass) and the rest (priced every few passes: they need a bigger move)."""
+    nearest: dict[str, float] = {}
+    for item in forming_bullish(view):
+        nearest.setdefault(item["symbol"], item["gap_pct"])      # sorted: the nearest first
+    watched = watch_list(view, watch_pct, max_symbols)
+    return ([s for s in watched if nearest[s] <= verge_pct],
+            [s for s in watched if nearest[s] > verge_pct])
+
+
+def bar_age_minutes(payload: dict[str, Any], now: datetime) -> float | None:
+    """How old the newest 1-minute bar is: about 1 with real-time data, about 15 or more
+    with delayed data. Measures TradingView's delay during the session."""
+    bars = pick(payload, ["bars"], context=f"{OHLCV_TOOL} 1-minute bars") or []
+    if not bars:
+        return None
+    opened = datetime.fromtimestamp(int(pick(bars[-1], ["t"], context=OHLCV_TOOL)), timezone.utc)
+    return round((now - opened).total_seconds() / 60, 1)
 
 
 def live_price(payload: dict[str, Any], session_day: date, market_tz: str) -> float | None:
@@ -252,12 +302,22 @@ def live_price(payload: dict[str, Any], session_day: date, market_tz: str) -> fl
 
 
 async def fetch_live_prices(session: Any, symbols: list[str], session_day: date, market_tz: str, *,
-                            concurrency: int = 1) -> dict[str, Any]:
-    """One pass: each watched stock's price from one get-ohlcv call (2 daily bars)."""
+                            concurrency: int = 1, measure_delay: bool = False) -> dict[str, Any]:
+    """One pass: each watched stock's price from one get-ohlcv call (2 daily bars). With
+    `measure_delay`, one more call (the first stock's newest 1-minute bar) shows how
+    delayed TradingView's data is."""
     gate = asyncio.Semaphore(concurrency)
     prices: dict[str, float] = {}
     seconds: list[float] = []
     failed = 0
+    delay = None
+    if measure_delay and symbols:
+        try:
+            payload = await fetch_in_session(session, OHLCV_TOOL,
+                                             {"symbol": symbols[0], "interval": "1", "count": 1})
+            delay = bar_age_minutes(payload, datetime.now(timezone.utc))
+        except (ProviderError, OSError, TimeoutError, ValueError):
+            delay = None
 
     async def one(symbol: str) -> None:
         nonlocal failed
@@ -275,7 +335,7 @@ async def fetch_live_prices(session: Any, symbols: list[str], session_day: date,
                 prices[symbol] = price
 
     await asyncio.gather(*(one(s) for s in symbols))
-    return {"prices": prices, "seconds": seconds, "failed": failed}
+    return {"prices": prices, "seconds": seconds, "failed": failed, "delay_min": delay}
 
 
 def live_crossings(view: ScanView, prices: dict[str, float], session_day: date,
@@ -303,7 +363,7 @@ def live_crossings(view: ScanView, prices: dict[str, float], session_day: date,
 
 def live_message(found: list[dict[str, Any]], at: datetime, market_tz: str, site_url: str) -> str:
     lines = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} שעון ניו יורק</b>",
-             "לא סופי עד הסגירה. המחירים מעוכבים בכ-15 דקות.", ""]
+             "לא סופי עד הסגירה. מחירי TradingView עשויים להיות מעוכבים.", ""]
     for n, c in enumerate(found, 1):
         above = (c["price"] / c["line"] - 1) * 100
         target = f" · יעד {_price(c['target'])} (כלל המדידה)" if _finite(c["target"]) else ""

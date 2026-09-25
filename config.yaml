@@ -107,6 +107,8 @@ alerts:
   verge_pct: 2.0             # "on the verge": the close this far below the breakout line
   watch_pct: 5.0             # watched during the session: the line this far above the close
   top_analyses: 3            # full analyses for the strongest breakouts (of the 10 a day)
-  live_interval_minutes: 15  # a price pass during the session (get-ohlcv, one call a stock)
+  live_interval_minutes: 5   # a price pass during the session (owner: as close to real time
+                             # as TradingView allows; get-ohlcv, one call a stock)
+  far_every: 3               # stocks beyond verge_pct from their line: every 3rd pass only
   live_max_symbols: 120      # stocks watched, at most, nearest to their line first
   site_url: "https://ta-screener.vercel.app"
