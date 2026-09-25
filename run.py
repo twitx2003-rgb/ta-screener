@@ -66,6 +66,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outcomes", action="store_true",
                         help="Update the breakout ledger from the saved scans: what happened after "
                              "each chart-pattern breakout (target, failed, open) -> data/outcomes/")
+    parser.add_argument("--backtest", action="store_true",
+                        help="Replay the breakout ledger as trades (entry next open; exit at the "
+                             "target, the invalidation close or the last tracked session): win rate, "
+                             "average return, profit factor per pattern -> data/outcomes/backtest.json")
     parser.add_argument("--backfill-outcomes", action="store_true",
                         help="Find past breakouts: the chart detector on stored bars, one past "
                              "session at a time without looking ahead (hours; resumable; "
@@ -369,8 +373,9 @@ def scan(settings) -> int:
         print(f"    {pattern:<22} {statuses}")
     try:
         outcomes(settings, quiet=True)
-    except (ScreenerError, OSError) as exc:      # the scan itself is fine; the ledger waits
-        log.error("outcome ledger not updated: %s", exc)
+        backtest(settings, quiet=True)
+    except (ScreenerError, OSError, ValueError) as exc:  # the scan itself is fine; the ledger waits
+        log.error("outcome ledger or backtest not updated: %s", exc)
     print("  our indicators vs TradingView's:")
     for name, result in summary["cross_check_vs_tradingview"].items():
         if result.get("compared"):
@@ -392,6 +397,35 @@ def outcomes(settings, rebuild: bool = False, quiet: bool = False) -> int:
         log.info("%s", line)
     else:
         print(line)
+    return 0
+
+
+def backtest(settings, quiet: bool = False) -> int:
+    """The outcome ledger replayed as trades (tascreen/backtest.py) -> data/outcomes/backtest.json,
+    shown on the scorecard page. Statistics only, no symbols."""
+    from datetime import datetime, timezone
+
+    from tascreen import backtest as bt
+    from tascreen.patterns.rules import load_rules
+    from tascreen.store import Store
+
+    store = Store(settings.data_dir)
+    done = bt.trades(store.read_ledger(), store.read_bars)
+    rows = bt.summary(done, settings.outcomes.min_cases)
+    store.write_backtest({"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                          "period": bt.period(done), "trades": int(len(done)),
+                          "min_trades": settings.outcomes.min_cases, "rows": rows})
+    if quiet:
+        log.info("backtest: %d trades, %d rows", len(done), len(rows))
+        return 0
+    names = {k: v.name_he for k, v in {**load_rules().chart, **load_rules().candle}.items()}
+    print(f"\nBacktest: {len(done):,} trades {bt.period(done)} (entry: next open; exit: target, "
+          "invalidation close or last tracked session; no costs)\n")
+    for r in rows:
+        name = "all" if r["pattern"] == "all" else r["pattern"]
+        print(f"  {name:<22} {r['direction']:<8} n={r['trades']:>6,} win {r['win_pct']:>5}%  "
+              f"avg {r['avg_return_pct']:>6}%  median {r['median_return_pct']:>6}%  "
+              f"PF {r['profit_factor']}  days {r['avg_sessions']}  against {r['median_mae_pct']}%/{r['p90_mae_pct']}%")
     return 0
 
 
@@ -1064,6 +1098,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.scan, lambda: scan(settings)),
         (args.scan_symbol, lambda: scan_symbol(settings, args.scan_symbol.strip().upper())),
         (args.outcomes, lambda: outcomes(settings, rebuild=args.rebuild)),
+        (args.backtest, lambda: backtest(settings)),
         (args.backfill_outcomes, lambda: backfill_outcomes(settings, args.limit)),
         (args.ci_probe, lambda: ci_probe(settings, args.limit)),
         (args.ci_tick, lambda: ci_tick(settings, args.limit, args.max_minutes,

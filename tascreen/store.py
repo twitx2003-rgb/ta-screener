@@ -76,6 +76,14 @@ class Store:
         path = self.outcomes_dir / "meta.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
+    # the ledger replayed as trades (tascreen/backtest.py): statistics only, no symbols
+    def read_backtest(self) -> dict[str, Any]:
+        path = self.outcomes_dir / "backtest.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    def write_backtest(self, report: dict[str, Any]) -> None:
+        _write_json(self.outcomes_dir / "backtest.json", report)
+
     @contextmanager
     def ledger_lock(self, wait_s: float = 120.0, stale_s: float = 900.0):
         """One writer of the ledger at a time (the live loop and a backfill run may

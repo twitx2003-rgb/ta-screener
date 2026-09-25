@@ -669,6 +669,27 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     faster source (Finnhub/Alpaca stream) is the next step to offer.
   - The evening report adds how the day's intraday crossings closed (held above the
     line / fell back: `intraday_followup`).
+- **From a trading video the owner watched (2026-09-25), he chose two additions:**
+  - News line per breakout (evening + live): `mcp-tv-get-news` (live schema: symbol, lang,
+    limit, offset; answer data.headlines[] with title, published, provider.name,
+    relatedSymbols[].symbol, link). Hebrew returned 0 headlines for NVDA: English, as
+    published. The newest headline naming the stock and at most 3 stocks, <= 48 h old;
+    only TradingView links are linked; a failed call = no headline.
+  - `tascreen/backtest.py`, `run.py --backtest` (also nightly after the ledger):
+    every decided ledger breakout as a trade: entry next open, exit at the target (scaled
+    by the ledger's split `scale`) / the resolved day's close; skipped if resolved before
+    entry or the entry is past the target; per pattern+direction: win %, avg/median
+    return, profit factor, days, adverse excursion (median / 90th pct), losing streak.
+    First run: 32,046 trades 2019-06 .. 2026-09; all bullish: win 47%, avg +2.8%/trade,
+    PF 1.44; bearish (shorts) lose (PF 0.58, a bull market). Survivorship: today's list.
+    Shown on /scorecard (data/outcomes/backtest.json, statistics only). A running-sum
+    drawdown over thousands of overlapping trades was meaningless (thousands of %), so
+    the per-trade adverse excursion replaced it.
+- Analyst accuracy pass (owner, 2026-09-25): `view.key_level_facts` (level.s1/s2/r1/r2,
+  position, up.*/down.*), the writer must cite up.trigger / down.trigger / level.*; chart:
+  header with name/close/change, round axis ticks, close tag, legend, 130 bars, profile
+  clipped to the plot; the analyst runner fetches only data/scans/*/indicators.parquet from
+  the state repo (sparse, blob-less) for the companies' names.
   - **Tests never reach the real bot**: `tests/conftest.py` clears the Telegram/GitHub keys
     and points `notify.CREDENTIALS` away from ~/.ta-screener (a tick test once sent the
     owner a real report of made-up stocks before that guard existed).

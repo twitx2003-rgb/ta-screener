@@ -80,4 +80,40 @@
 </div>
 {% endif %}
 {% endif %}
+{% if backtest and backtest.rows %}
+<h2 style="margin-top: 22px" id="backtest">בדיקה לאחור: כל פריצה כעסקה</h2>
+<p class="muted small" style="max-width: 75ch">
+  כל פריצה שהוכרעה, כאילו נכנסנו בפתיחה של יום המסחר שאחריה: בפריצה למעלה קנייה, בפריצה למטה מכירה בחסר.
+  יציאה ביעד של כלל המדידה אם הגיע אליו, אחרת בסגירה שמעבר לרמת הביטול, או בסגירה אחרי <span class="num">{{ window }}</span> ימי מסחר.
+  בלי עמלות ובלי החלקה. <span class="num">{{ "{:,}".format(backtest.trades) }}</span> עסקאות,
+  <span class="num">{{ backtest.period["from"]|day }}</span> עד <span class="num">{{ backtest.period["to"]|day }}</span>.
+  "נגד הכיוון" הוא כמה העסקה ירדה נגדך לפני היציאה: החציון, ו-10% העסקאות הקשות.
+</p>
+<p class="caution">המניות הן הרשימה של היום (מעל מיליארד דולר), ולכן חסרות מניות שירדו או נמחקו: התוצאות כנראה טובות מהמציאות, בעיקר בפריצות למעלה. תוצאות עבר אינן מבטיחות דבר, וזה לא ייעוץ השקעות.</p>
+<div class="table-wrap">
+  <table class="score">
+    <thead><tr>
+      <th scope="col">תבנית</th><th scope="col">עסקאות</th><th scope="col">הצלחה</th>
+      <th scope="col" title="ממוצע התשואה לעסקה">ממוצע</th><th scope="col" title="חציון התשואה לעסקה">חציון</th>
+      <th scope="col" title="סך הרווחים חלקי סך ההפסדים; מעל 1 = רווחי">מקדם רווח</th>
+      <th scope="col" title="ממוצע ימי המסחר בעסקה">ימים</th>
+      <th scope="col" title="כמה העסקה ירדה נגדך לפני היציאה: חציון / 10% הקשות">נגד הכיוון</th>
+    </tr></thead>
+    <tbody>
+    {% for r in backtest.rows %}
+      <tr>
+        <th scope="row">{% if r.pattern == "all" %}<strong>כל התבניות</strong>{% else %}<a href="/c/{{ r.pattern }}">{{ specs[r.pattern].name_he if r.pattern in specs else r.pattern }}</a>{% endif %} · {{ labels.DIRECTION[r.direction] }}</th>
+        <td class="n"><span class="num">{{ "{:,}".format(r.trades) }}</span></td>
+        <td class="n"><span class="num">{{ r.win_pct|num(0) }}%</span></td>
+        <td class="n"><span class="num {{ 'up' if r.avg_return_pct > 0 else 'down' }}">{{ r.avg_return_pct|pct }}</span></td>
+        <td class="n"><span class="num">{{ r.median_return_pct|pct }}</span></td>
+        <td class="n"><span class="num">{{ r.profit_factor|num(2) if r.profit_factor is not none else "—" }}</span></td>
+        <td class="n"><span class="num">{{ r.avg_sessions|num(0) }}</span></td>
+        <td class="n"><span class="num">{{ r.median_mae_pct|num(1) }}% / {{ r.p90_mae_pct|num(1) }}%</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 {% endblock %}

@@ -355,7 +355,7 @@ def create_app(settings: Settings, *, rules: Rules | None = None, static: bool =
                       sources=[s for s in labels.SOURCE if any(r["source"] == s for r in rows)],
                       recent=recent_decided(ledger, 15),
                       window=settings.outcomes.max_sessions, min_cases=settings.outcomes.min_cases,
-                      tracked=0 if ledger is None else len(ledger))
+                      tracked=0 if ledger is None else len(ledger), backtest=store.read_backtest())
 
     @app.get("/api/scorecard")
     def api_scorecard():
