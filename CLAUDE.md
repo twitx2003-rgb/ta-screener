@@ -151,6 +151,8 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   Four review lenses (TA expert, novice, Hebrew editor, trader; `analyst/review_rubric.md`),
   four agents at a time (twelve at once hit the session limit). Scores: round 1 5.21 (its 4
   stocks), round 2 5.92, round 3 6.35; target 8.5. Next: B2, a reviewer inside writer.py.
+  The exact reviewer prompts, the steps and each round's scores are local, in
+  `logs/eval/REVIEW.md` and `logs/eval/roundN/scores.md` (gitignored: they quote prices).
 - Open: pattern quality in the scanner (triangle touches, cup depth: discuss first, it
   changes the whole site), earnings dates, relative strength, gaps; the hosting keepalive
   before about 2026-11-23.
