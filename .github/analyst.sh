@@ -4,6 +4,10 @@
 #   bash .github/analyst.sh restore   the bars from the state repository's "bars" release,
 #                                     its "analyses" branch into ./analyses, config.local.yaml
 #   bash .github/analyst.sh keep      commit this run's analysis and log, and push them
+#   bash .github/analyst.sh keep-eval ROUND
+#                                     an evaluation round (eval.yml): logs/eval/ROUND, pictures
+#                                     included, onto the state repository's "eval" branch
+#   SKIP_ANALYSES=1 ... restore       without the "analyses" branch (eval.yml does not need it)
 #
 # The nightly run (state.sh save) force-pushes the state repository's main branch only;
 # the "analyses" branch is written here alone, by rebase-and-push. Needs STATE_REPO and
@@ -37,16 +41,20 @@ restore)
         fi
         echo "names: $(find data/scans -name indicators.parquet 2> /dev/null | wc -l) scan files"
     fi
-    if git clone -q --branch analyses --single-branch "$url" analyses 2> /dev/null; then
+    if [ -n "${SKIP_ANALYSES:-}" ]; then
+        echo "analyses: not needed"
+    elif git clone -q --branch analyses --single-branch "$url" analyses 2> /dev/null; then
         echo "analyses: $(find analyses -mindepth 2 -maxdepth 2 -type d -name '[0-9]*' | wc -l) kept so far"
     else
         git init -q -b analyses analyses
         git -C analyses remote add origin "$url"
         echo "analyses: a new branch"
     fi
-    git -C analyses config user.name "ta-screener bot"
-    git -C analyses config user.email "actions@users.noreply.github.com"
-    printf '*.png\n' > analyses/.gitignore
+    if [ -z "${SKIP_ANALYSES:-}" ]; then
+        git -C analyses config user.name "ta-screener bot"
+        git -C analyses config user.email "actions@users.noreply.github.com"
+        printf '*.png\n' > analyses/.gitignore
+    fi
     cat > config.local.yaml <<EOF
 # Written by .github/analyst.sh on the runner (gitignored).
 paths:
@@ -69,8 +77,33 @@ keep)
     echo "analyses: could not push"
     exit 1
     ;;
+keep-eval)
+    round="${2:?round name}"
+    if [ ! -d "logs/eval/$round" ]; then echo "eval: nothing to keep"; exit 0; fi
+    # its own branch, one folder per round; the pictures stay (the reviewers look at them)
+    if ! git clone -q --depth 1 --branch eval --single-branch "$url" eval 2> /dev/null; then
+        git init -q -b eval eval
+        git -C eval remote add origin "$url"
+    fi
+    git -C eval config user.name "ta-screener bot"
+    git -C eval config user.email "actions@users.noreply.github.com"
+    rm -rf "eval/$round"
+    mkdir -p eval
+    cp -r "logs/eval/$round" "eval/$round"
+    cp logs/eval-*.log "eval/$round/" 2> /dev/null || true
+    cd eval
+    git add -A
+    git commit -qm "evaluation $round $(date -u +%Y-%m-%dT%H:%MZ)" || { echo "eval: nothing new"; exit 0; }
+    for attempt in 1 2 3; do
+        git pull -q --rebase origin eval 2> /dev/null || true
+        if git push -q origin HEAD:eval 2> /dev/null; then echo "eval: kept"; exit 0; fi
+        sleep 5
+    done
+    echo "eval: could not push"
+    exit 1
+    ;;
 *)
-    echo "usage: $0 restore|keep" >&2
+    echo "usage: $0 restore|keep|keep-eval ROUND" >&2
     exit 2
     ;;
 esac

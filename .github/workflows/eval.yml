@@ -1,0 +1,88 @@
+# An evaluation round of the chart analyst in the cloud (owner, 2026-09-26: "the most
+# efficient way", so rounds no longer wait for a normal terminal at home): the fixed set of
+# 12 stocks (tascreen/analyst/evaluate.py), analysed as analyst.yml does, onto the "eval"
+# branch of the PRIVATE state repository, where the review agents read it. Started from
+# the owner's Claude Code session through the API, or by hand (Actions > eval > Run
+# workflow). It reads the stored bars only (no TradingView), so it runs beside the nightly
+# update. Its analyses come out of the same Claude subscription as the bot's. This
+# repository is public, and so is this log: one status line; the full log is kept with the
+# round.
+name: eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      round:
+        description: "Round name, for example round4"
+        required: true
+      until:
+        description: "Bars up to this day (YYYY-MM-DD): the day the earlier rounds saw; empty = the latest"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      STATE_REPO: twitx2003-rgb/ta-screener-state
+      STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+      ROUND: ${{ inputs.round }}
+      UNTIL: ${{ inputs.until }}
+    steps:
+      - name: Check the inputs
+        run: |
+          [[ "$ROUND" =~ ^[A-Za-z0-9_-]{1,40}$ ]] || { echo "round: letters, digits, - and _ only"; exit 2; }
+          [[ -z "$UNTIL" || "$UNTIL" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "until: YYYY-MM-DD"; exit 2; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -q -r requirements.txt
+          curl -fsSL https://claude.ai/install.sh | bash > /dev/null 2>&1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # the charts as PNGs: librsvg, with Hebrew and monospace fonts (SIL OFL)
+          sudo apt-get update -qq > /dev/null
+          sudo apt-get install -y -qq --no-install-recommends librsvg2-bin fonts-noto-core fonts-ibm-plex > /dev/null
+
+      - name: Get the stored bars
+        env:
+          SKIP_ANALYSES: "1"
+        run: bash .github/analyst.sh restore
+
+      - name: Analyse the evaluation set
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set +e
+          args=(--analyze-eval "$ROUND")
+          if [ -n "$UNTIL" ]; then args+=(--until "$UNTIL"); fi
+          python -u run.py "${args[@]}" > "logs/eval-$(date -u +%Y%m%dT%H%M%S).log" 2>&1
+          code=$?
+          python -c 'import json, os, sys
+          try:
+              s = json.load(open("logs/eval/" + os.environ["ROUND"] + "/index.json", encoding="utf-8"))["stocks"]
+          except Exception as e:
+              sys.exit(print(f"eval: no index ({type(e).__name__})"))
+          bad = sum(1 for x in s if x.get("error"))
+          print(f"eval: {len(s) - bad} analysed, {bad} failed")'
+          exit $code
+
+      - name: Keep the round
+        if: always()
+        run: bash .github/analyst.sh keep-eval "$ROUND"

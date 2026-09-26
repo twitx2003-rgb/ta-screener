@@ -33,18 +33,22 @@ EVAL_SET = {
 
 
 def run_eval(store: Store, llm: LLM, folder: Path, *, to_png: Callable[[Path, Path], Path] | None = None,
-             progress: Callable[[str], None] = print) -> dict[str, Any]:
+             progress: Callable[[str], None] = print, until: str | None = None) -> dict[str, Any]:
     """Analyse every stock of the set into `folder` (one subfolder each) and write
-    index.json: what was analysed, the situation it stands for, and what went wrong."""
+    index.json: what was analysed, the situation it stands for, and what went wrong.
+    `until` (YYYY-MM-DD) cuts the bars at that day, so a later round reads the same charts
+    as an earlier one and the scores compare changes to the analyst, not to the market."""
     folder.mkdir(parents=True, exist_ok=True)
     index: dict[str, Any] = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                             "model": getattr(llm, "name", "?"), "stocks": []}
+                             "model": getattr(llm, "name", "?"), "until": until, "stocks": []}
     for n, (symbol, situation) in enumerate(EVAL_SET.items(), 1):
         progress(f"  {n}/{len(EVAL_SET)} {symbol} ({situation})...")
         entry: dict[str, Any] = {"symbol": symbol, "situation": situation}
         bars = store.read_bars(symbol)
-        if bars is None:
-            entry["error"] = "no stored bars"
+        if bars is not None and until:
+            bars = bars[bars["timestamp"].dt.strftime("%Y-%m-%d") <= until]
+        if bars is None or bars.empty:
+            entry["error"] = "no stored bars" + (f" up to {until}" if until and bars is not None else "")
         else:
             out = folder / symbol.replace(":", "_")
             try:

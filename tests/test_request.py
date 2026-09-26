@@ -105,3 +105,8 @@ def test_the_evaluation_set_writes_every_stock_and_an_index(tmp_path, monkeypatc
     kept = sorted(p.suffix for p in (tmp_path / "round1" / "NYSE_SYN").iterdir())
     assert kept == [".html", ".json", ".json", ".pine", ".png", ".svg"]
     assert json.loads((tmp_path / "round1" / "index.json").read_text(encoding="utf-8"))["stocks"]
+    # a later round reads the same days as an earlier one
+    early = evaluate.run_eval(Store(), SyntheticLLM(_answer), tmp_path / "round2", to_png=_png,
+                              progress=lambda m: None, until="1990-01-01")
+    assert early["until"] == "1990-01-01"
+    assert {s["symbol"]: s.get("error") for s in early["stocks"]}["NYSE:SYN"] == "no stored bars up to 1990-01-01"
