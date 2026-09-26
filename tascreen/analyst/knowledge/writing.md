@@ -16,6 +16,10 @@ someone who knows only the words "support" and "resistance" understands.
 - The two scenarios are written by the program from the up.* / down.* facts: never
   repeat them, never say which is more likely or where the price will go.
 - Neutral tone: no hype, no emojis, no exclamation marks.
+- Never "(לא תחזית)": the footer says once that no level is a forecast.
+- "ממוצע 50 יום", never "הממוצע הבינוני"; "חזר אל", not "ירד חזרה אל"; a zone broken
+  down: "המחיר נסגר מתחת ל-X", never "נפרץ" or "פרוצה".
+- Ratios with one decimal ("פי 1.6"); percentages exactly as in the facts.
 - Each number once in the message: what the headline said, a section does not repeat.
 - Always above or below: every level and line is "מעל הסגירה" or "מתחת לסגירה".
 - Consistent terms: "ה-RSI", "ה-MACD", "קו האפס", "אזור" (never "רצועה"), "פריצה" up and

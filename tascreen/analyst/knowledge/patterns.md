@@ -7,7 +7,14 @@ What the engine gives:
 - pat_N.name (the Hebrew name), pat_N.status (בבנייה = forming, פריצה = breakout,
   פריצה כושלת = busted, אות נר = a candle signal), pat_N.direction (שורי / דובי / not
   known yet).
-- pat_N.breakout: the level whose close confirms the pattern; pat_N.breakout_day if it did.
+- pat_N.breakout (a forming pattern only): the line whose close would confirm it. Once
+  it broke, the line is quoted once, as it is today: pat_N.line_now. A bearish pattern
+  breaks down ("שבירה", status "שבירה"), a bullish one breaks out ("פריצה").
+- pat_N.breakout_volume: the breakout day's volume in words.
+- Right after a breakout that still holds near its line, the program's scenario is
+  "the breakout holds while the close stays beyond the line" (up.hold / down.hold).
+- A symmetrical triangle can break either way: its direction is the breakout's, so say
+  "פרץ כלפי מעלה", not "תבנית עלייה".
 - pat_N.target: the book's measure rule (the pattern's height added at the breakout).
   It is a rule of thumb, not a forecast: write "יעד לפי גובה התבנית (לא תחזית)".
 - pat_N.state, pat_N.sessions_since_breakout, pat_N.close_vs_breakout_pct: where the price

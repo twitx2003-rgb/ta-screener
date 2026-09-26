@@ -17,8 +17,11 @@ What the engine computes:
 - sma{50,150,200}.direction and .slope_pct: each average rising, falling or flat over
   the last 10 sessions. Say an average rises only when its direction fact says so.
 - ma.price_vs: the price above all three averages, below all three, or between them.
-- sma50.distance_atr and stretch: how far the price is from the 50-day average in ATRs;
-  from 3 ATRs the price is stretched (stretch).
+- sma50.distance_atr and stretch: from 3 ATRs away from the 50-day average the price is
+  stretched; the stretch fact says it in percent ("רחוק מהרגיל מממוצע 50 יום: 10.4%
+  מעליו"). Never write "ATR" in the text.
+- ma.stack: all three averages in order, or, looser, the price above (below) all three
+  with the 50-day above (below) the 200-day: both are "מגמת עלייה" ("מגמת ירידה").
 - ma.spread_pct and range.*: the three averages bunched within 2% of each other mean no
   trend; range.low / range.high are the lowest low and highest high of about six months.
 

@@ -35,6 +35,8 @@ STACK_HE = {"bullish": "מגמת עלייה: המחיר מעל הממוצעים 
             "unknown": "לא ידוע (אין מספיק היסטוריה)"}
 TREND_HE = {"rising": "עולה", "falling": "יורד", "flat": "יציב"}
 STATUS_HE = {"forming": "בבנייה", "breakout": "פריצה", "busted": "פריצה כושלת", "signal": "אות נר"}
+STATUS_DOWN_HE = {**STATUS_HE, "breakout": "שבירה", "busted": "שבירה כושלת"}
+FIB = "פיבונאצ׳י"
 DIRECTION_HE = {"bullish": "שורי", "bearish": "דובי", "either": "כיוון לא ידוע עדיין"}
 
 
@@ -87,6 +89,20 @@ def _volume_ratio(bars: pd.DataFrame, i: int, sessions: int = 50) -> float:
     before = bars["volume"].iloc[max(0, i - sessions):i].to_numpy(float)
     avg = float(np.nanmean(before)) if len(before) else math.nan
     return float(bars["volume"].iloc[i]) / avg if avg and math.isfinite(avg) else math.nan
+
+
+def volume_words(ratio: float) -> str | None:
+    """One session's volume against the average, in words with the number (round 3: an ordinary
+    volume was told as confirmation, another as low, and a bare ratio read badly)."""
+    if not isinstance(ratio, (int, float)) or not math.isfinite(ratio) or ratio <= 0:
+        return None
+    if ratio >= 1.5:
+        return f"גבוה, פי {ratio:.1f} מהממוצע"
+    if ratio >= 1.15:
+        return f"מעט מעל הממוצע (פי {ratio:.1f})"
+    if ratio > 0.85:
+        return "רגיל, סביב הממוצע"
+    return f"נמוך, כ-{round((1 - ratio) * 100)}% מתחת לממוצע"
 
 
 def _broken_line_now(lines: list[dict], level: float, index: dict[str, int], at_i: int, last: int) -> float:
@@ -159,6 +175,17 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
     f.add("low_52w_distance_pct", max(0.0, (price / low52 - 1) * 100), "כמה הסגירה מעל השפל השנתי", "%", 1)
     f.add("low_52w_sessions_ago", last - lo_i, "לפני כמה ימי מסחר נקבע השפל השנתי", "", 0)
     f.add("volume.last_ratio", _volume_ratio(bars, last), "הנפח ביום האחרון חלקי ממוצע 50 הימים שלפניו", "x", 2)
+    f.add("volume.last", volume_words(_volume_ratio(bars, last)), "הנפח ביום האחרון, במילים")
+    # the busiest session of the last few (round 3: a break on three times the average volume was
+    # left out while a 0.8x day was quoted)
+    recent = [(r, i) for i in range(max(1, last - int(rules["new_extreme_sessions"]) + 1), last + 1)
+              if math.isfinite(r := _volume_ratio(bars, i))]
+    if recent and max(recent)[0] >= 1.8:
+        ratio, i = max(recent)
+        f.add("volume.spike_day", _day(bars, i), "יום הנפח החריג בימים האחרונים")
+        f.add("volume.spike", volume_words(ratio), "הנפח ביום החריג, במילים")
+        f.add("volume.spike_change_pct", _pct(float(close.iloc[i]), float(close.iloc[i - 1])),
+              "שינוי המחיר ביום הנפח החריג", "%", 1)
 
     # moving averages
     stack = ma_stack(close, list(rules["ma_periods"]))
@@ -166,7 +193,14 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
         f.add(f"sma{n}", value, f"ממוצע {n} יום", "$")
         if value is not None and math.isfinite(value):
             f.add(f"vs_sma{n}_pct", _pct(price, value), f"המרחק מממוצע {n}", "%", 1)
-    f.add("ma.stack", STACK_HE[stack["state"]], "סדר הממוצעים")
+    state_he = STACK_HE[stack["state"]]
+    values = {n: v for n, v in stack["values"].items() if v is not None and math.isfinite(v)}
+    if stack["state"] == "mixed" and 50 in values and 200 in values:
+        if price > max(values.values()) and values[50] > values[200]:
+            state_he = "מגמת עלייה: המחיר מעל הממוצעים של 50, 150 ו-200 יום, וממוצע 50 מעל ממוצע 200 (שורי)"
+        elif price < min(values.values()) and values[50] < values[200]:
+            state_he = "מגמת ירידה: המחיר מתחת לממוצעים של 50, 150 ו-200 יום, וממוצע 50 מתחת לממוצע 200 (דובי)"
+    f.add("ma.stack", state_he, "סדר הממוצעים")
     known_ma = [v for v in stack["values"].values() if v is not None and math.isfinite(v)]
     if known_ma:
         f.add("ma.price_vs", ("המחיר מעל כל הממוצעים" if price > max(known_ma) else
@@ -184,8 +218,9 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
         stretch = (price - sma50) / atr_now
         f.add("sma50.distance_atr", stretch, "המרחק מממוצע 50 ביחידות ATR", "ATR", 1)
         if abs(stretch) >= rules["stretch_atr"]:
-            f.add("stretch", f"המחיר מתוח: {abs(stretch):.1f} ATR {'מעל ' if stretch > 0 else 'מתחת ל'}ממוצע 50",
-                  "המחיר רחוק מממוצע 50 (תנועה מהירה; מקום פחות נוח להיכנס)")
+            away = abs(_pct(price, sma50))
+            f.add("stretch", f"המחיר רחוק מהרגיל מממוצע 50 יום: {away:.1f}% {'מעליו' if stretch > 0 else 'מתחתיו'}",
+                  "המחיר רחוק מממוצע 50 יום יותר מפי 3 מהתנודה היומית (תנועה מהירה)")
     known = [v for v in stack["values"].values() if v is not None and math.isfinite(v)]
     if len(known) == len(stack["values"]):
         spread = (max(known) - min(known)) / price * 100
@@ -213,6 +248,13 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
     if math.isfinite(float(hist.iloc[-1])):
         f.add("macd.state", "מעל קו האות" if hist.iloc[-1] > 0 else "מתחת לקו האות", "מצב ה-MACD")
         f.add("macd.zero", "מעל 0" if line.iloc[-1] > 0 else "מתחת ל-0", "MACD ביחס ל-0")
+        if len(hist) > 3 and math.isfinite(float(hist.iloc[-4])):
+            growing = abs(float(hist.iloc[-1])) > abs(float(hist.iloc[-4]))
+            f.add("macd.momentum", ("המומנטום חיובי ומתחזק" if hist.iloc[-1] > 0 and growing else
+                                    "המומנטום חיובי אך נחלש" if hist.iloc[-1] > 0 else
+                                    "המומנטום שלילי ומתחזק כלפי מטה" if growing else
+                                    "המומנטום שלילי אך נחלש"),
+                  "ה-MACD במילים: כיוון המומנטום ב-3 ימי המסחר האחרונים")
 
     # turning points, zones, trendlines, Fibonacci, divergences
     minor = [p for p in pivots(bars, atr, rules["minor_pivot_atr"]) if p.i >= first]
@@ -238,6 +280,8 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
             f.add(f"{key}.broken_sessions_ago", last - j, f"ימי מסחר מאז הפריצה/השבירה של {key}", "", 0)
             f.add(f"{key}.broken_volume_ratio", _volume_ratio(bars, j),
                   f"הנפח ביום הפריצה/השבירה של {key} חלקי ממוצע 50 יום", "x", 2)
+            f.add(f"{key}.broken_volume", volume_words(_volume_ratio(bars, j)),
+                  f"הנפח ביום הפריצה/השבירה של {key}, במילים")
     for tl in trendlines(bars, minor, atr, rules):
         key, now_value = tl.id, tl.at(last)
         slope10 = _pct(tl.at(last), tl.at(last - 10)) if last >= 10 else math.nan
@@ -267,7 +311,7 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
         f.add("fib.retraced_pct", fib.position * 100, "כמה מהתנועה המחיר כבר תיקן", "%", 1)
         for key, value in fib.levels.items():
             ratio = int(key.rsplit("_", 1)[1]) / 10
-            label = (f"הרחבת פיבונאצ'י {ratio:g}%" if "ext" in key else f"תיקון פיבונאצ'י {ratio:g}%")
+            label = (f"הרחבת {FIB} {ratio:g}%: רמה מחושבת מאורך התנועה" if "ext" in key else f"תיקון {FIB} {ratio:g}%")
             f.add(key, value, label, "$")
         d["fib"] = {"type": "fib", "direction": fib.direction, "start_day": fib.start_day,
                     "end_day": fib.end_day, "start": fib.start, "end": fib.end, "levels": fib.levels}
@@ -304,12 +348,18 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
         key, record = f"pat_{n}", det.row() | {"points": det.points, "lines": det.lines}
         spec = specs.get(det.pattern)
         f.add(f"{key}.name", spec.name_he if spec else det.pattern, f"התבנית {key}")
-        f.add(f"{key}.status", STATUS_HE.get(det.status, det.status), f"מצב {key}")
+        statuses = STATUS_DOWN_HE if det.direction == "bearish" else STATUS_HE
+        f.add(f"{key}.status", statuses.get(det.status, det.status), f"מצב {key}")
         f.add(f"{key}.direction", DIRECTION_HE.get(det.direction, det.direction), f"כיוון {key}")
+        down = det.direction == "bearish"
         if det.breakout_date is not None:
-            f.add(f"{key}.breakout_day", det.breakout_date.date().isoformat(), f"יום הפריצה של {key}")
-        f.add(f"{key}.breakout", det.breakout_price, f"קו הפריצה של {key}", "$")
-        if det.status == "breakout" and det.breakout_date is not None and det.direction in ("bullish", "bearish"):
+            f.add(f"{key}.breakout_day", det.breakout_date.date().isoformat(),
+                  f"יום {'השבירה' if down else 'הפריצה'} של {key}")
+        tracked = det.status == "breakout" and det.breakout_date is not None and det.direction in ("bullish", "bearish")
+        if not tracked:                     # a broken line is quoted once, as it is today (line_now)
+            f.add(f"{key}.breakout", det.breakout_price,
+                  f"{'קו השבירה' if down else 'קו הפריצה'} של {key}" + (" (עוד לא נחצה)" if det.status == "forming" else ""), "$")
+        if tracked:
             # where the price is now against the broken line, extended to today (review
             # round 1: a breakdown the price had closed back above was told as live;
             # round 2: a throwback still under a rising line was told as failed)
@@ -339,13 +389,14 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
                   f"מצב {word} של {key} היום")
             f.add(f"{key}.breakout_volume_ratio", _volume_ratio(bars, b),
                   f"הנפח ביום {word} של {key} חלקי ממוצע 50 יום", "x", 2)
+            f.add(f"{key}.breakout_volume", volume_words(_volume_ratio(bars, b)), f"הנפח ביום {word} של {key}, במילים")
             target = float(det.target) if det.target is not None and math.isfinite(float(det.target)) else None
             if target is not None and len(after):
                 hit = after[(after["high"] >= target) if up else (after["low"] <= target)]
                 if len(hit):
                     f.add(f"{key}.target_reached_day", _day(bars, int(hit.index[0])),
                           f"היעד של {key} לפי גובה התבנית כבר הושג ביום")
-        f.add(f"{key}.target", det.target, f"יעד {key} לפי כלל המדידה (לא תחזית)", "$")
+        f.add(f"{key}.target", det.target, f"יעד {key} לפי גובה התבנית", "$")
         f.add(f"{key}.invalidation", invalidation(record, bars), f"רמת הביטול של {key}", "$")
         d[key] = {"type": "pattern", "pattern": det.pattern, "family": det.family,
                   "status": det.status, "direction": det.direction,

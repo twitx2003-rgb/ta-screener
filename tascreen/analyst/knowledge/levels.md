@@ -13,7 +13,14 @@ What the engine computes:
   Only the 3 nearest on each side are kept; the chart draws the 2 nearest.
 - zone_N.distance_pct and level.*.distance_pct: how far the zone's NEAR edge is from the
   close, in percent (0 when the price is inside it). Say which edge: "הקצה הקרוב".
-- zone_N.broken (with broken_day, broken_sessions_ago, broken_volume_ratio): the price
+- The level map (level.r1 / level.r2 above, level.s1 / level.s2 below): the zones, the big
+  turning points, the 52-week extremes and the drawn trendline, nearest first; levels
+  within 1 ATR of each other join one band while it stays within 1.5 ATR. level.*.what
+  names it, level.*.includes says what else sits in it (the yearly extreme, a trendline,
+  an average, a pattern's line), level.*.flipped a role it may have taken after a break.
+  The chart, the levels line and the scenarios all use these same bands; the program
+  writes the levels line and the scenarios, so a section never repeats their numbers.
+- zone_N.broken (with broken_day, broken_sessions_ago, broken_volume): the price
   closed through the zone lately, coming from the other side, and has stayed beyond it:
   a resistance broken upward now sits under the price, a support broken downward above it.
 

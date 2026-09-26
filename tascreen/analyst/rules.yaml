@@ -66,7 +66,14 @@ range_sessions: {value: 120, origin: ours, note: "the range a congested stock ha
 retest_away_atr: {value: 1.0, origin: ours, note: "after moving this far past the broken line, a return to within 1 ATR of it is a retest"}
 new_extreme_sessions: {value: 5, origin: ours, note: "a 52-week high or low this recent is news"}
 pullback_ma50_atr: {value: 1.0, origin: ours, note: "an uptrend's price within this of a rising 50-day average: a pullback to it"}
-scenario_cancel_min_atr: {value: 1.0, origin: ours, note: "a cancel level at least this far from its trigger, from a real level (review round 2: cancel = trigger)"}
-scenario_merge_atr: {value: 0.4, origin: ours, note: "levels this close join one band whatever its width (touching zones)"}
+scenario_cancel_min_atr: {value: 0.5, origin: ours, note: "a trigger band too thin to close back into: the cancel is this far back from the trigger (review round 2: cancel = trigger; round 3: a level further back sat past the close)"}
 closer_min_atr: {value: 0.5, origin: ours, note: "the price is 'closer' to one side only when the gap differs by this much"}
 view_trendline_atr: {value: 2.0, origin: ours, note: "a trendline of 3+ touches this close to the price is drawn and is a level"}
+
+# review round 3 (2026-09-26): the Levels line, the scenarios and the chart each had their
+# own list of levels; cancels sat on the far side of the close; a fresh breakout's scenario
+# ignored the line it broke
+scenario_cancel_band_atr: {value: 0.3, origin: ours, note: "a trigger band at least this wide: a close back into it cancels the scenario (a failed break)"}
+band_confluence_atr: {value: 0.25, origin: ours, note: "an average or a pattern's line this close to a band is named with it"}
+hold_sessions: {value: 5, origin: ours, note: "a breakout this recent, still near its line, makes its scenario 'the breakout holds above the line'"}
+hold_max_atr: {value: 1.5, origin: ours, note: "... while the close is within this of the broken line"}

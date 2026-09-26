@@ -14,6 +14,12 @@ What the engine computes:
 - vp.val / vp.vah: the bottom and top of the value area, the range holding 70% of the volume.
 - volume.ratio: average volume of the last 20 sessions divided by the last 50;
   volume.trend: rising / falling / steady.
+- volume.last, pat_N.breakout_volume, zone_N.broken_volume, volume.spike: the same
+  ratios in words with the number ("גבוה, פי 1.9 מהממוצע", "רגיל, סביב הממוצע", "נמוך, כ-22%
+  מתחת לממוצע"): quote these, never a bare ratio. Normal volume (0.85 to 1.15) confirms
+  nothing; a breakout without high volume is less convincing (a yellow light).
+- volume.spike (with spike_day, spike_change_pct): the busiest session of the last five,
+  from 1.8 times the average: an unusual day worth one clause.
 - volume.last_ratio, pat_N.breakout_volume_ratio, zone_N.broken_volume_ratio: one
   session's volume divided by the average of the 50 sessions before it (1.5 = half as much
   again as usual).

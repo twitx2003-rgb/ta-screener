@@ -748,6 +748,36 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   - scanner (site-wide): a head-and-shoulders neckline must stay on the right side of the
     head and shoulders, and a line extended past the head confirms nothing (a real stock
     "broke out" below both shoulders). Goes into the Saturday backfill with the 10% rule.
+- **Review round 3 (2026-09-26):** same 12 stocks and prompts, 4 at a time. Average 6.35
+  (round 2: 5.92; the round-1 stocks 5.21 -> 6.03 -> 6.32). Every reviewer's first finding:
+  the levels line, the scenarios and the chart used three different lists of levels (the
+  scenarios merged zones into unbounded bands the reader never saw). Fixes:
+  - one level map (`view._plan`): zones, big turning points, 52-week extremes and the drawn
+    trendline join into bands (apart <= 1 ATR, width <= 1.5 ATR, no exceptions). The chart
+    and the Pine Script draw the first two bands per side (`lvl_r1`...), the level facts
+    (`level.r1.low/high/what/includes/flipped/...`) and the scenarios quote the same bands;
+    a scenario level outside them is drawn as its own line or an edge tag (↑/↓) off scale.
+    A trendline the price crossed is not drawn.
+  - scenarios: cancel = a close back into the crossed band (>= 0.3 ATR wide), else half an
+    ATR back from a one-price trigger ("חצי מהתנודה היומית הממוצעת"), never a level past the
+    close; next = the next band's own edges, or the nearest measured level (target or
+    Fibonacci extension); right after a breakout (<= 5 sessions, within 1.5 ATR of its line)
+    "the breakout holds while the close stays beyond the line" (`up.hold` / `down.hold`).
+  - the program writes the levels line too (`writer.levels_part`); the model writes only the
+    headline (lead in bold, then the event) and <= 2 optional sections. Scenarios in three
+    lines, bases named ("רמת ההפעלה", never "רמת הכניסה"); blank line between sections;
+    company name in the header.
+  - facts in words: volume (`*_volume`, `volume.spike`), `macd.momentum` (from the
+    histogram's direction), stretch in percent; bearish statuses "שבירה"; one line per
+    pattern (`line_now`, no second `breakout` number); looser uptrend/downtrend call;
+    flipped zones "עשויה לשמש"; an intraday new extreme on a day that closed the other way.
+  - writer checks: no ATR / תנופה / קו האות / רצועה; no undrawn trendline; "(לא תחזית)"
+    stripped (the footer says it); the repeat check ignores MA periods.
+  - chart: one label size (two lines instead of shrinking), one number for one price, every
+    line with its price, 150-day grey dashed and 200-day light (not three purples), volume
+    scale capped at 3x the median, the breakout marker on the side it broke to, "יומי".
+  - Not done (need the owner or data): pattern quality in the scanner (triangle touches,
+    cup depth), earnings dates, relative strength, gaps, pattern statistics (own ledger only).
 - **Flat lines are flat (owner, 2026-09-25): `flat_line_max_drift` 0.25 -> 0.10.** At 0.25 a
   top that rose (NFLX, both lines rising) passed as an ascending triangle and a falling top
   with a rising bottom too. Measured on every stored stock (scratch script, not kept):

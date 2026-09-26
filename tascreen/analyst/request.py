@@ -56,7 +56,7 @@ def produce(symbol: str, bars: pd.DataFrame, folder: Path, *, llm: LLM | None = 
     pine.write_text(pine_script(analysis, bars), encoding="utf-8")
     written = message = None
     if llm is not None:
-        written = writer.write(analysis, llm)
+        written = writer.write(analysis, llm, name=name)
         message = writer.telegram_html(written)
         (folder / f"{stem}.written.json").write_text(json.dumps(written, ensure_ascii=False, indent=1),
                                                      encoding="utf-8")

@@ -10,6 +10,9 @@ What the engine computes:
   below 30 oversold (מכירת יתר), otherwise neutral.
 - MACD 12/26/9: macd (fast minus slow average), macd.signal (its 9-session average),
   macd.hist (the difference); macd.state above/below the signal line, macd.zero above/below 0.
+  macd.momentum says it in words, from whether the histogram grew over 3 sessions: below
+  zero and growing is "המומנטום שלילי ומתחזק כלפי מטה" (a decline gaining speed), not
+  a weakening one. Quote macd.momentum; never "תנופה" or "קו האות".
 - Divergences: two consecutive turning points of the same kind where the price makes a
   higher high but RSI or MACD a lower high (bearish, דובית), or the price a lower low and
   the indicator a higher low (bullish, שורית); the second point must be recent.
