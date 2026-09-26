@@ -28,6 +28,7 @@
 {%- endmacro %}
 
 {% block content %}
+<h1 class="sr-only">סורק מניות לפי תבניות</h1>
 <div class="layout{% if static %} solo{% endif %}">
   {% if not static %}
   <details class="filters" id="filters" open>
@@ -154,7 +155,7 @@
       {% set active = query.active(rules) %}
       {% if active and not static %}
       <div class="active">
-        {% for text, url in active %}<a class="chip accent" href="{{ url }}" title="הסרת הסינון">{{ text }} <span class="x">✕</span></a>{% endfor %}
+        {% for text, url in active %}<a class="chip accent" href="{{ url }}" title="הסרת הסינון">{{ text }} <span class="x" aria-hidden="true">✕</span><span class="sr-only">(הסרת הסינון)</span></a>{% endfor %}
       </div>
       {% endif %}
     </div>

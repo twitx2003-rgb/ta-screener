@@ -9,7 +9,7 @@
     <li>
       <a href="{{ url }}" {% if sidebar.current == c.id %}aria-current="page"{% endif %}>
         <span class="hash">#</span><span class="cname">{{ c.name[1:] }}</span>
-        {% if c.id in sidebar.fresh %}<span class="new-dot" title="פוסטים חדשים"></span>{% endif %}
+        {% if c.id in sidebar.fresh %}<span class="new-dot" title="פוסטים חדשים" aria-hidden="true"></span><span class="sr-only">(פוסטים חדשים)</span>{% endif %}
         {% if c.id != GENERAL %}<span class="ccount num" title="זיהויים בסריקה האחרונה">{{ c.count }}</span>{% endif %}
       </a>
     </li>
@@ -26,4 +26,4 @@
     <li><a href="/status" {% if path == "/status" %}aria-current="page"{% endif %}>מצב הנתונים</a></li>
   </ul>
 </nav>
-<button class="theme-toggle" type="button" id="theme-toggle">מצב כהה / בהיר</button>
+<button class="theme-toggle" type="button" id="theme-toggle" aria-pressed="false">מצב בהיר</button>

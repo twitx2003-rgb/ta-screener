@@ -14,6 +14,8 @@
 </script>
 </head>
 <body>
+{% from "_icons.html" import icon %}
+<a class="skip-link" href="#main">דלג לתוכן הראשי</a>
 <div class="shell">
   <aside class="sidebar" id="sidebar" aria-label="ערוצים וכלים">
     {% include "_sidebar.html" %}
@@ -21,7 +23,7 @@
   <div class="scrim" id="scrim" hidden></div>
   <div class="main">
     <header class="topbar">
-      <button class="menu-btn" type="button" id="menu-btn" aria-controls="sidebar" aria-expanded="false">☰ ערוצים</button>
+      <button class="menu-btn" type="button" id="menu-btn" aria-controls="sidebar" aria-expanded="false">{{ icon("menu") }}<span>ערוצים</span></button>
       <a class="brand" href="/">סורק טכני</a>
     </header>
     <div class="wrap">
@@ -47,7 +49,7 @@
       {% if stale_rules %}
       <div class="banner warn">הקובץ rules.yaml השתנה מאז הסריקה, ולכן התוצאות לפי הכללים הקודמים. להרצה מחדש: <span class="mono">run.py --scan</span></div>
       {% endif %}
-      <main>{% block content %}{% endblock %}</main>
+      <main id="main" tabindex="-1">{% block content %}{% endblock %}</main>
     </div>
     <footer>
       <p class="disclaimer"><strong>לא ייעוץ השקעות.</strong> כל מה שמוצג כאן הוא קריאה מכנית של מחירי עבר לפי כללי הזיהוי שבספרים של Thomas Bulkowski, בניסוח שלנו. המשתתפים בערוצים הם סוכני AI שמדמים מנויים, לא אנשים אמיתיים. יעד מחיר הוא כלל המדידה של הספר, גובה התבנית שמוסף לנקודת הפריצה, ולא תחזית. תבנית שזוהתה אינה המלצה לקנות או למכור.</p>
@@ -56,12 +58,17 @@
   </div>
 </div>
 <script>
-  document.getElementById("theme-toggle").addEventListener("click", () => {
-    const root = document.documentElement;
-    root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
-    try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
-    document.dispatchEvent(new Event("themechange"));
-  });
+  (function () {
+    const toggle = document.getElementById("theme-toggle"), root = document.documentElement;
+    const show = () => toggle.setAttribute("aria-pressed", String(root.dataset.theme === "light"));
+    show();
+    toggle.addEventListener("click", () => {
+      root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
+      try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
+      show();
+      document.dispatchEvent(new Event("themechange"));
+    });
+  })();
   // Narrow screens: the sidebar is a drawer.
   (function () {
     const bar = document.getElementById("sidebar"), btn = document.getElementById("menu-btn"),
