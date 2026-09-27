@@ -196,3 +196,10 @@ def test_after_three_months_the_owner_is_told_once_and_nothing_is_read(tmp_path)
     assert sent == [xnews.ENDED_TEXT]
     with pytest.raises(ConfigError):
         XNewsSettings(until="three months")
+
+
+def test_an_empty_page_ends_the_paging_even_if_more_are_offered(tmp_path):
+    reader = FakeReader({"tweets": [row("71")], "has_next_page": True, "next_cursor": "c2"},
+                        {"tweets": [], "has_next_page": True, "next_cursor": "c3"})
+    summary, _ = run(tmp_path, reader, picker(), [])
+    assert summary["calls"] == 2 and summary["read"] == 1

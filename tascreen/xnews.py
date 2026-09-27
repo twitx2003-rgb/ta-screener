@@ -104,11 +104,13 @@ class XSource:
             cursor = ""
             for _ in range(MAX_PAGES):
                 page = self.search_page(query, cursor)
-                for row in pick(page, ("tweets",), context="X search") or []:
+                rows = pick(page, ("tweets",), context="X search") or []
+                for row in rows:
                     post = to_post(row)
                     if with_replies or not post.is_reply:
                         found[post.id] = post
-                if not page.get("has_next_page") or not page.get("next_cursor"):
+                # the service can offer a next page that is empty (live, 2026-09-27): each is paid
+                if not rows or not page.get("has_next_page") or not page.get("next_cursor"):
                     break
                 cursor = str(page["next_cursor"])
         return sorted(found.values(), key=lambda p: (len(p.id), p.id))
