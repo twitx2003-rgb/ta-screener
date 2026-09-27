@@ -137,6 +137,13 @@ class Telegram:
             params["parse_mode"] = "HTML"
         self._answer("sendPhoto", self._upload("sendPhoto", params, ("photo", filename, content, "image/png")))
 
+    def send_photo_url(self, url: str, caption: str = "", *, html: bool = False) -> None:
+        """A photo Telegram fetches itself from `url` (the X news: pictures on pbs.twimg.com)."""
+        params = {"chat_id": self._chat(), "photo": url, "caption": caption[:1024]}
+        if html:
+            params["parse_mode"] = "HTML"
+        self.call("sendPhoto", **params)
+
     ALBUM = 10                          # Telegram: 2..10 photos in one media group
 
     def send_album(self, photos: list[tuple[bytes, str]]) -> None:

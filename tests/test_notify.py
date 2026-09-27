@@ -60,3 +60,11 @@ def test_run_messages():
     failed = run_message({"session": "2026-09-23", "due": True, "update_error": "ProviderError"},
                          "failure", run_url="https://github.com/x/runs/1")
     assert "ProviderError" in failed and "https://github.com/x/runs/1" in failed
+
+
+def test_a_photo_by_address():
+    calls = []
+    bot = Telegram(TOKEN, 7, post=lambda method, params: calls.append((method, params)) or {"ok": True})
+    bot.send_photo_url("https://pbs.twimg.com/media/synthetic.jpg", "<b>x</b>", html=True)
+    assert calls == [("sendPhoto", {"chat_id": 7, "photo": "https://pbs.twimg.com/media/synthetic.jpg",
+                                    "caption": "<b>x</b>", "parse_mode": "HTML"})]

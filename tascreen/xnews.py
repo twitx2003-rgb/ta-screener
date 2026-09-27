@@ -41,7 +41,8 @@ QUERY_ACCOUNTS = 10          # accounts per search call ("from:a OR from:b ...")
 MAX_PAGES = 5                # pages of up to 20 posts per call; more than 100 new posts in 10 minutes is a flood
 OVERLAP_S = 120              # each search starts a little before the last one ended; ids dedupe
 SENT_KEPT = 2000             # post ids remembered so a post is never judged or sent twice
-SUMMARY_MAX = 400
+SUMMARY_MAX = 220            # the owner wants it short (2026-09-27): one sentence
+PHOTO_HOST = "https://pbs.twimg.com/"
 
 
 def account_name(raw: str) -> str:
@@ -59,6 +60,7 @@ class Post:
     url: str
     created_at: str
     is_reply: bool
+    photo: str = ""              # the first attached photo's address, if any
 
 
 class XSource:
@@ -125,7 +127,21 @@ def to_post(row: dict) -> Post:
         f"https://x.com/{name}/status/{post_id}"
     return Post(id=post_id, author=str(name), text=str(pick(row, ("text",), context=context)),
                 url=str(url), created_at=str(pick(row, ("createdAt",), context=context, allow_null=True) or ""),
-                is_reply=bool(pick(row, ("isReply",), context=context, allow_null=True)))
+                is_reply=bool(pick(row, ("isReply",), context=context, allow_null=True)), photo=first_photo(row))
+
+
+def first_photo(row: dict) -> str:
+    """The first photo attached to a post, or "". Checked live (2026-09-27): media sit in
+    extendedEntities.media[], each with `type` ("photo", "video", "animated_gif") and
+    `media_url_https` on pbs.twimg.com. A post without media has no such list, which is
+    not an error; a video's still frame is not taken."""
+    media = (row.get("extendedEntities") or {}).get("media") if isinstance(row.get("extendedEntities"), dict) else None
+    for item in media if isinstance(media, list) else []:
+        if isinstance(item, dict) and item.get("type") == "photo":
+            url = str(item.get("media_url_https") or "")
+            if url.startswith(PHOTO_HOST):
+                return url
+    return ""
 
 
 # --- the owner's key -------------------------------------------------------------------
@@ -182,8 +198,9 @@ Rate each picked post 1-5 (5 = market-moving now; 4 = clearly relevant to specif
 stocks today; 3 or lower = only mildly interesting). Return an empty list when nothing
 qualifies; that is the usual case.
 
-For each pick write `summary_he`: 1-2 short sentences of plain Hebrew saying what
-happened and which tickers / market it touches. Use ONLY facts in the post: no numbers,
+For each pick write `summary_he`: ONE short sentence of plain Hebrew, at most about 15
+words, saying what happened and which tickers / market it touches. No preamble, no
+source name (it is shown separately), no filler. Use ONLY facts in the post: no numbers,
 names or causes that are not written there, no advice, no predictions. Keep tickers and
 company names in English. `post_id` must be copied exactly from the input."""
 
@@ -233,20 +250,42 @@ def triage(posts: list[Post], llm, min_importance: int) -> tuple[list[tuple[Post
     return [(p, picks[p.id]) for p in posts if p.id in picks], rejected
 
 
+def item(post: Post, pick_: dict) -> str:
+    """One pick in Telegram HTML, as short as it can be: mark, account, the sentence, a link."""
+    mark = "🔴" if pick_["importance"] >= 5 else "🟠"
+    return (f"{mark} <b>{html.escape(post.author)}</b>: {html.escape(pick_['summary_he'])} "
+            f'<a href="{html.escape(post.url, quote=True)}">↗</a>')
+
+
 def message(picks: list[tuple[Post, dict]]) -> str:
-    """One Telegram HTML message for this run's picks (Telegram allows 4096 characters)."""
-    parts = []
-    for post, pick_ in picks:
-        mark = "🔴" if pick_["importance"] >= 5 else "🟠"
-        parts.append(f"{mark} <b>@{html.escape(post.author)}</b>\n{html.escape(pick_['summary_he'])}\n"
-                     f'<a href="{html.escape(post.url, quote=True)}">לציוץ</a>')
+    """One Telegram HTML message for these picks (Telegram allows 4096 characters)."""
+    parts = [item(post, pick_) for post, pick_ in picks]
     # whole items only: a cut inside a tag makes Telegram refuse the HTML
     for shown in range(len(parts), 0, -1):
         rest = len(parts) - shown
-        text = "📰 חדשות מ-X\n\n" + "\n\n".join(parts[:shown]) + (f"\n\n(ועוד {rest})" if rest else "")
+        text = "\n\n".join(parts[:shown]) + (f"\n\n(ועוד {rest})" if rest else "")
         if len(text) <= 4000:
             return text
-    return "📰 חדשות מ-X\n\n" + parts[0][:3900]
+    return parts[0][:3900]
+
+
+def deliver(picks: list[tuple[Post, dict]], send: Callable[[str], None],
+            send_photo: Callable[[str, str], None] | None) -> int:
+    """The picks without a photo in one message, then each photo with its line as the
+    caption (under Telegram's 1024). A photo Telegram cannot fetch goes as text instead.
+    Returns how many went with a photo."""
+    with_photo = [(p, k) for p, k in picks if p.photo and send_photo is not None and len(item(p, k)) <= 1024]
+    plain = [(p, k) for p, k in picks if (p, k) not in with_photo]
+    if plain:
+        send(message(plain))
+    photos = 0
+    for post, pick_ in with_photo:
+        try:
+            send_photo(post.photo, item(post, pick_))
+            photos += 1
+        except ProviderError:
+            send(message([(post, pick_)]))
+    return photos
 
 
 # --- one run ------------------------------------------------------------------------------
@@ -258,17 +297,18 @@ LIMIT_PAUSE_S = 3600         # after the subscription's usage limit, no model ca
 
 def _post_row(post: Post, added: int) -> dict:
     return {"id": post.id, "author": post.author, "text": post.text, "url": post.url,
-            "created_at": post.created_at, "added": added}
+            "created_at": post.created_at, "photo": post.photo, "added": added}
 
 
 def _row_post(row: dict) -> Post:
     return Post(id=str(row["id"]), author=str(row["author"]), text=str(row["text"]), url=str(row["url"]),
-                created_at=str(row.get("created_at", "")), is_reply=False)
+                created_at=str(row.get("created_at", "")), is_reply=False, photo=str(row.get("photo", "")))
 
 
 def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], Any], send: Callable[[str], None],
              state_path: Path, now: datetime, min_importance: int, daily_read_cap: int,
              llm_daily_cap: int = 45, llm_min_interval_s: int = 1200,
+             send_photo: Callable[[str, str], None] | None = None,
              first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
     """Read, pick, send, remember. Returns counts only (safe for the public log).
 
@@ -323,7 +363,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             summary["judged"] = len(pending)
             pending = []
         if picks:
-            send(message(picks))
+            summary["photos"] = deliver(picks, send, send_photo)
         summary["sent"] = len(picks)
     elif pending and model["calls"] >= llm_daily_cap:
         status = "claude daily cap"

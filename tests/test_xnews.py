@@ -203,3 +203,47 @@ def test_an_empty_page_ends_the_paging_even_if_more_are_offered(tmp_path):
                         {"tweets": [], "has_next_page": True, "next_cursor": "c3"})
     summary, _ = run(tmp_path, reader, picker(), [])
     assert summary["calls"] == 2 and summary["read"] == 1
+
+
+def photo_row(post_id, kind="photo", url="https://pbs.twimg.com/media/synthetic.jpg"):
+    return {**row(post_id), "extendedEntities": {"media": [{"type": kind, "media_url_https": url}]}}
+
+
+def test_only_a_real_photo_is_taken():
+    assert xnews.to_post(photo_row("81")).photo == "https://pbs.twimg.com/media/synthetic.jpg"
+    assert xnews.to_post(photo_row("82", kind="video")).photo == ""
+    assert xnews.to_post(photo_row("83", url="https://evil.example/x.jpg")).photo == ""
+    assert xnews.to_post(row("84")).photo == "" and xnews.to_post({**row("85"), "extendedEntities": None}).photo == ""
+
+
+def test_a_pick_with_a_photo_goes_as_a_photo_and_the_rest_as_one_short_message(tmp_path):
+    page = {"tweets": [photo_row("91"), row("92")], "has_next_page": False}
+    llm = picker({"post_id": "91", "importance": 5, "summary_he": "חדשה עם גרף"},
+                 {"post_id": "92", "importance": 4, "summary_he": "חדשה בלי תמונה"})
+    sent, photos = [], []
+    summary, _ = run(tmp_path, FakeReader(page), llm, sent, send_photo=lambda u, c: photos.append((u, c)))
+    assert summary["sent"] == 2 and summary["photos"] == 1
+    assert sent == ['🟠 <b>NewsDesk</b>: חדשה בלי תמונה <a href="https://x.com/NewsDesk/status/92">↗</a>']
+    assert photos == [("https://pbs.twimg.com/media/synthetic.jpg",
+                       '🔴 <b>NewsDesk</b>: חדשה עם גרף <a href="https://x.com/NewsDesk/status/91">↗</a>')]
+
+
+def test_a_photo_telegram_cannot_fetch_goes_as_text(tmp_path):
+    def refused(url, caption):
+        raise ProviderError("Telegram sendPhoto: wrong file identifier")
+
+    sent = []
+    summary, _ = run(tmp_path, FakeReader({"tweets": [photo_row("95")], "has_next_page": False}),
+                     picker({"post_id": "95", "importance": 5, "summary_he": "חדשה"}), sent, send_photo=refused)
+    assert summary["photos"] == 0 and len(sent) == 1 and "status/95" in sent[0]
+
+
+def test_a_waiting_post_keeps_its_photo(tmp_path):
+    llm = picker({"post_id": "97", "importance": 5, "summary_he": "חדשה"})
+    run(tmp_path, FakeReader({"tweets": [row("96")], "has_next_page": False}), llm, [], llm_min_interval_s=1200)
+    run(tmp_path, FakeReader({"tweets": [photo_row("97")], "has_next_page": False}), llm, [],
+        now=datetime(2026, 1, 5, 15, 10, tzinfo=timezone.utc), llm_min_interval_s=1200)       # waits
+    photos = []
+    run(tmp_path, FakeReader(), llm, [], now=datetime(2026, 1, 5, 15, 20, tzinfo=timezone.utc),
+        llm_min_interval_s=1200, send_photo=lambda u, c: photos.append(u))
+    assert photos == ["https://pbs.twimg.com/media/synthetic.jpg"]

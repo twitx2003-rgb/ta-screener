@@ -996,6 +996,7 @@ def xnews_pass(settings) -> int:
         accounts=list(cfg.accounts), source=_x_source(),
         llm_factory=lambda: ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s),
         send=lambda text: bot.send(text, html=True),
+        send_photo=lambda url, caption: bot.send_photo_url(url, caption, html=True),
         state_path=state_path, now=now,
         min_importance=cfg.min_importance, daily_read_cap=cfg.daily_read_cap,
         llm_daily_cap=cfg.claude_daily_cap, llm_min_interval_s=cfg.claude_every_minutes * 60,
