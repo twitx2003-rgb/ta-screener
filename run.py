@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from tascreen.config import load_settings
-from tascreen.errors import ScreenerError
+from tascreen.errors import ConfigError, ScreenerError
 from tascreen.logging_setup import setup_logging
 
 log = logging.getLogger("run")
@@ -85,18 +85,16 @@ def build_parser() -> argparse.ArgumentParser:
                              "a screener pass, --limit N get-ohlcv calls, default 300) and one "
                              "Claude call; prints counts and timings only (public logs)")
     parser.add_argument("--ci-tick", action="store_true",
-                        help="GitHub Actions: do whatever is due now (the daily update and the "
-                             "channels after a session closes); logs/ci_summary.json gets counts "
+                        help="GitHub Actions: do whatever is due now (the daily update after a "
+                             "session closes, then the evening alerts); logs/ci_summary.json gets counts "
                              "only, for the public log")
-    parser.add_argument("--no-channels", action="store_true",
-                        help="With --ci-tick: skip the channels (a test run)")
     parser.add_argument("--max-minutes", type=float, metavar="M",
                         help="With --update/--bars/--ci-tick: stop fetching bars after M minutes "
                              "(the rest are deferred to the next run); with --ci-live: start the "
                              "continuation after M minutes (default 345)")
-    parser.add_argument("--export-site", metavar="DIR",
-                        help="Write the website as static files to DIR (for Vercel): every page, "
-                             "no live data")
+    parser.add_argument("--export-webhook", metavar="DIR",
+                        help="Write what Vercel serves to DIR: only the Telegram bot's webhook "
+                             "(the website was removed)")
     parser.add_argument("--setup-telegram", action="store_true",
                         help="Connect your private Telegram bot (made with @BotFather): asks for "
                              "its token (hidden), finds your chat, sends a test message")
@@ -134,26 +132,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="With --ci-analyze: the analyses kept so far (one folder per UTC day)")
     parser.add_argument("--daily-limit", type=int, default=10,
                         help="With --ci-analyze: analyses per UTC day, at most")
-    parser.add_argument("--quotes", action="store_true",
-                        help="Fetch every stock's last price once from TradingView's screener "
-                             "-> data/quotes/ (the website shows them and live pattern crossings)")
-    parser.add_argument("--live", action="store_true",
-                        help="Keep running: quotes every live.interval_minutes during the US "
-                             "session, then the daily update (universe, bars, scan) after the close")
-    parser.add_argument("--channels", action="store_true",
-                        help="Write today's discussion channels: simulated members (AI agents) discuss "
-                             "the most common patterns, through Claude Code (run from a normal terminal)")
-    parser.add_argument("--redraw-charts", action="store_true",
-                        help="Draw the channel chart images again with the current chart style "
-                             "(no model calls)")
-    parser.add_argument("--force", action="store_true",
-                        help="With --channels: write channels again even if already written today")
-    parser.add_argument("--serve", action="store_true",
-                        help="Open the website on http://127.0.0.1:<web.port>/ (this computer only; "
-                             "reads the newest scan, never calls TradingView)")
     parser.add_argument("--limit", type=int, metavar="N",
                         help="With --bars/--update/--backfill-outcomes: only the N largest "
                              "symbols (a pilot run)")
+    parser.add_argument("--setup-x", action="store_true",
+                        help="Save the twitterapi.io key (asked for, never shown) and test it")
+    parser.add_argument("--x-discover", metavar="ACCOUNT",
+                        help="One real search for an X account: print the answer's keys (no post text)")
+    parser.add_argument("--xnews", action="store_true",
+                        help="One pass: new posts of xnews.accounts -> Claude picks -> Telegram "
+                             "(normal terminal or xnews.yml)")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -490,16 +478,16 @@ def ci_probe(settings, calls: int | None) -> int:
     from tascreen.llm import ClaudeCodeLLM
 
     report = probe(settings, make_tradingview(settings),
-                   lambda: ClaudeCodeLLM(model=settings.channels.model, effort="low", timeout_s=180),
+                   lambda: ClaudeCodeLLM(model=settings.claude.model, effort="low", timeout_s=180),
                    calls=calls or 300)
     print(json.dumps(report, indent=2))
     return 0 if report["tradingview"].get("ok") and report["claude"].get("ok") else 1
 
 
-def ci_tick(settings, limit: int | None, max_minutes: float | None, with_channels: bool) -> int:
+def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
     """What is due now on a GitHub runner. The daily update runs when the last completed
     session has no complete update yet (a run cut short, e.g. by a throttled TradingView,
-    is finished by the next one); then the channels. The public log shows only
+    is finished by the next one); then the evening alerts. The public log shows only
     logs/ci_summary.json: dates, counts and error class names."""
     from datetime import datetime, timedelta, timezone
 
@@ -532,17 +520,6 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None, with_channel
                                ("symbols_in_universe", "symbols_scanned", "detections")}
         summary["outcomes"] = store.read_outcomes_meta().get("updated_at")
         complete = code == 0 and deferred == 0 and bool(scans) and scans[-1] == target
-        if with_channels and settings.channels.enabled and scans and scans[-1] == target:
-            try:
-                channels(settings)
-            except ScreenerError as exc:
-                summary["channels_error"] = type(exc).__name__
-            report = _read_log_json(settings, "channels_last_run.json").get("channels", {})
-            summary["channels"] = {
-                "written": sum(1 for v in report.values() if isinstance(v, dict)),
-                "already": sum(1 for v in report.values() if v == "already written"),
-                "failed": sum(1 for v in report.values() if str(v).startswith("failed")),
-                "skipped": sum(1 for v in report.values() if str(v).startswith("skipped"))}
         store.write_live_state({"daily_update_for": target.isoformat(), "complete": complete,
                                 "exit_code": code,
                                 "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
@@ -703,16 +680,16 @@ def ci_live(settings, max_minutes: float) -> int:
                 bars = client.with_session(lambda session: alerts.fetch_bars(session, symbols, day))
             except (ScreenerError, OSError, TimeoutError, ExceptionGroup):
                 bars = {}
-            photos = alerts.crossing_photos(found, bars.get, at, tz, cfg.site_url, news)
+            photos = alerts.crossing_photos(found, bars.get, at, tz, news)
             try:
                 if len(photos) == len(found):       # each crossing with its pattern's chart
                     bot.send_album(photos)
                 else:
-                    bot.send(alerts.live_message(found, at, tz, cfg.site_url, news), html=True)
+                    bot.send(alerts.live_message(found, at, tz, news), html=True)
                     if photos:
                         bot.send_album(photos)
             except (ScreenerError, OSError):
-                bot.send(alerts.live_message(found, at, tz, cfg.site_url, news), html=True)
+                bot.send(alerts.live_message(found, at, tz, news), html=True)
             summary["charts"] = summary.get("charts", 0) + len(photos)
             live = sent.setdefault("live", {})
             for c in found:
@@ -737,10 +714,10 @@ def _read_log_json(settings, name: str) -> dict:
         return {}
 
 
-def export_site(settings, out: str) -> int:
-    from tascreen.web.export import export_site as export
+def export_webhook(out: str) -> int:
+    from tascreen.web.export import export_webhook as export
 
-    report = export(settings, Path(out))
+    report = export(Path(out))
     print(json.dumps(report))
     return 0
 
@@ -816,9 +793,7 @@ def ci_notify(settings, status: str) -> int:
     if os.environ.get("GITHUB_RUN_ID"):
         run_url = (f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
                    f"{os.environ.get('GITHUB_REPOSITORY', '')}/actions/runs/{os.environ['GITHUB_RUN_ID']}")
-    site_file = settings.log_dir / "site-url.txt"
-    site = site_file.read_text(encoding="utf-8").strip() if site_file.exists() else ""
-    text = run_message(_read_log_json(settings, "ci_summary.json"), status, run_url, site)
+    text = run_message(_read_log_json(settings, "ci_summary.json"), status, run_url)
     if not text:
         print("telegram: nothing to report")
         return 0
@@ -834,7 +809,7 @@ def _analyst_llm(settings):
     from tascreen.analyst import writer
     from tascreen.llm import ClaudeCodeLLM
 
-    cfg = settings.channels
+    cfg = settings.claude
     return ClaudeCodeLLM(model=cfg.model, effort=writer.EFFORT, timeout_s=cfg.timeout_s)
 
 
@@ -944,193 +919,89 @@ def scan_symbol(settings, symbol: str) -> int:
     return 0
 
 
-def serve(settings) -> int:
-    import threading
-    import webbrowser
+def setup_x(settings) -> int:
+    import getpass
+    import time
 
-    import uvicorn
+    from tascreen import xnews
 
-    from tascreen.web.app import HOST, create_app
-
-    url = f"http://{HOST}:{settings.web.port}/"
-    print(f"\nThe screener is at {url} (this computer only). Ctrl+C stops it.\n")
-    if settings.web.open_browser:
-        threading.Timer(1.5, webbrowser.open, (url,)).start()
-    uvicorn.run(create_app(settings), host=HOST, port=settings.web.port, log_level="warning")
+    print("\nחיבור השירות שקורא ציוצים מ-X. הדבק את המפתח מהאתר twitterapi.io ולחץ Enter.")
+    print("המפתח לא יוצג על המסך בזמן ההדבקה, וזה תקין.\n")
+    key = getpass.getpass("Key: ").strip()
+    if not key:
+        print("\nלא הודבק מפתח.\n")
+        return 1
+    try:
+        xnews.XSource(key).search_page(f"from:Reuters since_time:{int(time.time()) - 3600}")
+    except ScreenerError as exc:
+        print(f"\nהמפתח לא עובד: {exc}\n")
+        return 1
+    path = xnews.save_key(key)
+    print(f"\nהמפתח עובד ונשמר במחשב: {path}")
+    print("עכשיו שמור אותו גם ב-GitHub (Settings > Secrets and variables > Actions):")
+    print("  X_API_KEY = אותו מפתח שהדבקת עכשיו\n")
     return 0
 
 
-def refresh_quotes(settings, client=None) -> dict:
+def _x_source():
+    from tascreen import xnews
+
+    key = xnews.key_from_environment()
+    if not key:
+        raise ConfigError("no twitterapi.io key: run `run.py --setup-x` (or set X_API_KEY)")
+    return xnews.XSource(key)
+
+
+def x_discover(settings, account: str) -> int:
+    """The real answer's shape, so the fields in tascreen/xnews.py are confirmed, not guessed."""
+    import time
+
+    from tascreen import xnews
+
+    name = xnews.account_name(account)
+    page = _x_source().search_page(f"from:{name} since_time:{int(time.time()) - 7 * 86400}")
+    print(f"answer keys: {sorted(page)}")
+    tweets = page.get("tweets")
+    print(f"tweets: {type(tweets).__name__}, {len(tweets) if isinstance(tweets, list) else '-'} on this page")
+    if isinstance(tweets, list) and tweets and isinstance(tweets[0], dict):
+        first = tweets[0]
+        print(f"post keys: {sorted(first)}")
+        if isinstance(first.get("author"), dict):
+            print(f"author keys: {sorted(first['author'])}")
+        post = xnews.to_post(first)
+        print(f"parsed: id={post.id} author={post.author} reply={post.is_reply} "
+              f"created={post.created_at} text={len(post.text)} chars")
+    return 0
+
+
+def xnews_pass(settings) -> int:
     from datetime import datetime, timezone
 
-    from tascreen.market_hours import live_session
-    from tascreen.quotes import fetch_quotes
-    from tascreen.store import Store
-
-    client = client or make_tradingview(settings)
-    frame, summary = client.with_session(lambda session: fetch_quotes(
-        session, settings.universe, delays=settings.tradingview.rate_limit_delays))
-    session = live_session(datetime.now(timezone.utc), market_tz=settings.market.timezone,
-                           after_close_minutes=settings.live.after_close_minutes)
-    summary["session"] = session.isoformat() if session else None
-    Store(settings.data_dir).write_quotes(frame, summary)
-    return summary
-
-
-def quotes(settings) -> int:
-    summary = refresh_quotes(settings)
-    print(f"\nQuotes: {summary['rows']} stocks in {summary['seconds']:.0f} s "
-          f"({summary['calls']} calls)"
-          + ("" if summary["complete"] else f", {summary['missing']} missed (moved across a band edge)"))
-    print(f"  session: {summary['session'] or 'none - the market is closed; prices are the last close'}\n")
-    return 0
-
-
-def live(settings) -> int:
-    import time as clock
-    from datetime import datetime, timedelta, timezone
-
-    from tascreen.market_hours import live_session, next_open
-    from tascreen.store import Store
-    from tascreen.tv.data import RateLimited
-
-    store, cfg, tz = Store(settings.data_dir), settings.live, settings.market.timezone
-    client = make_tradingview(settings)
-    writer = None
-    if settings.channels.enabled:
-        try:
-            writer = make_channel_writer(settings)
-        except ScreenerError as exc:
-            # Inside Claude Code (CLAUDECODE=1) the agents cannot be run; quotes still are.
-            log.warning("channels are off in this run: %s", exc)
-    print(f"\nLive: every stock's price every {cfg.interval_minutes:g} min during the US session"
-          + (", then the daily update after the close" if cfg.update_after_close else "")
-          + (", with channel posts" if writer is not None else ", channels off")
-          + ". Ctrl+C stops.\n")
-    wait = cfg.interval_minutes          # grows while the screener keeps answering 429
-    try:
-        while True:
-            now = datetime.now(timezone.utc)
-            if live_session(now, market_tz=tz, after_close_minutes=cfg.after_close_minutes):
-                started = clock.monotonic()
-                try:
-                    s = refresh_quotes(settings, client)
-                    wait = cfg.interval_minutes
-                    log.info("quotes: %d stocks, %d calls, %.0f s%s", s["rows"], s["calls"],
-                             s["seconds"], "" if s["complete"] else f", {s['missing']} missed")
-                    if writer is not None:
-                        try:
-                            live_channel_posts(settings, writer)
-                        except ScreenerError as exc:
-                            log.error("live channel posts failed: %s", exc)
-                except RateLimited as exc:
-                    # Knocking every few minutes on a scanner that answers 429 for hours
-                    # only prolongs it: back off, doubling up to 30 minutes.
-                    wait = min(wait * 2, max(30.0, cfg.interval_minutes))
-                    log.warning("screener rate limited (%s); next try in %g min", exc, wait)
-                except ScreenerError as exc:
-                    log.error("quotes failed: %s", exc)
-                clock.sleep(max(5.0, wait * 60 - (clock.monotonic() - started)))
-                continue
-            target = _target(settings)
-            done_for = store.read_live_state().get("daily_update_for")
-            if cfg.update_after_close and done_for != target.isoformat():
-                deadline = next_open(now, market_tz=tz) - timedelta(minutes=10)
-                log.info("daily update for %s (bars stop by %s)", target, deadline)
-                try:
-                    code = update(settings, None, stop_at=deadline)
-                except ScreenerError as exc:
-                    log.error("daily update failed: %s", exc)
-                    code = 1
-                if writer is not None:
-                    try:
-                        channels(settings, writer=writer)
-                    except ScreenerError as exc:
-                        log.error("daily channels failed: %s", exc)
-                store.write_live_state({"daily_update_for": target.isoformat(), "exit_code": code,
-                                        "finished_at": datetime.now(timezone.utc).isoformat(
-                                            timespec="seconds")})
-                continue
-            wake = next_open(now, market_tz=tz)
-            log.info("market closed; next open %s", wake.isoformat(timespec="minutes"))
-            clock.sleep(min(1800.0, max(30.0, (wake - datetime.now(timezone.utc)).total_seconds())))
-    except KeyboardInterrupt:
-        print("\nLive stopped.\n")
-        return 0
-
-
-def make_channel_writer(settings):
-    """ChannelWriter over Claude Code; ConfigError inside a Claude Code session."""
-    from tascreen.channels.generate import ChannelWriter
+    from tascreen import xnews
     from tascreen.llm import ClaudeCodeLLM
-    from tascreen.patterns.rules import load_rules
-    from tascreen.store import Store
+    from tascreen.notify import from_environment
 
-    cfg = settings.channels
-    llm = ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s)
-    return ChannelWriter(store=Store(settings.data_dir), rules=load_rules(), cfg=cfg, llm=llm)
-
-
-def channels(settings, force: bool = False, writer=None) -> int:
-    from tascreen.web.data import ScanRepository
-
-    if not settings.channels.enabled:
-        print("\nchannels.enabled is false in config.yaml\n")
+    cfg = settings.xnews
+    if not cfg.enabled:
+        print("xnews: disabled in config.yaml")
         return 0
-    writer = writer or make_channel_writer(settings)
-    view = ScanRepository(writer.store, writer.rules).current()
-    if view is None:
-        log.error("no scan yet; run: .venv\\Scripts\\python.exe run.py --scan")
-        return 1
-    print(f"\nChannels for the session {view.day}: #כללי + {settings.channels.count} pattern channels, "
-          f"written by Claude Code ({settings.channels.model}, effort {settings.channels.effort})\n")
-    report = writer.daily(view, force=force)
-    (settings.log_dir / "channels_last_run.json").write_text(
-        json.dumps(report, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-    failed = 0
-    for channel, result in report["channels"].items():
-        if isinstance(result, dict):
-            print(f"  {channel:<22} {result['threads']} threads, {result['posts']} posts, "
-                  f"{result['dropped']} dropped, {result['seconds']:.0f} s")
-        else:
-            print(f"  {channel:<22} {result}")
-            failed += str(result).startswith("failed")
-    print(f"  details: {settings.log_dir / 'channels_last_run.json'}\n")
-    return 1 if failed else 0
-
-
-def redraw_charts(settings) -> int:
-    from tascreen.channels.generate import redraw_charts as redraw
-    from tascreen.patterns.rules import load_rules
-    from tascreen.store import Store
-    from tascreen.web.data import ScanRepository
-
-    store = Store(settings.data_dir)
-    view = ScanRepository(store, load_rules()).current()
-    if view is None:
-        log.error("no scan yet")
-        return 1
-    counts = redraw(store, view)
-    print(f"\nCharts: {counts['redrawn']} redrawn, {counts['kept']} kept (their pattern is no longer "
-          "in the newest scan)\n")
+    bot = from_environment()
+    if bot is None:
+        raise ConfigError("no Telegram bot: run `run.py --setup-telegram` (or set TELEGRAM_BOT_TOKEN/_CHAT_ID)")
+    now, state_path = datetime.now(timezone.utc), settings.data_dir / "xnews" / "state.json"
+    if xnews.past_end(until=cfg.until, now=now, state_path=state_path, send=bot.send):
+        print(f"xnews: status=ended (after {cfg.until})")
+        return 0
+    summary = xnews.run_once(
+        accounts=list(cfg.accounts), source=_x_source(),
+        llm_factory=lambda: ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s),
+        send=lambda text: bot.send(text, html=True),
+        state_path=state_path, now=now,
+        min_importance=cfg.min_importance, daily_read_cap=cfg.daily_read_cap,
+        llm_daily_cap=cfg.claude_daily_cap, llm_min_interval_s=cfg.claude_every_minutes * 60,
+        with_replies=cfg.with_replies)
+    print("xnews: " + " ".join(f"{k}={v}" for k, v in summary.items()))
     return 0
-
-
-def live_channel_posts(settings, writer) -> None:
-    """Threads about the crossings in the newest quotes (deduplicated, hourly cap)."""
-    from datetime import datetime, timedelta, timezone
-
-    from tascreen.web.data import QuotesRepository, ScanRepository, live_for
-
-    view = ScanRepository(writer.store, writer.rules).current()
-    max_age = timedelta(minutes=settings.live.interval_minutes * settings.live.stale_after_intervals)
-    live = live_for(view, QuotesRepository(writer.store).current(), datetime.now(timezone.utc), max_age)
-    if live is None or not live.active or not live.crossings:
-        return
-    result = writer.live(view, live.quotes.session, live.quotes.prices, live.quotes.changes,
-                         live.crossings, progress=lambda m: log.info(m.strip()))
-    if result["written"]:
-        log.info("live channel threads: %d written", result["written"])
 
 
 def update(settings, limit: int | None, stop_at=None) -> int:
@@ -1176,9 +1047,8 @@ def main(argv: list[str] | None = None) -> int:
         (args.backfill_outcomes, lambda: backfill_outcomes(settings, args.limit)),
         (args.backfill_needed, lambda: backfill_needed(settings)),
         (args.ci_probe, lambda: ci_probe(settings, args.limit)),
-        (args.ci_tick, lambda: ci_tick(settings, args.limit, args.max_minutes,
-                                       with_channels=not args.no_channels)),
-        (args.export_site, lambda: export_site(settings, args.export_site)),
+        (args.ci_tick, lambda: ci_tick(settings, args.limit, args.max_minutes)),
+        (args.export_webhook, lambda: export_webhook(args.export_webhook)),
         (args.setup_telegram, lambda: setup_telegram(settings)),
         (args.ci_notify, lambda: ci_notify(settings, args.ci_notify)),
         (args.analyze, lambda: analyze(settings, args.analyze, args.out, with_llm=not args.no_llm,
@@ -1187,11 +1057,9 @@ def main(argv: list[str] | None = None) -> int:
         (args.ci_live, lambda: ci_live(settings, args.max_minutes or 345)),
         (args.telegram_webhook, lambda: telegram_webhook(settings, args.telegram_webhook)),
         (args.analyze_eval is not None, lambda: analyze_eval(settings, args.analyze_eval or None, args.until)),
-        (args.quotes, lambda: quotes(settings)),
-        (args.live, lambda: live(settings)),
-        (args.channels, lambda: channels(settings, force=args.force)),
-        (args.redraw_charts, lambda: redraw_charts(settings)),
-        (args.serve, lambda: serve(settings)),
+        (args.setup_x, lambda: setup_x(settings)),
+        (args.x_discover, lambda: x_discover(settings, args.x_discover)),
+        (args.xnews, lambda: xnews_pass(settings)),
     )
     for requested, command in commands:
         if requested:

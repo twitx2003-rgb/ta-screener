@@ -53,38 +53,16 @@ market:
   # auction has printed); before it, the bar is a partial session and is dropped.
   session_close: "16:15"
 
-web:
-  # The server listens on 127.0.0.1 only (not configurable).
-  port: 8050
-  open_browser: true         # --serve opens the screener in the default browser
-  rows_per_page: 100
-  # Host names the site also answers to when you expose it through a tunnel.
-  # Owner's decision (2026-09-23): make the site public through VS Code port
-  # forwarding (Ports view, visibility Public), knowing that TradingView's terms
-  # limit its data to the account holder. Set to [] to go back to this computer only.
-  public_hosts: ["*.devtunnels.ms"]
-  display_timezone: "Asia/Jerusalem"
-
 live:
-  # run.py --live: every stock's last price from TradingView's screener this often
-  # during the US session (one pass is ~15 calls; prices are delayed 15 min or more).
-  interval_minutes: 5
-  after_close_minutes: 20    # keep refreshing this long after the close (delayed quotes)
-  update_after_close: true   # then run the daily update (universe, bars, scan) once
-  stale_after_intervals: 3   # an older quote is shown as not live
+  # The session's breakout watch (run.py --ci-live) keeps going this long after the close
+  # (TradingView's quotes are delayed).
+  after_close_minutes: 20
 
-channels:
-  # Discussion channels: simulated members (AI agents, labelled as such on the site)
-  # discuss the most common patterns, each thread opening with a chart screenshot with
-  # drawings. Written through your Claude Code subscription (`claude -p`), which must
-  # run from a normal terminal, not from inside Claude Code.
-  enabled: true
-  count: 8                   # pattern channels, plus #כללי
-  topics_per_channel: 3      # stocks per channel per day
-  days_shown: 5
-  live_max_per_hour: 4       # threads about live breakout crossings, at most
+claude:
+  # Claude Code for the chart analyst, through your subscription (`claude -p`, which must
+  # run from a normal terminal or a workflow, not from inside Claude Code). The site and
+  # its discussion channels were removed on 2026-09-27: Telegram only.
   model: "sonnet"
-  effort: "medium"
   timeout_s: 600
 
 outcomes:
@@ -111,4 +89,34 @@ alerts:
                              # as TradingView allows; get-ohlcv, one call a stock)
   far_every: 3               # stocks beyond verge_pct from their line: every 3rd pass only
   live_max_symbols: 120      # stocks watched, at most, nearest to their line first
-  site_url: "https://ta-screener.vercel.app"
+
+xnews:
+  # Breaking Wall Street news from X (owner's request, 2026-09-27): every 10 minutes
+  # (.github/workflows/xnews.yml) the new posts of these accounts are read through
+  # twitterapi.io (paid per post read), Claude picks only what matters for Wall Street,
+  # and the bot sends a short Hebrew summary with a link. Account names without the @.
+  enabled: true
+  until: "2026-12-27"        # three months (owner, 2026-09-27); after it: one notice, then nothing
+  accounts: [   # the owner's list, 2026-09-27
+    unusual_whales, RyanDetrick, wallstengine, StockSavvyShay, cperruna, bespokeinvest,
+    MikeZaccardi, DeItaone, gurgavin, DivesTech, garyblack00, topdowncharts,
+    larryswedroe, DeanChristians, InvestingVisual, Mr_Derivatives, GinaMartinAdams,
+    zerohedge, LizAnnSonders, charliebilello, KobeissiLetter, sentimentrader,
+    Callum_Thomas, NorthmanTrader, TheChartReport, YardeniResearch, LukeGromen,
+    jsblokland, Tier1alpha, MacroAlf, CrescatCapital, GrantWilliams11, WolfStreet,
+    TheBondFreak, markets, CNBC, Bloomberg, WSJmarkets, FT, ReutersBiz, DavidInglesTV,
+    RampCapitalLLC, julius_fox, RealVision, SchwabResearch, GoldmanSachs, JPMorgan,
+    MorganStanley, BofA_Merrill, Citi, UBS, Barclays, HSBC, Fidelity, Vanguard_Group,
+    BlackRock, StateStreet, InvescoUS, PIMCO, TrowePrice, JanusHenderson, ARKInvest,
+    CathieDWood]
+  min_importance: 4          # 1-5: 5 = market-moving now, 4 = relevant to specific stocks today
+  daily_read_cap: 3000       # posts read a day, at most (cost guard)
+  with_replies: false
+  # Claude's share of the subscription (also used by the chart analyses): the
+  # posts are read every 10 minutes, but judged together every 20 minutes at most, and at
+  # most 45 times a day (about 42 fit in the 14-hour window, so the cap is a safety net)
+  claude_daily_cap: 45
+  claude_every_minutes: 20
+  model: "sonnet"
+  effort: "low"
+  timeout_s: 300

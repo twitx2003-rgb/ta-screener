@@ -1,6 +1,6 @@
 """A chart "screenshot" (SVG) with clean annotations on it.
 
-The chart has one fixed look, like a real screenshot, in the site's night-violet
+The chart has one fixed look, like a real screenshot, in the night-violet
 palette: daily candles around the pattern, volume, SMA50 and SMA150. The
 annotations are the precise kind a charting tool draws (owner's choice,
 2026-09-24): straight lines, ringed markers, arrows, and labels in small tags.
@@ -18,8 +18,8 @@ from typing import Any
 
 import pandas as pd
 
-from ..indicators import sma
-from ..patterns.levels import invalidation
+from .indicators import sma
+from .patterns.levels import invalidation
 
 DRAWINGS = ("pivots", "pattern_lines", "confirm_line", "breakout", "target", "trigger",
             "failure", "volume", "sma", "zone")

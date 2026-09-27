@@ -16,11 +16,13 @@ def _no_real_messages(monkeypatch, tmp_path_factory):
     and not the bot saved on this computer (~/.ta-screener/telegram.json). (Without this,
     a tick test once sent the owner a real report of made-up stocks.)"""
     import tascreen.notify
+    import tascreen.xnews
 
-    for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GH_DISPATCH_TOKEN"):
+    for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GH_DISPATCH_TOKEN", "X_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(tascreen.notify, "CREDENTIALS",
                         tmp_path_factory.getbasetemp() / "no-telegram.json")
+    monkeypatch.setattr(tascreen.xnews, "CREDENTIALS", tmp_path_factory.getbasetemp() / "no-x.json")
 
 
 @pytest.fixture(autouse=True)

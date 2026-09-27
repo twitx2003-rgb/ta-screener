@@ -13,7 +13,7 @@ from tascreen.notify import Telegram
 
 
 def _scan(tmp_path):
-    from test_web_live import RULES, _setup
+    from scan_setup import RULES, _setup
     from tascreen.market_hours import next_sessions
     from tascreen.web.data import ScanRepository
 
@@ -27,12 +27,12 @@ def _svg_bytes(svg: str) -> bytes:
 
 
 def test_a_live_crossing_gets_its_forming_pattern_and_the_live_price(tmp_path):
-    from test_web_live import LIVE_PRICE
+    from scan_setup import LIVE_PRICE
 
     store, view, session = _scan(tmp_path)
     found = alerts.live_crossings(view, {"NASDAQ:DB": LIVE_PRICE}, session, {})
     at = datetime(2026, 3, 20, 15, 40, tzinfo=timezone.utc)
-    photos = alerts.crossing_photos(found, store.read_bars, at, "America/New_York", "https://s.example",
+    photos = alerts.crossing_photos(found, store.read_bars, at, "America/New_York",
                                     to_png=_svg_bytes)
     assert len(photos) == 1
     svg, caption = photos[0][0].decode("utf-8"), photos[0][1]
@@ -50,14 +50,14 @@ def test_a_confirmed_breakout_chart_and_its_report_line(tmp_path):
                 "rel_volume": 1.8, "hit_rate": 55.0, "record": record}
     long_news = {"title": "x" * 900, "hours": 2.0, "provider": "Reuters",
                  "link": "https://www.tradingview.com/news/a/", "published": None}
-    photos, missing = alerts.breakout_photos([breakout], store.read_bars, "https://s.example",
+    photos, missing = alerts.breakout_photos([breakout], store.read_bars,
                                              {"NASDAQ:DB": long_news}, to_png=_svg_bytes)
     assert missing == 0 and len(photos) == 1
     caption = photos[0][1]
-    assert caption.startswith('1. <a href="https://s.example/symbol/NASDAQ_DB/">DB</a>')
+    assert caption.startswith('1. <a href="https://www.tradingview.com/chart/?symbol=NASDAQ%3ADB">DB</a>')
     assert len(caption) <= 1000 and "📰" in caption and "..." in caption   # a long title is cut
     assert "יעד 124.90 (כלל המדידה)" in caption
-    short = alerts.breakout_block(1, breakout, "https://s.example", long_news, limit=250)
+    short = alerts.breakout_block(1, breakout, long_news, limit=250)
     assert len(short) <= 250 and "📰" not in short and "פריצה 112.30" in short   # the news gave way
 
 
@@ -70,8 +70,8 @@ def test_no_bars_or_a_failed_drawing_means_text_only(tmp_path):
     item = {"symbol": "NASDAQ:DB", "pattern": "p", "name": "n", "breakout": 1.0, "target": 2.0,
             "invalidation": 0.5, "close": 1.1, "rel_volume": 1.0, "hit_rate": None,
             "record": {"symbol": "NASDAQ:DB"}}
-    assert alerts.breakout_photos([item], lambda s: None, "https://s.example")[1] == 1
-    assert alerts.breakout_photos([item], store.read_bars, "https://s.example", to_png=broken)[1] == 1
+    assert alerts.breakout_photos([item], lambda s: None)[1] == 1
+    assert alerts.breakout_photos([item], store.read_bars, to_png=broken)[1] == 1
 
 
 def test_charts_go_in_albums_of_ten():

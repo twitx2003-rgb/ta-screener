@@ -1,11 +1,13 @@
 # The pipeline on GitHub Actions (owner-approved plan, 2026-09-24: GitHub Actions + Vercel).
 # Each run does what is due now (run.py --ci-tick): after a session closes, the daily
-# update (universe, bars, scan, outcome ledger) and the channels. The working state
+# update (universe, bars, scan, outcome ledger) and the evening alerts. The working state
 # (TradingView sign-in, data, full logs) lives in the PRIVATE repository
 # twitx2003-rgb/ta-screener-state. This repository is public, and so is this log: it
 # shows only logs/ci_summary.json (dates, counts, error class names).
 # Scheduled since the home computer stopped (stage 3, 2026-09-24). Several start times:
 # GitHub delays or drops scheduled runs, and each run only does what is still due.
+# The website and its discussion channels were removed on 2026-09-27 (the owner uses
+# Telegram only): Vercel now serves only the bot's webhook.
 name: run
 
 on:
@@ -18,10 +20,6 @@ on:
       limit:
         description: "Only the N largest stocks (a test run; empty = all)"
         default: ""
-      channels:
-        description: "Write the channels (uses the Claude subscription)"
-        type: boolean
-        default: false
       save:
         description: "Save the data to the state repository (off = a test: only the token and logs are kept)"
         type: boolean
@@ -56,8 +54,6 @@ jobs:
       - name: Install
         run: |
           python -m pip install -q -r requirements.txt
-          curl -fsSL https://claude.ai/install.sh | bash > /dev/null 2>&1
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           # the breakout charts in the evening report: librsvg, Hebrew and monospace fonts (SIL OFL)
           sudo apt-get update -qq > /dev/null
           sudo apt-get install -y -qq --no-install-recommends librsvg2-bin fonts-noto-core fonts-ibm-plex > /dev/null
@@ -67,32 +63,29 @@ jobs:
 
       - name: Do what is due
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # the evening breakout report (Telegram) and its full analyses (analyst.yml)
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
           LIMIT: ${{ inputs.limit }}
-          CHANNELS: ${{ github.event_name == 'schedule' || inputs.channels }}
         run: |
           set +e
           args=(--ci-tick --max-minutes 300)
           if [ -n "$LIMIT" ]; then args+=(--limit "$LIMIT"); fi
-          if [ "$CHANNELS" != "true" ]; then args+=(--no-channels); fi
-          rm -f state/logs/ci_summary.json state/logs/site-url.txt
+          rm -f state/logs/ci_summary.json
           python -u run.py "${args[@]}" > "state/logs/tick-$(date -u +%Y%m%dT%H%M).log" 2>&1
           code=$?
           python .github/mask_tokens.py state/tv_tokens.json
           cat state/logs/ci_summary.json 2> /dev/null || echo "no summary (see the log in the state repository)"
           exit $code
 
-      - name: Publish the site to Vercel
+      - name: Deploy the bot's webhook to Vercel
         id: publish
         if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.save) }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_CLI: vercel@59.26.0
-          # run-time keys of the site's Telegram webhook function (api/telegram.js); they
+          # run-time keys of the Telegram webhook function (api/telegram.js); they
           # stay GitHub secrets, handed to each deployment and never stored in the project
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -100,7 +93,7 @@ jobs:
         run: |
           site="$RUNNER_TEMP/ta-screener"
           logs="$GITHUB_WORKSPACE/state/logs"
-          python run.py --export-site "$site" > "$logs/export.json" 2> "$logs/export-stderr.txt" || { echo "export failed (see the state repository)"; exit 1; }
+          python run.py --export-webhook "$site" > "$logs/export.json" 2> "$logs/export-stderr.txt" || { echo "export failed (see the state repository)"; exit 1; }
           cat "$logs/export.json"
           cd "$site"
           started=$(date +%s)
@@ -110,11 +103,9 @@ jobs:
               -e GH_DISPATCH_TOKEN="$GH_DISPATCH_TOKEN" > deploy-url.txt 2> "$logs/vercel-deploy.txt"
           code=$?
           echo "deploy exit $code after $(( $(date +%s) - started )) s"
-          npx --yes "$VERCEL_CLI" inspect "$(tail -n 1 deploy-url.txt)" --token "$VERCEL_TOKEN" > "$logs/vercel-inspect.txt" 2>&1 || true
-          grep -ho 'https://[a-z0-9.-]*\.vercel\.app' "$logs/vercel-inspect.txt" deploy-url.txt | awk '{ print length, $0 }' | sort -n | head -n 1 | cut -d' ' -f2 | tee "$logs/site-url.txt"
           exit $code
 
-      - name: Point the Telegram bot at the site
+      - name: Point the Telegram bot at the webhook
         if: ${{ !cancelled() && steps.publish.outcome == 'success' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

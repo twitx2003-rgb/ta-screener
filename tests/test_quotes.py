@@ -139,8 +139,7 @@ def test_bars_stop_at_the_deadline_without_opening_a_session(tmp_path):
 
 
 # -------------------------------------------------------------------- config
-@pytest.mark.parametrize("kw", [{"interval_minutes": 0.5}, {"after_close_minutes": 500},
-                                {"stale_after_intervals": 0}])
+@pytest.mark.parametrize("kw", [{"after_close_minutes": 500}, {"after_close_minutes": -1}])
 def test_live_settings_are_checked(kw):
     with pytest.raises(ConfigError):
         LiveSettings(**kw)

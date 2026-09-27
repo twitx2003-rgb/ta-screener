@@ -48,11 +48,10 @@ def test_errors_never_carry_the_token():
 
 def test_run_messages():
     done = {"session": "2026-09-23", "due": True, "complete": True,
-            "scan": {"symbols_scanned": 2352, "detections": 2600},
-            "channels": {"written": 9, "already": 0, "failed": 0, "skipped": 0}}
-    text = run_message(done, "success", site_url="https://ta-screener.vercel.app")
+            "scan": {"symbols_scanned": 2352, "detections": 2600}}
+    text = run_message(done, "success")
     assert text.startswith("✅ העדכון היומי ל-23/09/2026 הושלם.")
-    assert "2352 מניות" in text and "9 נכתבו" in text and "vercel.app" in text
+    assert "2352 מניות" in text
     partial = {"session": "2026-09-23", "due": True, "complete": False,
                "bars": {"updated": 2000, "deferred": 300, "failed": 52}}
     assert "חסרות 352 מניות" in run_message(partial, "success")

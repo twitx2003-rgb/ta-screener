@@ -25,7 +25,7 @@ jobs:
     env:
       STATE_REPO: twitx2003-rgb/ta-screener-state
       STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
-      DAILY_LIMIT: "10"            # the analyses share the Claude subscription with the channels
+      DAILY_LIMIT: "10"            # the analyses share the Claude subscription with the X news
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

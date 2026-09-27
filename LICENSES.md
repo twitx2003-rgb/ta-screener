@@ -10,9 +10,8 @@ code only: no market data, and no text from the books it follows.
 | **Claude Code** (the owner's subscription) | Anthropic's terms | Writes the channel posts of the simulated members, which the site labels as AI agents; run from a normal terminal (`run.py --channels`). No API key is used. |
 | **pandas**, **numpy**, **pyarrow**, **PyYAML** | BSD-3-Clause / BSD-3-Clause / Apache-2.0 / MIT | — |
 | **Code taken from market-research-pipeline** (TradingView client, contracts, market calendar) | Same author | Copied, not a dependency. |
-| **FastAPI**, **Starlette**, **uvicorn**, **Jinja2** / **MarkupSafe**, **httpx** (tests) | MIT / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause / BSD-3-Clause | The website. |
-| **TradingView Lightweight Charts™** 5.2.1 | Apache-2.0 | Vendored unchanged in `tascreen/web/static/vendor/`, with its `LICENSE` and `NOTICE`. The licence requires the NOTICE line and a link to https://www.tradingview.com/ on the page: every page footer carries both, and the chart keeps its TradingView logo (`attributionLogo`). |
-| **Fonts**: Heebo, IBM Plex Mono | SIL Open Font License 1.1 | Loaded from Google Fonts by the browser, not stored in the repo. |
+| **Starlette**, **uvicorn** (tests; they come with mcp) | BSD-3-Clause | A small local server in the MCP client tests. (FastAPI, Jinja2 and httpx went with the website, removed 2026-09-27.) |
+| **Fonts**: Noto (Hebrew), IBM Plex Mono | SIL Open Font License 1.1 | Installed on the GitHub runner (apt) to draw the Telegram charts; not stored in the repo. |
 
 
 ## Bulkowski's books

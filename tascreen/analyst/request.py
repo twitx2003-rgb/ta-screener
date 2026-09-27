@@ -4,7 +4,7 @@ from the phone; stage T5: the Telegram bot starts the same run).
 `produce` writes the files of one analysis (facts, chart, Pine Script, and the written
 text when a model is given) and sends them to Telegram when a bot is given.
 `handle_request` is the runner's side: a daily limit (the analyses share the Claude
-subscription with the channels), the typed symbol resolved against the stored bars, the
+subscription with the X news), the typed symbol resolved against the stored bars, the
 analysis kept in `archive/<UTC day>/<time>-<stem>/`, and a short Hebrew answer in
 Telegram for a refusal or a failure. Nothing here calls TradingView.
 """

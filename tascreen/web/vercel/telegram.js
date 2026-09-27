@@ -1,5 +1,5 @@
 // The Telegram bot's webhook, a Vercel function (chart analyst, stage T5, 2026-09-24).
-// tascreen/web/export.py copies this file to api/telegram.js in every exported site.
+// tascreen/web/export.py copies this file to api/telegram.js, the only thing deployed.
 //
 // The owner writes a symbol to the bot; Telegram posts the update here; this starts the
 // analyst workflow on GitHub (which answers in Telegram a few minutes later) and says so.

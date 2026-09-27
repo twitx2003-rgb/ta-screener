@@ -8,8 +8,6 @@
         indicators.parquet (INDICATORS), patterns.parquet (PATTERNS), scan.json
     data/quotes/latest.parquet           the newest live quotes (QUOTES), latest.json
     data/quotes/live_state.json          what the live loop last did (the daily update)
-    data/channels/<YYYY-MM-DD>/<channel>.json   agent threads (daily; live.json for crossings)
-    data/channels/<YYYY-MM-DD>/charts/<post>.svg chart screenshots with drawings
     data/outcomes/ledger.parquet         every breakout and its outcome (OUTCOMES), meta.json
     data/outcomes/backfill/<SYMBOL>.parquet  breakouts found in past bars (run.py --backfill-outcomes),
         manifest.json (the rules and step they were found with)
@@ -58,7 +56,6 @@ class Store:
         self.bars_dir = self.root / "bars"
         self.scans_dir = self.root / "scans"
         self.quotes_dir = self.root / "quotes"
-        self.channels_dir = self.root / "channels"
         self.outcomes_dir = self.root / "outcomes"
 
     # ------------------------------------------------------------- outcomes
@@ -142,36 +139,6 @@ class Store:
             for path in self.backfill_dir.glob("*.parquet"):
                 path.unlink()
         _write_json(self.backfill_dir / "manifest.json", manifest)
-
-    # ------------------------------------------------------------- channels
-    def write_channel_doc(self, day: date, name: str, doc: dict[str, Any]) -> None:
-        _write_json(self.channels_dir / day.isoformat() / f"{name}.json", doc)
-
-    def read_channel_doc(self, day: date, name: str) -> dict[str, Any] | None:
-        path = self.channels_dir / day.isoformat() / f"{name}.json"
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-
-    def channel_days(self) -> list[date]:
-        if not self.channels_dir.exists():
-            return []
-        days = []
-        for folder in self.channels_dir.iterdir():
-            try:
-                days.append(date.fromisoformat(folder.name))
-            except ValueError:
-                continue
-        return sorted(days)
-
-    def write_channel_chart(self, day: date, post_id: str, svg: str) -> str:
-        name = f"{symbol_file_stem(post_id)}.svg"
-        _atomic_write_bytes(self.channels_dir / day.isoformat() / "charts" / name,
-                            lambda tmp: tmp.write_text(svg, encoding="utf-8"))
-        return name
-
-    def read_channel_chart(self, day: date, name: str) -> str | None:
-        path = self.channels_dir / day.isoformat() / "charts" / symbol_file_stem(Path(name).stem)
-        path = path.with_suffix(".svg")
-        return path.read_text(encoding="utf-8") if path.exists() else None
 
     # ------------------------------------------------------------- universe
     def write_universe(self, day: date, frame: pd.DataFrame, summary: dict[str, Any]) -> Path:

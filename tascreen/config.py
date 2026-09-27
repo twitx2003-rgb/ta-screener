@@ -7,11 +7,9 @@ from __future__ import annotations
 
 import os
 
-import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -132,97 +130,31 @@ class BarsSettings:
             raise ConfigError("bars.session_batch and bars.concurrency must be >= 1")
 
 
-_HOST_NAME = re.compile(r"^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$")
-
-
-@dataclass(frozen=True)
-class WebSettings:
-    # The server always binds to 127.0.0.1; the bind address is deliberately not a
-    # setting. Reaching it from outside goes through a tunnel the owner opens.
-    port: int = 8050
-    open_browser: bool = True
-    rows_per_page: int = 100
-    # Host names the site also answers to, beyond 127.0.0.1/localhost: the address
-    # of a tunnel such as VS Code port forwarding ("*.devtunnels.ms"). Empty means
-    # this computer only. Non-empty turns on public mode (no local details shown).
-    public_hosts: tuple[str, ...] = ()
-    # Times on the site (the live-quote time) are shown in this zone.
-    display_timezone: str = "Asia/Jerusalem"
-
-    def __post_init__(self):
-        object.__setattr__(self, "port", int(self.port))
-        object.__setattr__(self, "rows_per_page", int(self.rows_per_page))
-        object.__setattr__(self, "public_hosts", tuple(str(h).strip().lower() for h in self.public_hosts))
-        if not 1024 <= self.port <= 65535:
-            raise ConfigError("web.port must be 1024..65535")
-        if not 10 <= self.rows_per_page <= 1000:
-            raise ConfigError("web.rows_per_page must be 10..1000")
-        try:
-            ZoneInfo(self.display_timezone)
-        except (ZoneInfoNotFoundError, ValueError):
-            raise ConfigError(f"web.display_timezone: unknown zone '{self.display_timezone}'") from None
-        for host in self.public_hosts:
-            if not _HOST_NAME.match(host) or host.rsplit(".", 1)[-1].isdigit():   # no IPs
-                raise ConfigError(f"web.public_hosts: '{host}' is not a host name "
-                                  "(a leading '*.' wildcard is allowed; no IPs, ports or '*')")
-
-    @property
-    def public(self) -> bool:
-        return bool(self.public_hosts)
 
 
 @dataclass(frozen=True)
 class LiveSettings:
-    # `run.py --live`: refresh every stock's last price this often during the US
-    # session (one screener pass, ~15 calls), and keep going this long after the
-    # close because quotes are delayed.
-    interval_minutes: float = 5.0
+    # The session's breakout watch (run.py --ci-live) keeps going this long after the
+    # close, because quotes are delayed.
     after_close_minutes: float = 20.0
-    # After the close, run the daily update (universe, bars, scan) once. The bars
-    # part stops before the next open, so the next day's quotes are not blocked.
-    update_after_close: bool = True
-    # A quote older than this many refresh intervals is shown as not live.
-    stale_after_intervals: float = 3.0
 
     def __post_init__(self):
-        for name in ("interval_minutes", "after_close_minutes", "stale_after_intervals"):
-            object.__setattr__(self, name, float(getattr(self, name)))
-        if self.interval_minutes < 1:
-            raise ConfigError("live.interval_minutes must be at least 1 (each pass is ~15 calls)")
+        object.__setattr__(self, "after_close_minutes", float(self.after_close_minutes))
         if not 0 <= self.after_close_minutes <= 120:
             raise ConfigError("live.after_close_minutes must be 0..120")
-        if self.stale_after_intervals < 1:
-            raise ConfigError("live.stale_after_intervals must be at least 1")
 
 
 @dataclass(frozen=True)
-class ChannelsSettings:
-    # Discussion channels written by simulated members (AI agents, labelled so),
-    # through the owner's Claude Code subscription (`claude -p`).
-    enabled: bool = True
-    count: int = 8                 # pattern channels (the most common patterns), plus #כללי
-    topics_per_channel: int = 3    # stocks discussed per channel per day
-    days_shown: int = 5
-    live_max_per_hour: int = 4     # live-crossing threads per hour, at most
-    model: str = "sonnet"          # a Claude Code model alias or full name
-    effort: str = "medium"         # low | medium | high | xhigh | max
+class ClaudeSettings:
+    # Claude Code for the chart analyst (the owner's subscription; `claude -p` must run
+    # from a normal terminal or a workflow, not from inside Claude Code).
+    model: str = "sonnet"
     timeout_s: int = 600
 
     def __post_init__(self):
-        for name in ("count", "topics_per_channel", "days_shown", "live_max_per_hour", "timeout_s"):
-            object.__setattr__(self, name, int(getattr(self, name)))
-        if not 1 <= self.count <= 20:
-            raise ConfigError("channels.count must be 1..20")
-        if not 1 <= self.topics_per_channel <= 6:
-            raise ConfigError("channels.topics_per_channel must be 1..6")
-        if not 1 <= self.days_shown <= 30:
-            raise ConfigError("channels.days_shown must be 1..30")
-        if not 0 <= self.live_max_per_hour <= 30:
-            raise ConfigError("channels.live_max_per_hour must be 0..30")
-        if self.effort not in ("low", "medium", "high", "xhigh", "max"):
-            raise ConfigError("channels.effort must be low, medium, high, xhigh or max")
+        object.__setattr__(self, "timeout_s", int(self.timeout_s))
         if self.timeout_s < 30:
-            raise ConfigError("channels.timeout_s must be at least 30")
+            raise ConfigError("claude.timeout_s must be at least 30")
 
 
 @dataclass(frozen=True)
@@ -270,7 +202,6 @@ class AlertsSettings:
     # are priced every `far_every`-th pass only (fewer calls; TradingView slows down)
     far_every: int = 3
     live_max_symbols: int = 120        # get-ohlcv calls per pass, at most
-    site_url: str = "https://ta-screener.vercel.app"
 
     def __post_init__(self):
         for name in ("verge_pct", "watch_pct", "live_interval_minutes"):
@@ -289,8 +220,59 @@ class AlertsSettings:
             raise ConfigError("alerts.live_interval_minutes must be 5..60")
         if not 1 <= self.live_max_symbols <= 300:
             raise ConfigError("alerts.live_max_symbols must be 1..300")
-        if not str(self.site_url).startswith("https://"):
-            raise ConfigError("alerts.site_url must start with https://")
+
+
+@dataclass(frozen=True)
+class XNewsSettings:
+    # Breaking Wall Street news from X accounts the owner chose (tascreen/xnews.py;
+    # owner's request 2026-09-27): Claude picks what matters, the bot sends a Hebrew summary.
+    enabled: bool = True
+    until: str = "2026-12-27"          # the owner asked for three months; after it, one notice and silence
+    accounts: tuple = ()
+    min_importance: int = 4            # 1-5; 4 = clearly relevant to specific stocks today
+    daily_read_cap: int = 3000         # posts read a day, at most (the reader is paid per post)
+    with_replies: bool = False
+    # Claude is shared with the chart analyses: the posts are read every
+    # run, but judged together at most every `claude_every_minutes`, `claude_daily_cap` a day
+    claude_daily_cap: int = 45
+    claude_every_minutes: int = 20
+    model: str = "sonnet"
+    effort: str = "low"
+    timeout_s: int = 300
+
+    def __post_init__(self):
+        from datetime import date
+
+        from .xnews import account_name
+
+        try:
+            date.fromisoformat(str(self.until))
+        except ValueError:
+            raise ConfigError(f"xnews.until must be a YYYY-MM-DD date, got '{self.until}'") from None
+        object.__setattr__(self, "until", str(self.until))
+        raw = self.accounts or ()
+        if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+            raise ConfigError("xnews.accounts must be a list of X account names")
+        try:
+            names = tuple(dict.fromkeys(account_name(a) for a in raw))
+        except Exception as exc:
+            raise ConfigError(f"xnews.accounts: {exc}") from None
+        object.__setattr__(self, "accounts", names)
+        for name in ("min_importance", "daily_read_cap", "timeout_s", "claude_daily_cap",
+                     "claude_every_minutes"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        if not 1 <= self.min_importance <= 5:
+            raise ConfigError("xnews.min_importance must be 1..5")
+        if not 20 <= self.daily_read_cap <= 50000:
+            raise ConfigError("xnews.daily_read_cap must be 20..50000")
+        if self.effort not in ("low", "medium", "high", "xhigh", "max"):
+            raise ConfigError("xnews.effort must be low, medium, high, xhigh or max")
+        if self.timeout_s < 30:
+            raise ConfigError("xnews.timeout_s must be at least 30")
+        if not 1 <= self.claude_daily_cap <= 200:
+            raise ConfigError("xnews.claude_daily_cap must be 1..200")
+        if not 10 <= self.claude_every_minutes <= 180:
+            raise ConfigError("xnews.claude_every_minutes must be 10..180")
 
 
 _SECTIONS = {
@@ -299,11 +281,11 @@ _SECTIONS = {
     "market": MarketSettings,
     "universe": UniverseSettings,
     "bars": BarsSettings,
-    "web": WebSettings,
     "live": LiveSettings,
-    "channels": ChannelsSettings,
+    "claude": ClaudeSettings,
     "outcomes": OutcomesSettings,
     "alerts": AlertsSettings,
+    "xnews": XNewsSettings,
 }
 
 
@@ -315,11 +297,11 @@ class Settings:
     market: MarketSettings = field(default_factory=MarketSettings)
     universe: UniverseSettings = field(default_factory=UniverseSettings)
     bars: BarsSettings = field(default_factory=BarsSettings)
-    web: WebSettings = field(default_factory=WebSettings)
     live: LiveSettings = field(default_factory=LiveSettings)
-    channels: ChannelsSettings = field(default_factory=ChannelsSettings)
+    claude: ClaudeSettings = field(default_factory=ClaudeSettings)
     outcomes: OutcomesSettings = field(default_factory=OutcomesSettings)
     alerts: AlertsSettings = field(default_factory=AlertsSettings)
+    xnews: XNewsSettings = field(default_factory=XNewsSettings)
 
     @property
     def data_dir(self) -> Path:

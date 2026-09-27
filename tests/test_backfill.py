@@ -16,7 +16,7 @@ from tascreen.scan import run_scan
 from tascreen.store import Store
 from test_chart_patterns import ASC_TRIANGLE, DOUBLE_BOTTOM, HS_TOP, RULES
 from test_scan import _universe
-from test_web_live import _setup
+from scan_setup import _setup
 
 FLAG = [(0, 50), (60, 50), (66, 60), (68, 58.2), (70, 59.4), (72, 57.6), (74, 58.8), (76, 57.2),
         (78, 62), (79, 62.5)]

@@ -66,16 +66,16 @@ def test_the_messages_are_escaped_linked_and_fit_telegram():
     breakouts = bullish_breakouts(_view(), lambda s: None, {})
     breakouts[0]["name"] = "<b>x</b>"
     verge = on_the_verge(_view(), 2.0) * 80                  # long: split into messages
-    messages = evening_messages(DAY, breakouts, verge, site_url="https://site.example", verge_pct=2.0,
+    messages = evening_messages(DAY, breakouts, verge, verge_pct=2.0,
                                 coverage=(5, 6), analyses=["NYSE:BBB"])
     assert all(len(m) <= 4096 for m in messages) and len(messages) >= 1
     text = "\n".join(messages)
-    assert "&lt;b&gt;x&lt;/b&gt;" in text and '<a href="https://site.example/symbol/NYSE_BBB/">BBB</a>' in text
+    assert "&lt;b&gt;x&lt;/b&gt;" in text and '<a href="https://www.tradingview.com/chart/?symbol=NYSE%3ABBB">BBB</a>' in text
     assert "(נסרקו 5 מתוך 6 מניות)" in text and "ניתוח מלא יגיע" in text and "ועוד 50 באתר" in text
     assert "לא ייעוץ השקעות" in messages[-1] and "(כלל המדידה)" in text
-    empty = "\n".join(evening_messages(DAY, [], [], site_url="https://s.example", verge_pct=2.0))
+    empty = "\n".join(evening_messages(DAY, [], [], verge_pct=2.0))
     assert "אין היום פריצות שוריות" in empty and "מעקב המסחר" not in empty
-    watched = "\n".join(evening_messages(DAY, [], [], site_url="https://s.example", verge_pct=2.0,
+    watched = "\n".join(evening_messages(DAY, [], [], verge_pct=2.0,
                                          live_summary={"passes": 78, "watched": 60, "alerts": 3,
                                                        "data_delay_min": 15.5}))
     assert "78 סבבים · 60 מניות במעקב · 3 התראות · עיכוב הנתונים כ-15.5 דק'" in watched
@@ -149,7 +149,7 @@ def test_dispatch_posts_the_workflow_and_its_inputs():
 
 # ------------------------------------------------------------------ during the session
 def _live_setup(tmp_path):
-    from test_web_live import RULES, _setup
+    from scan_setup import RULES, _setup
     from tascreen.config import AlertsSettings, LiveSettings, Settings
     from tascreen.market_hours import next_sessions
     from tascreen.web.data import ScanRepository
@@ -173,7 +173,7 @@ def _ohlcv(session_day, price, days_back=0):
 
 def test_the_watch_list_and_a_crossing_told_once(tmp_path):
     from tascreen.alerts import live_crossings, live_message, live_price, watch_list
-    from test_web_live import LIVE_PRICE
+    from scan_setup import LIVE_PRICE
 
     settings, store, view, session = _live_setup(tmp_path)
     assert watch_list(view, 10.0, 5) == ["NASDAQ:DB"] and watch_list(view, 1.0, 5) == []
@@ -184,7 +184,7 @@ def test_the_watch_list_and_a_crossing_told_once(tmp_path):
     assert live_crossings(view, {"NASDAQ:DB": LIVE_PRICE}, session, {found[0]["key"]: {}}) == []
     assert live_crossings(view, {"NASDAQ:DB": 105.0}, session, {}) == []      # still below the line
     text = live_message(found, datetime(2026, 3, 20, 15, 40, tzinfo=timezone.utc),
-                        "America/New_York", "https://site.example")
+                        "America/New_York")
     assert "לא סופי עד הסגירה" in text and "11:40 שעון ניו יורק" in text and "DB</a>" in text
 
 
@@ -195,7 +195,7 @@ def test_ci_live_prices_the_watch_list_and_alerts_once(tmp_path, monkeypatch):
     import tascreen.market_hours as hours
     import tascreen.notify
     from tascreen.alerts import read_sent
-    from test_web_live import LIVE_PRICE
+    from scan_setup import LIVE_PRICE
 
     settings, store, view, session = _live_setup(tmp_path)
     calls, sent = [], []
@@ -284,10 +284,10 @@ def test_the_news_goes_under_each_breakout_and_live_crossing():
     news = {"NYSE:BBB": {"title": "BBB beats estimates", "hours": 2.0, "provider": "Reuters",
                          "link": "https://www.tradingview.com/news/y/", "published": now}}
     breakouts = bullish_breakouts(_view(), lambda s: None, {})
-    text = "\n".join(evening_messages(DAY, breakouts, [], site_url="https://s.example", verge_pct=2.0,
+    text = "\n".join(evening_messages(DAY, breakouts, [], verge_pct=2.0,
                                       news=news))
     assert "BBB beats estimates" in text and text.count("📰") == 1
     found = [{"symbol": "NYSE:BBB", "name": "משולש", "line": 100.0, "price": 101.0, "target": 110.0,
               "key": "k"}] * 60
-    message = live_message(found, now, "America/New_York", "https://s.example", news)
+    message = live_message(found, now, "America/New_York", news)
     assert len(message) <= 4096 and "BBB beats estimates" in message and "באתר." in message

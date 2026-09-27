@@ -1,4 +1,4 @@
-"""Claude for the channel agents, through the owner's Claude Code subscription.
+"""Claude for the chart analyst and the X news, through the owner's Claude Code subscription.
 
 Adapted from market-research-pipeline's pipeline/debate.py (ClaudeCodeLLM), where
 the owner chose the subscription over per-call API billing. Checked against the
@@ -61,11 +61,11 @@ class ClaudeCodeLLM:
                  command: list[str] | None = None, run=None, environ: dict | None = None):
         env = os.environ if environ is None else environ
         if env.get("CLAUDECODE") == "1":
-            raise ConfigError("the channel agents use Claude Code, which will not start inside "
+            raise ConfigError("this uses Claude Code, which will not start inside "
                               "another Claude Code session. Run this in a normal terminal "
                               "(VS Code: Terminal > New Terminal).")
         if effort not in self.EFFORTS:
-            raise ConfigError(f"channels.effort '{effort}' is not one of {', '.join(self.EFFORTS)}")
+            raise ConfigError(f"effort '{effort}' is not one of {', '.join(self.EFFORTS)}")
         self.command = command or self.find_cli()
         self.name = f"claude-code:{model}"
         self.model, self.effort, self.timeout_s = model, effort, timeout_s
@@ -94,7 +94,7 @@ class ClaudeCodeLLM:
                 "--tools", "", "--strict-mcp-config", "--no-session-persistence",
                 "--model", self.model, "--effort", self.effort, "--system-prompt", system]
         env = {k: v for k, v in self._environ.items() if k not in self.CREDENTIAL_VARS}
-        with tempfile.TemporaryDirectory(prefix="ta-channels-") as cwd:
+        with tempfile.TemporaryDirectory(prefix="ta-claude-") as cwd:
             try:
                 done = self._run(args, input=user.encode("utf-8"), capture_output=True, cwd=cwd,
                                  env=env, timeout=self.timeout_s)

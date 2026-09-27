@@ -1,7 +1,7 @@
 # CLAUDE.md — project brief for Claude Code
 
-A local, Hebrew-language website that screens US stocks above a $1B market cap by
-technical analysis. It filters on:
+A Hebrew Telegram bot that screens US stocks above a $1B market cap by technical
+analysis (the website was removed on 2026-09-27: the owner uses Telegram only). It looks at:
 
 - chart patterns, following Bulkowski's *Encyclopedia of Chart Patterns*;
 - candlestick patterns, following Bulkowski's *Encyclopedia of Candlestick Charts*;
@@ -52,18 +52,16 @@ Prefer code that asks for or does things itself over telling the user to edit fi
 .venv\Scripts\python.exe run.py --check-bars          # bars vs trading calendar -> logs/bars_audit.json
 .venv\Scripts\python.exe run.py --scan                # indicators + patterns -> data/scans/<session>/ (~3 min)
 .venv\Scripts\python.exe run.py --scan-symbol NASDAQ:NVDA   # one symbol's detections with checklists
-.venv\Scripts\python.exe run.py --serve               # website on http://127.0.0.1:8050/ (opens the browser)
-.venv\Scripts\python.exe run.py --quotes              # every stock's last price once -> data/quotes/
-.venv\Scripts\python.exe run.py --live                # quotes every 5 min in session, daily update after close
-.venv\Scripts\python.exe run.py --channels            # agents write today's channels (normal terminal only)
-.venv\Scripts\python.exe run.py --channels --force    # write them again
-.venv\Scripts\python.exe run.py --redraw-charts      # redraw stored chart posts after a chart_svg change
+.venv\Scripts\python.exe run.py --export-webhook DIR  # what Vercel serves: the bot's webhook only
 .venv\Scripts\python.exe run.py --outcomes           # breakout ledger from the saved scans (also after every scan)
 .venv\Scripts\python.exe run.py --outcomes --rebuild # rebuild it from the saved scans (+ backfill) made with the current rules
 .venv\Scripts\python.exe run.py --backfill-outcomes [--limit N]  # past breakouts, no look-ahead (~1.5 h, resumable)
 .venv\Scripts\python.exe run.py --backfill-needed    # yes/no: rules changed since the backfill (backfill.yml)
 .venv\Scripts\python.exe run.py --analyze NVDA --no-llm    # facts, chart, Pine Script -> logs/analyses/
 .venv\Scripts\python.exe run.py --analyze NVDA --telegram  # + Hebrew text, sent to the bot (normal terminal only)
+.venv\Scripts\python.exe run.py --setup-x              # save the twitterapi.io key (asked for, never shown)
+.venv\Scripts\python.exe run.py --x-discover Reuters   # real answer's keys: confirm xnews.py fields
+.venv\Scripts\python.exe run.py --xnews                # one X news pass -> Telegram (normal terminal only)
 ```
 
 For a long run from a Claude Code session, start a detached process: the tool kills
@@ -106,31 +104,27 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 - A daily bar is a close only after `market.session_close` (16:15 New York); see
   `tascreen/market_hours.py`.
 - Config is in `config.yaml`. Unknown sections and keys are rejected.
-- **The website (`tascreen/web/`) only reads** data/ and logs/; it never calls TradingView.
-  - Filters live in the URL (`web/filters.py`); a bad value is dropped and reported in
-    Hebrew, never guessed.
-  - No raw nan/None/NaT on a page (`fmt.page_problems`, asserted in `tests/test_web.py`).
-  - RTL: numbers in `num` spans (LTR), English names isolated (`.co`), numeric inputs LTR
-    with digit-only placeholders. Hebrew labels live in `web/labels.py`.
-  - Lightweight Charts 5.2.1 is vendored: keep its NOTICE line and `attributionLogo`.
-  - Design: dark by default, purple accent, Heebo + IBM Plex Mono. The ui-ux-pro-max audit
-    of 2026-09-26 is the bar for new UI: contrast >= 4.5:1, no text under 12 px, 44 px
-    touch targets, a skip link, line icons (no emoji as icons).
+- What is left of `tascreen/web/`: `data.py` (the newest scan as a view, read by the
+  alerts), `labels.py` (sector names) and the bot's webhook (`vercel/telegram.js`, deployed
+  alone by `export.py`). Links in messages go to TradingView's chart, not to a site.
 
 ## How it runs (details per subsystem: docs/NOTES.md)
 
-- Hosting: GitHub Actions + Vercel (https://ta-screener.vercel.app); the home PC runs
+- Hosting: GitHub Actions + Vercel (only the bot's webhook, ta-screener.vercel.app/api/telegram/);
+  the home PC runs
   nothing. Workflows share the concurrency group `state` (a newer queued run cancels a
   pending one):
   - `run.yml`: nightly 21:40 UTC Mon-Fri, catch-ups 01:10 / 05:10 UTC Tue-Sat (update,
-    scan, channels, alerts, publish);
-  - `live.yml`: quotes during the session;
+    scan, alerts, webhook deploy);
+  - `live.yml`: breakout crossings during the session (Telegram);
+  - `xnews.yml`: every 10 min Mon-Fri 10-24 UTC, breaking news from X (`tascreen/xnews.py`;
+    own group `xnews`, seen ids on the state repo's `xnews` branch);
   - `analyst.yml`: one analysis on request (the Telegram bot dispatches it);
   - `backfill.yml`: Saturdays 08:00 UTC, when the pattern rules changed;
   - `eval.yml`: an analyst evaluation round (outside the `state` group).
 - State: the PRIVATE repo `twitx2003-rgb/ta-screener-state` (TradingView sign-in, data
   minus bars, full logs; bars in its `bars` release; branches `analyses` and `eval`).
-- Secrets: STATE_REPO_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, VERCEL_TOKEN, TELEGRAM_BOT_TOKEN,
+- Secrets: X_API_KEY (twitterapi.io), STATE_REPO_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, VERCEL_TOKEN, TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID, GH_DISPATCH_TOKEN. Never print them.
 - This repo's Actions logs are public: print counts, dates and error class names only;
   everything else goes to the state repo. Workflow inputs go through `env:`, never
@@ -154,12 +148,12 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   The exact reviewer prompts, the steps and each round's scores are local, in
   `logs/eval/REVIEW.md` and `logs/eval/roundN/scores.md` (gitignored: they quote prices).
 - Open: pattern quality in the scanner (triangle touches, cup depth: discuss first, it
-  changes the whole site), earnings dates, relative strength, gaps; the hosting keepalive
+  changes every alert), earnings dates, relative strength, gaps; the hosting keepalive
   before about 2026-11-23.
 
 ## Working rules
 
-- Stop for review after each stage. Discuss site-wide scanner changes with the owner first.
+- Stop for review after each stage. Discuss scanner-wide changes with the owner first.
 - Public repo: synthetic values in tests; no vendor numbers in comments or commit messages.
 - Edits that contain backslashes: write a Python script with the Write tool (Bash heredocs
   here collapse double backslashes into one).
@@ -170,8 +164,6 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 ## Safety
 
 - Never print, log or commit tokens (`~/.ta-screener/tv_tokens.json`) or `.env`.
-- Never commit or upload `data/` or `logs/`. The server binds to 127.0.0.1 only.
-  Exposing it is the owner's own step, through their VS Code tunnel; Claude does not
-  open tunnels.
+- Never commit or upload `data/` or `logs/`.
 - Nothing here is investment advice. Pattern targets are the book's measure rule, not
   forecasts.

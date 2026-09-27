@@ -65,23 +65,3 @@ def test_the_statistics_per_pattern_and_in_total():
     assert p["target_pct"] == 50.0 and p["median_mae_pct"] == 2.5 and p["losing_streak"] == 1
     assert total["losing_streak"] == 2                                     # -1 then -2 at the end
     assert bt.summary(pd.DataFrame(columns=frame.columns), 3) == []
-
-
-def test_the_scorecard_page_shows_the_backtest(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from tascreen.config import Settings
-    from tascreen.store import Store
-    from tascreen.web import fmt
-    from tascreen.web.app import HOST, create_app
-
-    settings = Settings(root=tmp_path)
-    store = Store(settings.data_dir)
-    store.write_backtest({"trades": 1234, "period": {"from": "2020-01-02", "to": "2026-03-20"},
-                          "rows": [{"pattern": "all", "direction": "bullish", "trades": 1234,
-                                    "win_pct": 51.0, "avg_return_pct": 2.5, "median_return_pct": 1.0,
-                                    "profit_factor": 1.4, "avg_sessions": 30.0, "median_mae_pct": 8.0,
-                                    "p90_mae_pct": 20.0}]})
-    page = TestClient(create_app(settings), base_url=f"http://{HOST}").get("/scorecard")
-    assert page.status_code == 200 and fmt.page_problems(page.text) == []
-    assert "בדיקה לאחור" in page.text and "1,234" in page.text and "כל התבניות" in page.text

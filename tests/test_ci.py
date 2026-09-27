@@ -135,10 +135,10 @@ def test_the_vercel_probe_site_and_its_checks(tmp_path):
 # ------------------------------------------------------------------ the tick
 def _tick_setup(tmp_path, monkeypatch, deferred=0):
     import run
-    from test_web_live import _setup
+    from scan_setup import _setup
 
     settings, store, day = _setup(tmp_path)
-    calls = {"update": 0, "channels": 0}
+    calls = {"update": 0}
 
     def fake_update(s, limit, stop_at=None):
         calls["update"] += 1
@@ -148,28 +148,19 @@ def _tick_setup(tmp_path, monkeypatch, deferred=0):
             encoding="utf-8")
         return 0
 
-    def fake_channels(s, force=False, writer=None):
-        calls["channels"] += 1
-        (s.log_dir / "channels_last_run.json").write_text(
-            json.dumps({"channels": {"general": {"threads": 1}, "double_top": "failed: x"}}),
-            encoding="utf-8")
-        return 1
-
     monkeypatch.setattr(run, "update", fake_update)
-    monkeypatch.setattr(run, "channels", fake_channels)
     monkeypatch.setattr(run, "_target", lambda s: day)
     return run, settings, store, day, calls
 
 
 def test_the_tick_runs_the_daily_update_once_per_session(tmp_path, monkeypatch):
     run, settings, store, day, calls = _tick_setup(tmp_path, monkeypatch)
-    assert run.ci_tick(settings, None, None, with_channels=True) == 0
+    assert run.ci_tick(settings, None, None) == 0
     summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
     assert summary["due"] and summary["complete"] and summary["session"] == day.isoformat()
-    assert summary["channels"] == {"written": 1, "already": 0, "failed": 1, "skipped": 0}
     assert summary["scan"]["symbols_scanned"] == 2
-    assert run.ci_tick(settings, None, None, with_channels=True) == 0       # nothing due now
-    assert calls == {"update": 1, "channels": 1}
+    assert run.ci_tick(settings, None, None) == 0       # nothing due now
+    assert calls == {"update": 1}
     text = (settings.log_dir / "ci_summary.json").read_text(encoding="utf-8")
     assert "NYSE:HS" not in text and "close" not in text                    # counts only
 
@@ -185,29 +176,29 @@ def test_the_tick_sends_the_breakout_report_once_and_logs_counts_only(tmp_path, 
             sent.append(text)
 
     monkeypatch.setattr(tascreen.notify, "from_environment", lambda: Bot())
-    run.ci_tick(settings, None, None, with_channels=False)
+    run.ci_tick(settings, None, None)
     summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
     assert summary["alerts"]["status"] == "sent" and sent and "פריצות שוריות" in sent[0]
     assert set(summary["alerts"]) == {"status", "breakouts", "verge", "analyses", "messages",
                                       "intraday_held", "intraday_fell", "charts", "charts_missing"}
-    run.ci_tick(settings, None, None, with_channels=False)
+    run.ci_tick(settings, None, None)
     summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
     assert summary["alerts"] == {"status": "already sent"} and len(sent) == 1
 
 
 def test_without_a_bot_the_tick_only_says_so(tmp_path, monkeypatch):
     run, settings, store, day, calls = _tick_setup(tmp_path, monkeypatch)
-    run.ci_tick(settings, None, None, with_channels=False)
+    run.ci_tick(settings, None, None)
     summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
     assert summary["alerts"] == {"status": "telegram not configured"}
 
 
 def test_a_cut_short_update_is_finished_by_the_next_tick(tmp_path, monkeypatch):
     run, settings, store, day, calls = _tick_setup(tmp_path, monkeypatch, deferred=5)
-    assert run.ci_tick(settings, None, 30, with_channels=False) == 1
+    assert run.ci_tick(settings, None, 30) == 1
     assert store.read_live_state()["complete"] is False
-    run.ci_tick(settings, None, 30, with_channels=False)
-    assert calls == {"update": 2, "channels": 0}
+    run.ci_tick(settings, None, 30)
+    assert calls == {"update": 2}
 
 
 def test_a_refreshed_token_is_pushed_to_the_state_repo(tmp_path, monkeypatch):

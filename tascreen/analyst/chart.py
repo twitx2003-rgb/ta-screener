@@ -2,7 +2,7 @@
 (view.py: the nearest zones, and Fibonacci and the volume-by-price profile when they
 matter; the profile sits in a panel beside the price axis). A list of drawing ids draws
 those instead (trendlines, divergences, patterns and averages too). Every coordinate comes from the
-Analysis (facts.py); the colours are the site's night-violet palette (chart_svg.py).
+Analysis (facts.py); the colours are the site's night-violet palette (tascreen/chart_svg.py).
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from ..channels.chart_svg import ANN, INK, MONO, SANS
+from ..chart_svg import ANN, INK, MONO, SANS
 from ..indicators import sma
 from .facts import Analysis
 from .view import note_labels, note_parts, simple_view

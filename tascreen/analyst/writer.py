@@ -9,7 +9,7 @@ fact keys it relies on. A section is dropped unless:
 - every number matches a fact value within 0.5% (small counts, indicator periods and the
   Fibonacci ratios are allowed), and every date is a fact's date;
 - "bullish/bearish" and "rising/falling trend" appear only when a cited fact says so;
-- it carries no advice, trading claim or forecast wording (the channels' own check).
+- it carries no advice, trading claim or forecast wording (analyst/text_rules.py).
 Rejected or missing required sections get one retry with the reasons; what still fails
 is left out, and the message says so. The model never draws: the chart is the simple view.
 The program writes the levels line and the two scenarios from the level map (review round 3:
@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..channels.generate import NUMBER, STRUCTURAL, banned, fact_numbers
+from .text_rules import NUMBER, STRUCTURAL, banned, fact_numbers
 from ..llm import LLM
 from . import load_rules
 from .facts import Analysis

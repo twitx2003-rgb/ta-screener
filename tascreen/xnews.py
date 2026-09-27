@@ -1,0 +1,348 @@
+"""Breaking Wall Street news from X accounts the owner chose, to the Telegram bot.
+
+Every run (xnews.yml, every 10 minutes) reads the chosen accounts' new posts through
+twitterapi.io (a paid third-party reader: 1 USD = 100,000 credits, 15 credits a call at
+least, 0.15 USD per 1,000 posts; checked 2026-09-27), asks Claude once which of them
+matter for Wall Street, and sends only those as a short Hebrew summary with a link.
+Nothing new -> no model call; nothing important -> no message.
+
+The API shape below is from the service's documentation (GET
+/twitter/tweet/advanced_search, header X-API-Key, query + queryType + cursor; posts
+under "tweets" with id, text, url, createdAt, author, isReply; X search operators
+since_time: and -filter:replies). It is NOT yet confirmed
+against a real answer: `run.py --x-discover ACCOUNT` prints the real keys, and every
+field goes through `pick`, which fails with the keys actually present.
+
+The key is a secret: X_API_KEY (a GitHub secret on Actions) or ~/.ta-screener/x.json on
+the owner's computer; never printed. Post texts never go to the public Actions log.
+"""
+from __future__ import annotations
+
+import html
+import json
+import os
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from .errors import ProviderError
+from .fields import pick
+from .llm import UsageLimit
+
+API = "https://api.twitterapi.io"
+CREDENTIALS = Path("~/.ta-screener/x.json")
+ACCOUNT = re.compile(r"^@?([A-Za-z0-9_]{1,15})$")
+QUERY_ACCOUNTS = 10          # accounts per search call ("from:a OR from:b ..."); fewer calls, same posts
+MAX_PAGES = 5                # pages of up to 20 posts per call; more than 100 new posts in 10 minutes is a flood
+OVERLAP_S = 120              # each search starts a little before the last one ended; ids dedupe
+SENT_KEPT = 2000             # post ids remembered so a post is never judged or sent twice
+SUMMARY_MAX = 400
+
+
+def account_name(raw: str) -> str:
+    match = ACCOUNT.match(str(raw).strip())
+    if not match:
+        raise ProviderError(f"'{raw}' is not an X account name (letters, digits, _; up to 15)")
+    return match.group(1)
+
+
+@dataclass(frozen=True)
+class Post:
+    id: str
+    author: str
+    text: str
+    url: str
+    created_at: str
+    is_reply: bool
+
+
+class XSource:
+    def __init__(self, key: str, *, get: Callable[[str, dict], dict] | None = None):
+        self.key = key.strip()
+        self._get = get or self._http
+        self.calls = 0
+
+    def _redact(self, text: str) -> str:
+        return str(text).replace(self.key, "<key>") if self.key else str(text)
+
+    def _http(self, path: str, params: dict) -> dict:
+        request = urllib.request.Request(f"{API}{path}?{urllib.parse.urlencode(params)}",
+                                         headers={"X-API-Key": self.key})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise ProviderError(self._redact(f"X reader {path}: HTTP {exc.code}")) from None
+        except (OSError, ValueError) as exc:
+            raise ProviderError(self._redact(f"X reader {path}: {type(exc).__name__}: {exc}")) from None
+
+    def search_page(self, query: str, cursor: str = "") -> dict:
+        self.calls += 1
+        params = {"query": query, "queryType": "Latest"}
+        if cursor:
+            params["cursor"] = cursor
+        answer = self._get("/twitter/tweet/advanced_search", params)
+        if not isinstance(answer, dict):
+            raise ProviderError(f"X reader: expected an object, got {type(answer).__name__}")
+        if answer.get("status") == "error":
+            raise ProviderError(self._redact(f"X reader: {answer.get('msg') or answer.get('message') or 'error'}"))
+        return answer
+
+    def new_posts(self, accounts: list[str], since: int, *, with_replies: bool = False) -> list[Post]:
+        """Posts by these accounts since the Unix time `since`, oldest first."""
+        found: dict[str, Post] = {}
+        for start in range(0, len(accounts), QUERY_ACCOUNTS):
+            group = accounts[start:start + QUERY_ACCOUNTS]
+            query = "(" + " OR ".join(f"from:{a}" for a in group) + f") since_time:{int(since)}"
+            if not with_replies:
+                query += " -filter:replies"      # replies are paid for too; isReply stays checked
+            cursor = ""
+            for _ in range(MAX_PAGES):
+                page = self.search_page(query, cursor)
+                for row in pick(page, ("tweets",), context="X search") or []:
+                    post = to_post(row)
+                    if with_replies or not post.is_reply:
+                        found[post.id] = post
+                if not page.get("has_next_page") or not page.get("next_cursor"):
+                    break
+                cursor = str(page["next_cursor"])
+        return sorted(found.values(), key=lambda p: (len(p.id), p.id))
+
+
+def to_post(row: dict) -> Post:
+    context = "X post"
+    author = pick(row, ("author",), context=context)
+    name = pick(author, ("userName", "username", "screen_name"), context="X post author")
+    post_id = str(pick(row, ("id",), context=context))
+    url = pick(row, ("url", "twitterUrl"), context=context, allow_null=True) or \
+        f"https://x.com/{name}/status/{post_id}"
+    return Post(id=post_id, author=str(name), text=str(pick(row, ("text",), context=context)),
+                url=str(url), created_at=str(pick(row, ("createdAt",), context=context, allow_null=True) or ""),
+                is_reply=bool(pick(row, ("isReply",), context=context, allow_null=True)))
+
+
+# --- the owner's key -------------------------------------------------------------------
+
+def key_from_environment() -> str | None:
+    if os.environ.get("X_API_KEY"):
+        return os.environ["X_API_KEY"].strip()
+    try:
+        return json.loads(CREDENTIALS.expanduser().read_text(encoding="utf-8"))["key"].strip()
+    except (OSError, ValueError, KeyError, AttributeError):
+        return None
+
+
+def save_key(key: str) -> Path:
+    path = CREDENTIALS.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"key": key.strip()}), encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
+# --- what the last runs saw --------------------------------------------------------------
+
+def load_state(path: Path) -> dict[str, Any]:
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        return state if isinstance(state, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(path)
+
+
+# --- Claude picks what matters ------------------------------------------------------------
+
+SYSTEM = """\
+You screen posts from X for an Israeli private investor who trades US stocks. You get the
+new posts of accounts the investor follows. Pick ONLY what could move US stocks, sectors,
+indices, rates or the dollar today: breaking company news (earnings, guidance, deals,
+FDA, lawsuits, management changes, big contracts), macro data and Fed remarks, government
+actions (tariffs, sanctions, export rules), market-wide events (halts, outages, sharp
+moves). Skip opinions, jokes, promotions, ads, "good morning", repeats of old news,
+engagement bait, chart doodles and anything already stale.
+
+Rate each picked post 1-5 (5 = market-moving now; 4 = clearly relevant to specific
+stocks today; 3 or lower = only mildly interesting). Return an empty list when nothing
+qualifies; that is the usual case.
+
+For each pick write `summary_he`: 1-2 short sentences of plain Hebrew saying what
+happened and which tickers / market it touches. Use ONLY facts in the post: no numbers,
+names or causes that are not written there, no advice, no predictions. Keep tickers and
+company names in English. `post_id` must be copied exactly from the input."""
+
+
+def schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {"picks": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"post_id": {"type": "string"},
+                           "importance": {"type": "integer", "minimum": 1, "maximum": 5},
+                           "summary_he": {"type": "string"}},
+            "required": ["post_id", "importance", "summary_he"],
+            "additionalProperties": False}}},
+        "required": ["picks"],
+        "additionalProperties": False,
+    }
+
+
+def user_prompt(posts: list[Post]) -> str:
+    return json.dumps([{"post_id": p.id, "author": p.author, "time": p.created_at, "text": p.text}
+                       for p in posts], ensure_ascii=False, indent=1)
+
+
+def triage(posts: list[Post], llm, min_importance: int) -> tuple[list[tuple[Post, dict]], int]:
+    """(the picks at or above `min_importance`, in post order; how many answers were rejected)."""
+    if not posts:
+        return [], 0
+    answer, _ = llm.complete(system=SYSTEM, user=user_prompt(posts), schema=schema())
+    by_id = {p.id: p for p in posts}
+    picks: dict[str, dict] = {}
+    rejected = 0
+    for item in answer.get("picks") or []:
+        if not isinstance(item, dict):
+            rejected += 1
+            continue
+        post_id, summary = str(item.get("post_id", "")), str(item.get("summary_he", "")).strip()
+        try:
+            importance = int(item.get("importance", 0))
+        except (TypeError, ValueError):
+            importance = 0
+        if post_id not in by_id or not summary or not 1 <= importance <= 5:
+            rejected += 1                  # an invented post, or an empty or broken answer
+            continue
+        if importance >= min_importance:
+            picks[post_id] = {"importance": importance, "summary_he": summary[:SUMMARY_MAX]}
+    return [(p, picks[p.id]) for p in posts if p.id in picks], rejected
+
+
+def message(picks: list[tuple[Post, dict]]) -> str:
+    """One Telegram HTML message for this run's picks (Telegram allows 4096 characters)."""
+    parts = []
+    for post, pick_ in picks:
+        mark = "🔴" if pick_["importance"] >= 5 else "🟠"
+        parts.append(f"{mark} <b>@{html.escape(post.author)}</b>\n{html.escape(pick_['summary_he'])}\n"
+                     f'<a href="{html.escape(post.url, quote=True)}">לציוץ</a>')
+    # whole items only: a cut inside a tag makes Telegram refuse the HTML
+    for shown in range(len(parts), 0, -1):
+        rest = len(parts) - shown
+        text = "📰 חדשות מ-X\n\n" + "\n\n".join(parts[:shown]) + (f"\n\n(ועוד {rest})" if rest else "")
+        if len(text) <= 4000:
+            return text
+    return "📰 חדשות מ-X\n\n" + parts[0][:3900]
+
+
+# --- one run ------------------------------------------------------------------------------
+
+PENDING_MAX = 300            # posts waiting for Claude, at most (the newest are kept)
+PENDING_MAX_AGE_S = 3 * 3600  # older than this is no longer breaking news: dropped unjudged
+LIMIT_PAUSE_S = 3600         # after the subscription's usage limit, no model call for an hour
+
+
+def _post_row(post: Post, added: int) -> dict:
+    return {"id": post.id, "author": post.author, "text": post.text, "url": post.url,
+            "created_at": post.created_at, "added": added}
+
+
+def _row_post(row: dict) -> Post:
+    return Post(id=str(row["id"]), author=str(row["author"]), text=str(row["text"]), url=str(row["url"]),
+                created_at=str(row.get("created_at", "")), is_reply=False)
+
+
+def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], Any], send: Callable[[str], None],
+             state_path: Path, now: datetime, min_importance: int, daily_read_cap: int,
+             llm_daily_cap: int = 45, llm_min_interval_s: int = 1200,
+             first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
+    """Read, pick, send, remember. Returns counts only (safe for the public log).
+
+    Posts are read every run, but Claude is asked at most every `llm_min_interval_s`
+    and `llm_daily_cap` times a day (the subscription is shared with the chart
+    analyses); the posts in between wait in the state's "pending" list and are
+    judged together. The state is saved only after the message went out, so a failed
+    send is retried by the next run and a sent post is never sent again."""
+    state = load_state(state_path)
+    stamp = int(now.timestamp())
+    day = now.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    reads = state.get("reads") if isinstance(state.get("reads"), dict) else {}
+    if reads.get("day") != day:
+        reads = {"day": day, "posts": 0}
+    model = state.get("llm") if isinstance(state.get("llm"), dict) else {}
+    if model.get("day") != day:
+        model = {"day": day, "calls": 0, "last": model.get("last", 0), "paused_until": model.get("paused_until", 0)}
+    summary: dict[str, Any] = {"accounts": len(accounts), "read": 0, "new": 0, "waiting": 0,
+                               "judged": 0, "sent": 0, "rejected": 0, "calls": 0,
+                               "claude_today": model["calls"]}
+    if not accounts:
+        summary["status"] = "no accounts"
+        return summary
+    seen = list(state.get("seen") or [])
+    pending = [r for r in state.get("pending") or []
+               if isinstance(r, dict) and stamp - int(r.get("added", 0)) <= PENDING_MAX_AGE_S]
+    since = int(state.get("since") or stamp - first_lookback_s)
+    if reads["posts"] < daily_read_cap:
+        posts = source.new_posts(accounts, since - OVERLAP_S, with_replies=with_replies)
+        summary["calls"], summary["read"] = source.calls, len(posts)
+        seen_set = set(seen)
+        new = [p for p in posts if p.id not in seen_set]
+        summary["new"] = len(new)
+        seen = (seen + [p.id for p in new])[-SENT_KEPT:]
+        pending = (pending + [_post_row(p, stamp) for p in new])[-PENDING_MAX:]
+        reads["posts"] += len(posts)
+        since = stamp
+    else:
+        summary["read_status"] = "daily cap"
+    status = "ok"
+    due = (pending and model["calls"] < llm_daily_cap and stamp >= int(model.get("paused_until", 0))
+           and stamp - int(model.get("last", 0)) >= llm_min_interval_s)
+    if due:
+        try:
+            picks, summary["rejected"] = triage([_row_post(r) for r in pending], llm_factory(), min_importance)
+        except UsageLimit:
+            model["paused_until"] = stamp + LIMIT_PAUSE_S
+            picks, status = [], "claude limit"
+        else:
+            model["calls"] += 1
+            model["last"] = stamp
+            summary["judged"] = len(pending)
+            pending = []
+        if picks:
+            send(message(picks))
+        summary["sent"] = len(picks)
+    elif pending and model["calls"] >= llm_daily_cap:
+        status = "claude daily cap"
+    summary["waiting"] = len(pending)
+    summary["claude_today"] = model["calls"]
+    save_state(state_path, {"since": since, "seen": seen, "pending": pending, "reads": reads, "llm": model})
+    summary["status"] = status
+    return summary
+
+
+ENDED_TEXT = ("📰 תקופת החדשות מ-X הסתיימה (שלושה חודשים). לא ייקראו יותר ציוצים ולא ישולם עליהם. "
+              "כדי להמשיך: לשנות את התאריך xnews.until בקובץ ההגדרות.")
+
+
+def past_end(*, until: str, now: datetime, state_path: Path, send: Callable[[str], None]) -> bool:
+    """After the `until` day (New York's date is not needed: a day late is fine) nothing
+    is read; the owner is told once."""
+    if now.astimezone(timezone.utc).date().isoformat() <= until:
+        return False
+    state = load_state(state_path)
+    if not state.get("ended"):
+        send(ENDED_TEXT)
+        save_state(state_path, {**state, "ended": True, "pending": []})
+    return True

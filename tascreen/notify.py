@@ -183,8 +183,7 @@ def save_credentials(token: str, chat_id: int) -> Path:
     return path
 
 
-def run_message(summary: dict[str, Any], status: str, run_url: str = "",
-                site_url: str = "") -> str | None:
+def run_message(summary: dict[str, Any], status: str, run_url: str = "") -> str | None:
     """The owner's message about one GitHub run (None when there is nothing to say)."""
     session = summary.get("session")
     day = "/".join(reversed(session.split("-"))) if session else "?"
@@ -205,18 +204,6 @@ def run_message(summary: dict[str, Any], status: str, run_url: str = "",
         lines.append(f"⚠️ העדכון היומי ל-{day} לא הושלם: חסרות {missing} מניות. ימשיך בריצה הבאה.")
     if scan:
         lines.append(f"סריקה: {scan.get('symbols_scanned')} מניות, {scan.get('detections')} זיהויים.")
-    channels = summary.get("channels")
-    if channels:
-        text = f"ערוצים: {channels.get('written', 0)} נכתבו"
-        if channels.get("failed"):
-            text += f", {channels['failed']} נכשלו"
-        if channels.get("skipped"):
-            text += f", {channels['skipped']} נדחו (מכסת Claude)"
-        lines.append(text + ".")
-    elif summary.get("channels_error"):
-        lines.append(f"ערוצים: נכשלו ({summary['channels_error']}).")
-    if site_url and status == "success":
-        lines.append(f"האתר: {site_url}")
     if status != "success":
         lines.append("חלק מהריצה נכשל." + link)
     return "\n".join(lines)

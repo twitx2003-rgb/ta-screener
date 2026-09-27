@@ -14,7 +14,7 @@ from tascreen.outcomes import (empty_ledger, evaluate_row, merge, rows_from_scan
 from tascreen.patterns.chart import detect_chart
 from tascreen.patterns.levels import detection_key, geometry, invalidation
 from test_chart_patterns import ASC_TRIANGLE, CUP, DOUBLE_BOTTOM, HS_TOP, RULES
-from test_web_live import _setup
+from scan_setup import _setup
 
 
 def _one(bars, pattern):
@@ -204,23 +204,3 @@ def test_scorecard_shows_percentages_only_with_enough_cases():
     assert row["target_pct"] == 60.0 and row["failed_pct"] == 40.0
     assert scorecard(ledger, min_cases=21)[0]["target_pct"] is None
     assert scorecard(None, 20) == [] and scorecard(empty_ledger(), 20) == []
-
-
-# --------------------------------------------------------------------- pages
-def test_scorecard_page_before_and_after_the_first_ledger(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from tascreen.web import fmt
-    from tascreen.web.app import HOST, create_app
-
-    settings, store, _ = _setup(tmp_path)
-    client = TestClient(create_app(settings, rules=RULES), base_url=f"http://{HOST}")
-    empty = client.get("/scorecard")
-    assert empty.status_code == 200 and "עוד אין פריצות במעקב" in empty.text
-    update(store, 60)
-    html = client.get("/scorecard").text
-    assert fmt.page_problems(html) == []
-    assert "ראש וכתפיים" in html and "לא הסטטיסטיקה מהספרים" in html and "מדגם קטן" in html
-    assert 'href="/scorecard" aria-current="page"' in html
-    api = client.get("/api/scorecard").json()
-    assert api["patterns"][0]["pattern"] == "head_shoulders_top" and api["patterns"][0]["target_pct"] is None

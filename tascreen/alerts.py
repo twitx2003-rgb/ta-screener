@@ -19,6 +19,7 @@ import html
 import json
 import math
 import time
+import urllib.parse
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -32,7 +33,7 @@ from .fields import pick
 from .outcomes import FINAL
 from .patterns.levels import invalidation
 from .quotes import crossings
-from .store import Store, _write_json, symbol_file_stem
+from .store import Store, _write_json
 from .tv.data import NEWS_TOOL, OHLCV_TOOL, fetch_in_session
 from .web.data import ScanView, detection_record
 
@@ -159,9 +160,13 @@ def _day(day: date) -> str:
     return f"{day:%d/%m/%Y}"
 
 
-def _link(symbol: str, site_url: str) -> str:
+CHART_URL = "https://www.tradingview.com/chart/?symbol="
+
+
+def _link(symbol: str) -> str:
+    """The ticker, linked to its chart on TradingView (the site was removed, 2026-09-27)."""
     ticker = html.escape(symbol.split(":")[-1])
-    return f'<a href="{html.escape(site_url)}/symbol/{symbol_file_stem(symbol)}/">{ticker}</a>'
+    return f'<a href="{CHART_URL}{urllib.parse.quote(symbol, safe="")}">{ticker}</a>'
 
 
 def _pack(blocks: list[str]) -> list[str]:
@@ -176,7 +181,7 @@ def _pack(blocks: list[str]) -> list[str]:
     return messages + ([current] if current else [])
 
 
-def breakout_block(n: int, b: dict[str, Any], site_url: str, headline: dict | None = None,
+def breakout_block(n: int, b: dict[str, Any], headline: dict | None = None,
                    limit: int | None = None) -> str:
     """One confirmed breakout's lines (the report's list and each chart's caption). With
     `limit`, the news and then the levels line go before a character is cut."""
@@ -188,7 +193,7 @@ def breakout_block(n: int, b: dict[str, Any], site_url: str, headline: dict | No
         levels.append(f"ביטול {_price(b['invalidation'])}")
     if b["hit_rate"] is not None and _finite(b["target"]):
         levels.append(f"בעבר {b['hit_rate']:g}% מהפריצות שלה הגיעו ליעד")
-    head = (f"{n}. {_link(b['symbol'], site_url)} · {html.escape(str(b['name']))}\n"
+    head = (f"{n}. {_link(b['symbol'])} · {html.escape(str(b['name']))}\n"
             f"פריצה {_price(b['breakout'])} · סגירה {_price(b['close'])}{volume}")
     extras = [f"\n{' · '.join(levels)}" if levels else "", f"\n{news_line(headline)}" if headline else ""]
     while limit is not None and len(head + "".join(extras)) > limit and any(extras):
@@ -196,7 +201,7 @@ def breakout_block(n: int, b: dict[str, Any], site_url: str, headline: dict | No
     return head + "".join(extras)
 
 
-def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, site_url: str,
+def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *,
                      verge_pct: float, coverage: tuple[int, int] | None = None,
                      analyses: list[str] | None = None,
                      intraday: list[dict] | None = None,
@@ -209,7 +214,7 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, sit
     if not breakouts:
         blocks.append("אין היום פריצות שוריות מאושרות של תבניות גרף.")
     for n, b in enumerate(breakouts, 1):
-        blocks.append(breakout_block(n, b, site_url, (news or {}).get(b["symbol"])))
+        blocks.append(breakout_block(n, b, (news or {}).get(b["symbol"])))
     if analyses:
         blocks.append("📊 ניתוח מלא יגיע בהודעות נפרדות: "
                       + ", ".join(html.escape(s.split(":")[-1]) for s in analyses))
@@ -217,14 +222,14 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *, sit
         lines = ["<b>⚡ הפריצות מהמסחר של היום, בסגירה</b>"]
         for f in intraday:
             mark = "✅ החזיקה מעל הקו" if f["held"] else "❌ חזרה מתחת לקו"
-            lines.append(f"{mark}: {_link(f['symbol'], site_url)} · {html.escape(str(f['name']))} · "
+            lines.append(f"{mark}: {_link(f['symbol'])} · {html.escape(str(f['name']))} · "
                          f"קו {_price(f['line'])} · סגירה {_price(f['close'])}")
         blocks.append("\n".join(lines))
     lines = [f"<b>⏳ על סף פריצה</b> (הסגירה עד {verge_pct:g}% מתחת לקו הפריצה)"]
     if not verge:
         lines.append("אין היום.")
     for n, v in enumerate(verge[:VERGE_SHOWN], 1):
-        lines.append(f"{n}. {_link(v['symbol'], site_url)} · {html.escape(str(v['name']))} · "
+        lines.append(f"{n}. {_link(v['symbol'])} · {html.escape(str(v['name']))} · "
                      f"קו {_price(v['line'])} · סגירה {_price(v['close'])} ({v['gap_pct']:.1f}% מתחת)")
     if len(verge) > VERGE_SHOWN:
         lines.append(f"ועוד {len(verge) - VERGE_SHOWN} באתר.")
@@ -259,14 +264,14 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
                 if summary.get("symbols_scanned") and summary.get("symbols_in_universe") else None)
     intraday = intraday_followup(view, sent.get("live") or {})
     news = news_of([b["symbol"] for b in breakouts]) if news_of and breakouts else {}
-    messages = evening_messages(view.day, breakouts, verge, site_url=cfg.site_url,
+    messages = evening_messages(view.day, breakouts, verge,
                                 verge_pct=cfg.verge_pct, coverage=coverage, analyses=chosen,
                                 intraday=intraday, live_summary=live_summary, news=news)
     for message in messages:
         bot.send(message, html=True)
     photos, no_chart = ([], 0)
     if images and breakouts:
-        photos, no_chart = breakout_photos(breakouts, store.read_bars, cfg.site_url, news,
+        photos, no_chart = breakout_photos(breakouts, store.read_bars, news,
                                            to_png or default_png)
         try:
             bot.send_album(photos)
@@ -404,7 +409,7 @@ def watch_started_message(near: int, far: int, cfg: AlertsSettings) -> str:
             "תגיע הודעה רק כשמניה חוצה את קו הפריצה.")
 
 
-def live_message(found: list[dict[str, Any]], at: datetime, market_tz: str, site_url: str,
+def live_message(found: list[dict[str, Any]], at: datetime, market_tz: str,
                  news: dict[str, dict] | None = None) -> str:
     head = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} שעון ניו יורק</b>",
             "לא סופי עד הסגירה. מחירי TradingView עשויים להיות מעוכבים.", ""]
@@ -414,7 +419,7 @@ def live_message(found: list[dict[str, Any]], at: datetime, market_tz: str, site
         above = (c["price"] / c["line"] - 1) * 100
         target = f" · יעד {_price(c['target'])} (כלל המדידה)" if _finite(c["target"]) else ""
         headline = news_line((news or {}).get(c["symbol"]))
-        item = (f"{n}. {_link(c['symbol'], site_url)} · {html.escape(str(c['name']))} · "
+        item = (f"{n}. {_link(c['symbol'])} · {html.escape(str(c['name']))} · "
                 f"קו {_price(c['line'])} · מחיר {_price(c['price'])} (+{above:.1f}% מעל){target}"
                 + (f"\n{headline}" if headline else ""))
         if len("\n".join(head + items + [item] + tail)) > MESSAGE_LIMIT - 40:      # never cut a tag
@@ -502,7 +507,7 @@ def default_png(svg: str) -> bytes:
 
 
 def pattern_chart(bars: pd.DataFrame, record: dict[str, Any], *, live_price: float | None = None) -> str:
-    from .channels.chart_svg import render
+    from .chart_svg import render
 
     drawings = CROSSING_DRAWINGS if live_price is not None else BREAKOUT_DRAWINGS
     symbol = str(record.get("symbol", ""))
@@ -523,13 +528,13 @@ def _photo(bars: pd.DataFrame | None, record: dict | None, caption: str, to_png:
         return None
 
 
-def breakout_photos(breakouts: list[dict], bars_of: Callable[[str], pd.DataFrame | None], site_url: str,
+def breakout_photos(breakouts: list[dict], bars_of: Callable[[str], pd.DataFrame | None],
                     news: dict[str, dict] | None = None,
                     to_png: Callable[[str], bytes] = default_png) -> tuple[list[tuple[bytes, str]], int]:
     """The confirmed breakouts' charts (strongest first) with their report lines as captions."""
     photos, failed = [], 0
     for n, b in enumerate(breakouts, 1):
-        caption = breakout_block(n, b, site_url, (news or {}).get(b["symbol"]), limit=CAPTION_LIMIT)
+        caption = breakout_block(n, b, (news or {}).get(b["symbol"]), limit=CAPTION_LIMIT)
         photo = _photo(bars_of(b["symbol"]), b.get("record"), caption, to_png)
         if photo is None:
             failed += 1
@@ -538,12 +543,12 @@ def breakout_photos(breakouts: list[dict], bars_of: Callable[[str], pd.DataFrame
     return photos, failed
 
 
-def crossing_caption(c: dict[str, Any], at: datetime, market_tz: str, site_url: str,
+def crossing_caption(c: dict[str, Any], at: datetime, market_tz: str,
                      headline: dict | None = None) -> str:
     above = (c["price"] / c["line"] - 1) * 100
     target = f" · יעד {_price(c['target'])} (כלל המדידה)" if _finite(c["target"]) else ""
     lines = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} ניו יורק</b>",
-             f"{_link(c['symbol'], site_url)} · {html.escape(str(c['name']))} · קו {_price(c['line'])} · "
+             f"{_link(c['symbol'])} · {html.escape(str(c['name']))} · קו {_price(c['line'])} · "
              f"מחיר {_price(c['price'])} (+{above:.1f}% מעל){target}"]
     news = news_line(headline)
     if news and len("\n".join(lines + [news])) < CAPTION_LIMIT - 80:
@@ -553,12 +558,12 @@ def crossing_caption(c: dict[str, Any], at: datetime, market_tz: str, site_url: 
 
 
 def crossing_photos(found: list[dict], bars_of: Callable[[str], pd.DataFrame | None], at: datetime,
-                    market_tz: str, site_url: str, news: dict[str, dict] | None = None,
+                    market_tz: str, news: dict[str, dict] | None = None,
                     to_png: Callable[[str], bytes] = default_png) -> list[tuple[bytes, str]]:
     """Each live crossing's forming pattern, its breakout line and the live price."""
     photos = []
     for c in found:
-        caption = crossing_caption(c, at, market_tz, site_url, (news or {}).get(c["symbol"]))
+        caption = crossing_caption(c, at, market_tz, (news or {}).get(c["symbol"]))
         photo = _photo(bars_of(c["symbol"]), c.get("record"), caption, to_png, live_price=c["price"])
         if photo is not None:
             photos.append(photo)
