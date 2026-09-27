@@ -25,6 +25,7 @@ installed CLI 2.1.280 (`claude --help`):
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -89,24 +90,60 @@ class ClaudeCodeLLM:
                               "a .cmd shim would mangle the JSON arguments")
         return [found]
 
-    def complete(self, *, system: str, user: str, schema: dict) -> tuple[dict, dict]:
-        args = [*self.command, "-p", "--output-format", "json", "--json-schema", json.dumps(schema),
+    def _args(self, system: str, schema: dict, output: str) -> list[str]:
+        return [*self.command, "-p", "--output-format", output, "--json-schema", json.dumps(schema),
                 "--tools", "", "--strict-mcp-config", "--no-session-persistence",
                 "--model", self.model, "--effort", self.effort, "--system-prompt", system]
+
+    def _call(self, args: list[str], stdin: bytes):
         env = {k: v for k, v in self._environ.items() if k not in self.CREDENTIAL_VARS}
         with tempfile.TemporaryDirectory(prefix="ta-claude-") as cwd:
             try:
-                done = self._run(args, input=user.encode("utf-8"), capture_output=True, cwd=cwd,
+                done = self._run(args, input=stdin, capture_output=True, cwd=cwd,
                                  env=env, timeout=self.timeout_s)
             except subprocess.TimeoutExpired as exc:
                 raise ProviderError(f"Claude Code did not answer within {self.timeout_s}s") from exc
-        out = done.stdout.decode("utf-8", errors="replace").strip()
-        err = done.stderr.decode("utf-8", errors="replace").strip()
+        return (done.returncode, done.stdout.decode("utf-8", errors="replace").strip(),
+                done.stderr.decode("utf-8", errors="replace").strip())
+
+    def complete(self, *, system: str, user: str, schema: dict) -> tuple[dict, dict]:
+        code, out, err = self._call(self._args(system, schema, "json"), user.encode("utf-8"))
         try:
             result = json.loads(out)
         except json.JSONDecodeError:
-            raise ProviderError(f"Claude Code (exit {done.returncode}) did not return JSON: "
+            raise ProviderError(f"Claude Code (exit {code}) did not return JSON: "
                                 f"{(err or out)[:500]}") from None
+        return self._answer(result, err)
+
+    def complete_with_images(self, *, system: str, user: str, images: list[tuple[str, bytes]],
+                             schema: dict) -> tuple[dict, dict]:
+        """The same call with pictures: one stream-json user message holding the images
+        (base64, `media_type` such as image/jpeg) and then the text. With
+        `--input-format stream-json` the CLI answers in stream-json too (one JSON object
+        a line; `--verbose` is required for that in -p mode); the last line of type
+        "result" has the same fields as the plain JSON answer. (The shape follows the
+        CLI's help and the Messages API's image blocks; `run.py --x-vision-check`
+        confirms it on a real call.)"""
+        content = [{"type": "image", "source": {"type": "base64", "media_type": media,
+                                                "data": base64.b64encode(data).decode("ascii")}}
+                   for media, data in images]
+        content.append({"type": "text", "text": user})
+        line = json.dumps({"type": "user", "message": {"role": "user", "content": content}})
+        args = [*self._args(system, schema, "stream-json"), "--input-format", "stream-json", "--verbose"]
+        code, out, err = self._call(args, (line + "\n").encode("utf-8"))
+        result = None
+        for raw in out.splitlines():
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict) and event.get("type") == "result":
+                result = event
+        if result is None:
+            raise ProviderError(f"Claude Code (exit {code}) gave no result line: {(err or out)[-500:]}")
+        return self._answer(result, err)
+
+    def _answer(self, result, err: str) -> tuple[dict, dict]:
         if not isinstance(result, dict) or result.get("type") != "result":
             raise ProviderError(f"Claude Code returned an unexpected message: {str(result)[:300]}")
         if result.get("is_error") or result.get("subtype") != "success":
@@ -140,3 +177,8 @@ class SyntheticLLM:
         self.calls.append(user)
         return self.answer(system, user, schema), {"input_tokens": 0, "output_tokens": 0,
                                                     "served_by": "synthetic"}
+
+    def complete_with_images(self, *, system: str, user: str, images: list[tuple[str, bytes]],
+                             schema: dict) -> tuple[dict, dict]:
+        self.images = getattr(self, "images", []) + [len(images)]
+        return self.complete(system=system, user=user, schema=schema)

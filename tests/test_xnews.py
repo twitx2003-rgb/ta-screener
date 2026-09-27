@@ -48,7 +48,8 @@ def run(tmp_path, reader, llm, sent, accounts=("NewsDesk",), **kw):
     summary = xnews.run_once(accounts=list(accounts), source=xnews.XSource(KEY, get=reader),
                              llm_factory=factory, send=sent.append, state_path=tmp_path / "state.json",
                              now=kw.pop("now", NOW), min_importance=kw.pop("min_importance", 4),
-                             daily_read_cap=kw.pop("daily_read_cap", 1000), **kw)
+                             daily_read_cap=kw.pop("daily_read_cap", 1000),
+                             fetch=kw.pop("fetch", lambda url: None), **kw)       # never online
     return summary, made
 
 
@@ -247,3 +248,38 @@ def test_a_waiting_post_keeps_its_photo(tmp_path):
     run(tmp_path, FakeReader(), llm, [], now=datetime(2026, 1, 5, 15, 20, tzinfo=timezone.utc),
         llm_min_interval_s=1200, send_photo=lambda u, c: photos.append(u))
     assert photos == ["https://pbs.twimg.com/media/synthetic.jpg"]
+
+
+def test_a_chart_gets_one_line_saying_what_it_shows(tmp_path):
+    def answer(system, user, schema):
+        if "images" in schema["properties"]:
+            return {"images": [{"post_id": "101", "image_he": "גרף של תשואת האג\"ח ל-10 שנים בשנה האחרונה"},
+                               {"post_id": "999", "image_he": "המצאה"}]}
+        return {"picks": [{"post_id": "101", "importance": 5, "summary_he": "התשואה קפצה"},
+                          {"post_id": "102", "importance": 5, "summary_he": "תמונה של מנכ\"ל"}]}
+
+    llm = SyntheticLLM(answer)
+    photos = []
+    page = {"tweets": [photo_row("101"), photo_row("102")], "has_next_page": False}
+    summary, _ = run(tmp_path, FakeReader(page), llm, [], send_photo=lambda u, c: photos.append(c),
+                     fetch=lambda url: ("image/jpeg", b"synthetic"))
+    assert summary["explained"] == 1 and llm.images == [2] and summary["claude_today"] == 2
+    assert photos[0].endswith("\n📊 גרף של תשואת האג&quot;ח ל-10 שנים בשנה האחרונה")
+    assert "📊" not in photos[1]                                        # not a chart: no line
+
+
+def test_the_news_goes_out_even_if_the_picture_look_fails(tmp_path):
+    def answer(system, user, schema):
+        if "images" in schema["properties"]:
+            raise ProviderError("Claude Code returned an error (error_during_execution): x")
+        return {"picks": [{"post_id": "111", "importance": 5, "summary_he": "חדשה"}]}
+
+    photos = []
+    summary, _ = run(tmp_path, FakeReader({"tweets": [photo_row("111")], "has_next_page": False}),
+                     SyntheticLLM(answer), [], send_photo=lambda u, c: photos.append(c),
+                     fetch=lambda url: ("image/png", b"synthetic"))
+    assert summary["explain_error"] == "ProviderError" and len(photos) == 1 and "📊" not in photos[0]
+
+
+def test_only_pictures_from_x_are_fetched():
+    assert xnews.fetch_image("https://evil.example/x.jpg") is None

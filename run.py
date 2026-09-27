@@ -139,6 +139,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Save the twitterapi.io key (asked for, never shown) and test it")
     parser.add_argument("--x-discover", metavar="ACCOUNT",
                         help="One real search for an X account: print the answer's keys (no post text)")
+    parser.add_argument("--x-vision-check", action="store_true",
+                        help="One real post picture -> Claude's explanation -> Telegram (confirms the "
+                             "picture call; normal terminal or xnews.yml with check_vision)")
     parser.add_argument("--xnews", action="store_true",
                         help="One pass: new posts of xnews.accounts -> Claude picks -> Telegram "
                              "(normal terminal or xnews.yml)")
@@ -974,6 +977,41 @@ def x_discover(settings, account: str) -> int:
     return 0
 
 
+def x_vision_check(settings) -> int:
+    """The picture call on a real post, end to end. The public log gets one status word;
+    the explanation (or the error) goes to the owner's Telegram."""
+    import time
+
+    from tascreen import xnews
+    from tascreen.llm import ClaudeCodeLLM
+    from tascreen.notify import from_environment
+
+    cfg, bot = settings.xnews, from_environment()
+    if bot is None:
+        raise ConfigError("no Telegram bot: run `run.py --setup-telegram`")
+    source = _x_source()
+    post = None
+    for account in ("charliebilello", "KobeissiLetter", "Callum_Thomas"):
+        page = source.search_page(f"from:{account} since_time:{int(time.time()) - 7 * 86400} filter:images")
+        post = next((p for p in map(xnews.to_post, page.get("tweets") or []) if p.photo), None)
+        if post:
+            break
+    if post is None:
+        print("vision: no post with a picture found")
+        return 1
+    pick = {"importance": 4, "summary_he": "בדיקה: כך ייראה הסבר לתמונה מציוץ אמיתי."}
+    try:
+        llm = ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s)
+        explained = xnews.explain_images([(post, pick)], llm)
+    except ScreenerError as exc:
+        bot.send(f"🧪 בדיקת ההסבר לתמונות נכשלה: {exc}"[:3500])
+        print(f"vision: failed ({type(exc).__name__})")
+        return 1
+    bot.send_photo_url(post.photo, "🧪 " + xnews.item(post, pick, with_image=True), html=True)
+    print(f"vision: ok (explained={explained})")
+    return 0
+
+
 def xnews_pass(settings) -> int:
     from datetime import datetime, timezone
 
@@ -1060,6 +1098,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.analyze_eval is not None, lambda: analyze_eval(settings, args.analyze_eval or None, args.until)),
         (args.setup_x, lambda: setup_x(settings)),
         (args.x_discover, lambda: x_discover(settings, args.x_discover)),
+        (args.x_vision_check, lambda: x_vision_check(settings)),
         (args.xnews, lambda: xnews_pass(settings)),
     )
     for requested, command in commands:

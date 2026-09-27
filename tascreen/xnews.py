@@ -250,11 +250,92 @@ def triage(posts: list[Post], llm, min_importance: int) -> tuple[list[tuple[Post
     return [(p, picks[p.id]) for p in posts if p.id in picks], rejected
 
 
-def item(post: Post, pick_: dict) -> str:
-    """One pick in Telegram HTML, as short as it can be: mark, account, the sentence, a link."""
+def item(post: Post, pick_: dict, *, with_image: bool = False) -> str:
+    """One pick in Telegram HTML, as short as it can be: mark, account, the sentence, a link;
+    under a photo also the line that says what the picture shows."""
     mark = "🔴" if pick_["importance"] >= 5 else "🟠"
-    return (f"{mark} <b>{html.escape(post.author)}</b>: {html.escape(pick_['summary_he'])} "
+    text = (f"{mark} <b>{html.escape(post.author)}</b>: {html.escape(pick_['summary_he'])} "
             f'<a href="{html.escape(post.url, quote=True)}">↗</a>')
+    if with_image and pick_.get("image_he"):
+        text += f"\n📊 {html.escape(pick_['image_he'])}"
+    return text
+
+
+# --- what a picture shows ------------------------------------------------------------------
+
+IMAGE_SYSTEM = """\
+You explain pictures attached to market news posts, for an Israeli private investor who
+reads them on Telegram. The images come in the order of the list in the text, each with
+its post_id, author and post text.
+
+For each image write `image_he`: ONE short sentence of plain Hebrew, at most about 20
+words, saying what the picture shows and how to read it: what the chart or table
+measures, the period if it is visible, and the one point it makes. Describe only what is
+visible in the picture or written in its post: no advice, no forecasts. Keep tickers in
+English. If the picture is not a chart, table or data (a person, a logo, a meme), return
+an empty string. `post_id` must be copied exactly."""
+
+IMAGES_MAX = 4               # pictures per model call
+IMAGE_BYTES_MAX = 5 * 1024 * 1024
+IMAGE_MAX = 260
+IMAGE_TYPES = ("image/jpeg", "image/png", "image/webp", "image/gif")
+
+
+def image_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {"images": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"post_id": {"type": "string"}, "image_he": {"type": "string"}},
+            "required": ["post_id", "image_he"],
+            "additionalProperties": False}}},
+        "required": ["images"],
+        "additionalProperties": False,
+    }
+
+
+def fetch_image(url: str) -> tuple[str, bytes] | None:
+    """(media type, bytes) of a picture on pbs.twimg.com, or None."""
+    if not url.startswith(PHOTO_HOST):
+        return None
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "ta-screener"}),
+                                    timeout=20) as response:
+            media = response.headers.get_content_type()
+            data = response.read(IMAGE_BYTES_MAX + 1)
+    except (OSError, ValueError):
+        return None
+    return (media, data) if media in IMAGE_TYPES and 0 < len(data) <= IMAGE_BYTES_MAX else None
+
+
+def explain_images(picks: list[tuple[Post, dict]], llm,
+                   fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image) -> int:
+    """Adds `image_he` to the picks whose photo is a chart or table (one model call for up
+    to IMAGES_MAX pictures). Returns how many got one."""
+    chosen, images = [], []
+    for post, pick_ in picks:
+        if post.photo and len(chosen) < IMAGES_MAX:
+            got = fetch(post.photo)
+            if got is not None:
+                chosen.append((post, pick_))
+                images.append(got)
+    if not chosen:
+        return 0
+    listing = json.dumps([{"image": n + 1, "post_id": p.id, "author": p.author, "text": p.text}
+                          for n, (p, _) in enumerate(chosen)], ensure_ascii=False, indent=1)
+    answer, _ = llm.complete_with_images(system=IMAGE_SYSTEM, user=listing, images=images,
+                                         schema=image_schema())
+    by_id = {p.id: k for p, k in chosen}
+    done = 0
+    for entry in answer.get("images") or []:
+        if not isinstance(entry, dict):
+            continue
+        pick_ = by_id.get(str(entry.get("post_id", "")))
+        text = str(entry.get("image_he", "")).strip()
+        if pick_ is not None and text:
+            pick_["image_he"] = text[:IMAGE_MAX]
+            done += 1
+    return done
 
 
 def message(picks: list[tuple[Post, dict]]) -> str:
@@ -274,14 +355,15 @@ def deliver(picks: list[tuple[Post, dict]], send: Callable[[str], None],
     """The picks without a photo in one message, then each photo with its line as the
     caption (under Telegram's 1024). A photo Telegram cannot fetch goes as text instead.
     Returns how many went with a photo."""
-    with_photo = [(p, k) for p, k in picks if p.photo and send_photo is not None and len(item(p, k)) <= 1024]
+    with_photo = [(p, k) for p, k in picks
+                  if p.photo and send_photo is not None and len(item(p, k, with_image=True)) <= 1024]
     plain = [(p, k) for p, k in picks if (p, k) not in with_photo]
     if plain:
         send(message(plain))
     photos = 0
     for post, pick_ in with_photo:
         try:
-            send_photo(post.photo, item(post, pick_))
+            send_photo(post.photo, item(post, pick_, with_image=True))
             photos += 1
         except ProviderError:
             send(message([(post, pick_)]))
@@ -309,6 +391,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
              state_path: Path, now: datetime, min_importance: int, daily_read_cap: int,
              llm_daily_cap: int = 45, llm_min_interval_s: int = 1200,
              send_photo: Callable[[str, str], None] | None = None,
+             fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
              first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
     """Read, pick, send, remember. Returns counts only (safe for the public log).
 
@@ -353,7 +436,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
            and stamp - int(model.get("last", 0)) >= llm_min_interval_s)
     if due:
         try:
-            picks, summary["rejected"] = triage([_row_post(r) for r in pending], llm_factory(), min_importance)
+            llm = llm_factory()
+            picks, summary["rejected"] = triage([_row_post(r) for r in pending], llm, min_importance)
         except UsageLimit:
             model["paused_until"] = stamp + LIMIT_PAUSE_S
             picks, status = [], "claude limit"
@@ -362,6 +446,14 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             model["last"] = stamp
             summary["judged"] = len(pending)
             pending = []
+        if send_photo is not None and any(p.photo for p, _ in picks):
+            try:                             # a second look, at the pictures: never blocks the news
+                summary["explained"] = explain_images(picks, llm, fetch)
+                model["calls"] += 1
+            except UsageLimit:
+                model["paused_until"] = stamp + LIMIT_PAUSE_S
+            except ProviderError as exc:
+                summary["explain_error"] = type(exc).__name__
         if picks:
             summary["photos"] = deliver(picks, send, send_photo)
         summary["sent"] = len(picks)

@@ -12,6 +12,11 @@ on:
     # GitHub may start a scheduled run a few minutes late; the search overlaps the last one.
     - cron: "*/10 10-23 * * 1-5"
   workflow_dispatch:
+    inputs:
+      check_vision:
+        description: "Only check the picture explanations (one real post picture -> Telegram)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -52,9 +57,16 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CHECK_VISION: ${{ inputs.check_vision }}
         run: |
           if [ -z "$X_API_KEY" ]; then echo "xnews: no X_API_KEY secret yet, nothing read"; exit 0; fi
           set +e
+          if [ "$CHECK_VISION" = "true" ]; then
+            python -u run.py --x-vision-check > "$RUNNER_TEMP/xnews.log" 2>&1
+            code=$?
+            grep -h '^vision: ' "$RUNNER_TEMP/xnews.log" | tail -n 1
+            exit $code
+          fi
           python -u run.py --xnews > "$RUNNER_TEMP/xnews.log" 2>&1
           code=$?
           line=$(grep -h '^xnews: ' "$RUNNER_TEMP/xnews.log" | tail -n 1)
