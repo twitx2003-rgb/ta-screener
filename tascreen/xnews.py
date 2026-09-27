@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .errors import ProviderError
+from .analyst.text_rules import banned
 from .fields import pick
 from .llm import UsageLimit
 
@@ -42,6 +43,7 @@ MAX_PAGES = 5                # pages of up to 20 posts per call; more than 100 n
 OVERLAP_S = 120              # each search starts a little before the last one ended; ids dedupe
 SENT_KEPT = 2000             # post ids remembered so a post is never judged or sent twice
 SUMMARY_MAX = 220            # the owner wants it short (2026-09-27): one sentence
+ANALYSIS_MAX = 360           # ...and then a short analysis (owner, same day): 1-2 sentences
 PHOTO_HOST = "https://pbs.twimg.com/"
 
 
@@ -202,7 +204,13 @@ For each pick write `summary_he`: ONE short sentence of plain Hebrew, at most ab
 words, saying what happened and which tickers / market it touches. No preamble, no
 source name (it is shown separately), no filler. Use ONLY facts in the post: no numbers,
 names or causes that are not written there, no advice, no predictions. Keep tickers and
-company names in English. `post_id` must be copied exactly from the input."""
+company names in English. `post_id` must be copied exactly from the input.
+
+Then write `analysis_he`: a short analysis, 1-2 sentences of plain Hebrew (at most about
+35 words): why this matters for the market, which sectors or tickers are exposed, and
+the background a reader needs (for example what the data usually shows, or what the
+market was expecting, if the post says so). Explain, do not forecast: no price targets,
+no "will rise / will fall", no buy or sell wording, no advice."""
 
 
 def schema() -> dict:
@@ -212,8 +220,9 @@ def schema() -> dict:
             "type": "object",
             "properties": {"post_id": {"type": "string"},
                            "importance": {"type": "integer", "minimum": 1, "maximum": 5},
-                           "summary_he": {"type": "string"}},
-            "required": ["post_id", "importance", "summary_he"],
+                           "summary_he": {"type": "string"},
+                           "analysis_he": {"type": "string"}},
+            "required": ["post_id", "importance", "summary_he", "analysis_he"],
             "additionalProperties": False}}},
         "required": ["picks"],
         "additionalProperties": False,
@@ -246,16 +255,22 @@ def triage(posts: list[Post], llm, min_importance: int) -> tuple[list[tuple[Post
             rejected += 1                  # an invented post, or an empty or broken answer
             continue
         if importance >= min_importance:
-            picks[post_id] = {"importance": importance, "summary_he": summary[:SUMMARY_MAX]}
+            analysis = str(item.get("analysis_he", "")).strip()
+            if banned(analysis):             # advice or forecast wording: the news goes without it
+                analysis = ""
+            picks[post_id] = {"importance": importance, "summary_he": summary[:SUMMARY_MAX],
+                              "analysis_he": analysis[:ANALYSIS_MAX]}
     return [(p, picks[p.id]) for p in posts if p.id in picks], rejected
 
 
 def item(post: Post, pick_: dict, *, with_image: bool = False) -> str:
-    """One pick in Telegram HTML, as short as it can be: mark, account, the sentence, a link;
-    under a photo also the line that says what the picture shows."""
+    """One pick in Telegram HTML: mark, account, the sentence and a link; then the short
+    analysis, and under a photo the line that says what the picture shows."""
     mark = "🔴" if pick_["importance"] >= 5 else "🟠"
     text = (f"{mark} <b>{html.escape(post.author)}</b>: {html.escape(pick_['summary_he'])} "
             f'<a href="{html.escape(post.url, quote=True)}">↗</a>')
+    if pick_.get("analysis_he"):
+        text += f"\n💡 {html.escape(pick_['analysis_he'])}"
     if with_image and pick_.get("image_he"):
         text += f"\n📊 {html.escape(pick_['image_he'])}"
     return text

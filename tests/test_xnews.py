@@ -283,3 +283,15 @@ def test_the_news_goes_out_even_if_the_picture_look_fails(tmp_path):
 
 def test_only_pictures_from_x_are_fetched():
     assert xnews.fetch_image("https://evil.example/x.jpg") is None
+
+
+def test_a_short_analysis_goes_under_the_news_unless_it_gives_advice(tmp_path):
+    llm = picker({"post_id": "121", "importance": 5, "summary_he": "חברה A העלתה תחזית",
+                  "analysis_he": "העלאת תחזית מצביעה על ביקוש חזק; מניות הענף רגישות לזה"},
+                 {"post_id": "122", "importance": 5, "summary_he": "חברה B הורידה תחזית",
+                  "analysis_he": "כדאי למכור את המניה"})
+    sent = []
+    run(tmp_path, FakeReader({"tweets": [row("121"), row("122")], "has_next_page": False}), llm, sent)
+    first, second = sent[0].split("\n\n")
+    assert first.endswith("↗</a>\n💡 העלאת תחזית מצביעה על ביקוש חזק; מניות הענף רגישות לזה")
+    assert "💡" not in second and "למכור" not in second
