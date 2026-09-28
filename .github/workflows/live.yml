@@ -16,6 +16,10 @@ on:
   # a watch runs, the later ones wait in the "state" group and end at once when the market
   # has closed; one that starts before the open (winter time) waits at most 15 minutes.
   schedule:
+    # 07:25 New York (summer, then winter time): the pre-market reports at 07:30, 08:30
+    # and 09:15 (tascreen/premarket.py), then the session in the same run (owner, 2026-09-28)
+    - cron: "25 11 * * 1-5"
+    - cron: "25 12 * * 1-5"
     - cron: "31 13 * * 1-5"      # 09:31 New York in summer time (EDT)
     - cron: "47 13 * * 1-5"
     - cron: "13 14 * * 1-5"

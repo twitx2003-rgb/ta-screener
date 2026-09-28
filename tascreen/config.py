@@ -202,9 +202,15 @@ class AlertsSettings:
     # are priced every `far_every`-th pass only (fewer calls; TradingView slows down)
     far_every: int = 3
     live_max_symbols: int = 120        # get-ohlcv calls per pass, at most
+    # Big moves before the open (tascreen/premarket.py; owner, 2026-09-28): 07:30, 08:30
+    # and 09:15 New York time, the $1B+ stocks moving at least this much on real volume
+    premarket: bool = True
+    premarket_min_pct: float = 4.0
+    premarket_min_volume: float = 50000.0
 
     def __post_init__(self):
-        for name in ("verge_pct", "watch_pct", "live_interval_minutes"):
+        for name in ("verge_pct", "watch_pct", "live_interval_minutes", "premarket_min_pct",
+                     "premarket_min_volume"):
             object.__setattr__(self, name, float(getattr(self, name)))
         for name in ("top_analyses", "live_max_symbols", "far_every"):
             object.__setattr__(self, name, int(getattr(self, name)))
@@ -220,6 +226,10 @@ class AlertsSettings:
             raise ConfigError("alerts.live_interval_minutes must be 5..60")
         if not 1 <= self.live_max_symbols <= 300:
             raise ConfigError("alerts.live_max_symbols must be 1..300")
+        if not 1 <= self.premarket_min_pct <= 50:
+            raise ConfigError("alerts.premarket_min_pct must be 1..50")
+        if self.premarket_min_volume < 0:
+            raise ConfigError("alerts.premarket_min_volume must be 0 or more")
 
 
 @dataclass(frozen=True)

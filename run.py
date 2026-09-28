@@ -125,6 +125,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="GitHub Actions (live.yml): during the session, alert on prices "
                              "crossing a bullish pattern's breakout line (--max-minutes, then "
                              "the job starts its continuation)")
+    parser.add_argument("--ci-premarket", action="store_true",
+                        help="GitHub Actions (premarket.yml): the pre-market report when a slot "
+                             "(07:30, 08:30, 09:15 New York) is due; one status line")
     parser.add_argument("--ci-analyze", metavar="SYMBOL",
                         help="GitHub Actions (analyst.yml): one requested analysis sent to Telegram, "
                              "kept under --archive, within --daily-limit")
@@ -624,9 +627,12 @@ def ci_live(settings, max_minutes: float) -> int:
     day = live_session(started, market_tz=tz, after_close_minutes=after)
     if day is None:
         opens = next_open(started, market_tz=tz)
-        if opens - started > timedelta(minutes=15):
+        if cfg.premarket and timedelta(minutes=15) < opens - started <= timedelta(minutes=PREMARKET_LEAD_MINUTES):
+            # the pre-market reports, in this same run: one TradingView sign-in at a time
+            summary["premarket"] = premarket_until_open(settings, opens)
+        elif opens - started > timedelta(minutes=15):
             return finish("the market is closed")        # the other start time covers winter/summer
-        clock.sleep((opens - started).total_seconds())
+        clock.sleep(max(0.0, (opens - datetime.now(timezone.utc)).total_seconds()))
         day = live_session(datetime.now(timezone.utc), market_tz=tz, after_close_minutes=after)
     store = Store(settings.data_dir)
     view = ScanRepository(store, load_rules()).current()
@@ -707,6 +713,77 @@ def ci_live(settings, max_minutes: float) -> int:
         wait = pass_started + interval * 60 - clock.monotonic()
         limit = min(ends, hand_over) - datetime.now(timezone.utc)
         clock.sleep(max(0.0, min(wait, limit.total_seconds())))
+
+
+PREMARKET_LEAD_MINUTES = 135      # live.yml starts at 07:25 New York; the open is 09:30
+
+
+def premarket_until_open(settings, opens, sleep=None, now=None) -> list[str]:
+    """The pre-market slots until the open (tascreen/premarket.py SLOTS), each sent once;
+    returns each attempt's status. A failed report is logged and the watch goes on."""
+    import time as clock
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    from tascreen.premarket import SLOTS
+
+    sleep, now = sleep or clock.sleep, now or (lambda: datetime.now(timezone.utc))
+    tz = ZoneInfo(settings.market.timezone)
+    statuses = []
+    while now() < opens - timedelta(minutes=1):
+        try:
+            code = ci_premarket(settings)
+            statuses.append("ok" if code == 0 else f"exit {code}")
+        except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+            log.error("pre-market report failed: %s", exc)            # the private log only
+            statuses.append(type(exc).__name__)
+        local = now().astimezone(tz)
+        starts = [datetime.combine(local.date(), s, tz) for s in SLOTS]
+        wake = min([t for t in starts if t > local] + [opens])
+        if wake >= opens:
+            break
+        sleep(max(1.0, (wake - now()).total_seconds() + 5))
+    return statuses
+
+
+def ci_premarket(settings) -> int:
+    """The pre-market report (tascreen/premarket.py), once per slot. The public log gets
+    one line of counts; the report goes to Telegram."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from tascreen import alerts, notify, premarket
+    from tascreen.patterns.rules import load_rules
+    from tascreen.store import Store
+    from tascreen.web.data import ScanRepository
+
+    cfg, tz = settings.alerts, settings.market.timezone
+    bot = notify.from_environment()
+    if bot is None or not cfg.enabled or not cfg.premarket:
+        print("premarket: status=" + ("telegram not configured" if bot is None else "off"))
+        return 0
+    store, now = Store(settings.data_dir), datetime.now(timezone.utc)
+    sent = alerts.read_sent(store, now.astimezone(ZoneInfo(tz)).date())   # today's session in New York
+    day, slot = premarket.slot_due(now, tz, sent.get("premarket", {}))
+    if day is None:
+        print(f"premarket: status={slot}")
+        return 0
+    movers = make_tradingview(settings).with_session(lambda session: premarket.fetch_movers(
+        session, settings.universe, settings.tradingview.rate_limit_delays,
+        min_pct=cfg.premarket_min_pct, min_volume=cfg.premarket_min_volume))
+    crossings = []
+    view = ScanRepository(store, load_rules()).current()
+    if view is not None and movers["up"]:
+        crossings = alerts.live_crossings(view, {m["symbol"]: m["price"] for m in movers["up"]}, day,
+                                          sent.get("premarket_crossings", {}))
+    bot.send(premarket.message(slot, movers, crossings, cfg.premarket_min_pct), html=True)
+    sent.setdefault("premarket", {})[slot] = now.isoformat(timespec="seconds")
+    for c in crossings:
+        sent.setdefault("premarket_crossings", {})[c["key"]] = slot
+    alerts.write_sent(store, day, sent)
+    print(f"premarket: status=sent slot={slot} up={len(movers['up'])} down={len(movers['down'])} "
+          f"stale={movers['stale']} crossings={len(crossings)}")
+    return 0
 
 
 def _read_log_json(settings, name: str) -> dict:
@@ -1093,6 +1170,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.ci_notify, lambda: ci_notify(settings, args.ci_notify)),
         (args.analyze, lambda: analyze(settings, args.analyze, args.out, with_llm=not args.no_llm,
                                        to_telegram=args.telegram)),
+        (args.ci_premarket, lambda: ci_premarket(settings)),
         (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit)),
         (args.ci_live, lambda: ci_live(settings, args.max_minutes or 345)),
         (args.telegram_webhook, lambda: telegram_webhook(settings, args.telegram_webhook)),

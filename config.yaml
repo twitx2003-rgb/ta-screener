@@ -89,6 +89,13 @@ alerts:
                              # as TradingView allows; get-ohlcv, one call a stock)
   far_every: 3               # stocks beyond verge_pct from their line: every 3rd pass only
   live_max_symbols: 120      # stocks watched, at most, nearest to their line first
+  # Big moves before the open (owner, 2026-09-28): at 07:30, 08:30 and 09:15 New York
+  # time (14:30, 15:30, 16:15 Israel time in summer), the $1B+ stocks moving at least
+  # premarket_min_pct since the last close on at least premarket_min_volume shares, and
+  # any above a forming pattern's breakout line. Pre-market prices, never a breakout.
+  premarket: true
+  premarket_min_pct: 4
+  premarket_min_volume: 50000
 
 xnews:
   # Breaking Wall Street news from X (owner's request, 2026-09-27): every 10 minutes
