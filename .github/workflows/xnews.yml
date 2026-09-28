@@ -7,13 +7,13 @@
 name: xnews
 
 on:
+  # GitHub's schedule is not reliable (2026-09-28: nothing fired from Saturday to Monday
+  # noon), so one run loops: a pass every 10 minutes (20 on the weekend) for 5.5 hours,
+  # then it starts its own continuation. These hourly starts only revive a broken chain:
+  # while a loop runs they wait in the "xnews" group, and a newer one replaces them.
   schedule:
-    # 04:00-23:50 UTC, about 07:00-03:00 Israel time (owner, 2026-09-28): Europe's morning,
-    # New York's pre-market, session and after-hours. Every 10 minutes Mon-Fri; every 20
-    # on the weekend, when only the dramatic and what matters for the week is sent.
-    # GitHub may start a scheduled run a few minutes late; the search overlaps the last one.
-    - cron: "*/10 4-23 * * 1-5"
-    - cron: "*/20 4-23 * * 0,6"
+    - cron: "17 * * * *"
+    - cron: "47 * * * *"
   workflow_dispatch:
     inputs:
       check_vision:
@@ -31,7 +31,7 @@ concurrency:
 jobs:
   news:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 350
     env:
       STATE_REPO: twitx2003-rgb/ta-screener-state
       STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
@@ -54,30 +54,38 @@ jobs:
       - name: Get what was seen
         run: bash .github/xnews.sh restore
 
-      - name: Read, pick, send
+      - name: Read, pick, send (a pass every 10 minutes for 5.5 hours)
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
           CHECK_VISION: ${{ inputs.check_vision }}
         run: |
-          if [ -z "$X_API_KEY" ]; then echo "xnews: no X_API_KEY secret yet, nothing read"; exit 0; fi
-          set +e
           if [ "$CHECK_VISION" = "true" ]; then
             python -u run.py --x-vision-check > "$RUNNER_TEMP/xnews.log" 2>&1
             code=$?
             grep -h '^vision: ' "$RUNNER_TEMP/xnews.log" | tail -n 1
             exit $code
           fi
-          python -u run.py --xnews > "$RUNNER_TEMP/xnews.log" 2>&1
-          code=$?
-          line=$(grep -h '^xnews: ' "$RUNNER_TEMP/xnews.log" | tail -n 1)
-          # errors by class name only: a message could quote a post
-          err=$(grep -ho 'ERROR' "$RUNNER_TEMP/xnews.log" | head -n 1)
-          echo "${line:-xnews: no status line${err:+ (an error; exit $code)}}"
-          exit $code
+          end=$(( $(date +%s) + 330 * 60 ))
+          while :; do
+            hour=$((10#$(date -u +%H)))
+            if [ -n "$X_API_KEY" ] && [ "$hour" -ge 4 ]; then    # 07:00-03:00 Israel time
+              python -u run.py --xnews > "$RUNNER_TEMP/xnews.log" 2>&1
+              line=$(grep -h '^xnews: ' "$RUNNER_TEMP/xnews.log" | tail -n 1)
+              echo "$(date -u +%H:%M) ${line:-xnews: no status line (an error)}"
+              bash .github/xnews.sh keep > /dev/null || echo "xnews state: could not keep"
+            fi
+            python -u run.py --ensure-live 2> /dev/null | grep -h '^ensure-live: ' || true
+            step=600
+            if [ "$(date -u +%u)" -ge 6 ]; then step=1200; fi
+            if [ $(( $(date +%s) + step )) -ge "$end" ]; then break; fi
+            sleep "$step"
+          done
+          python -c "from tascreen import github; print('continuation:', github.dispatch('xnews.yml', {}))"
 
       - name: Keep what was seen
-        if: always()
+        if: always() && inputs.check_vision != true
         run: bash .github/xnews.sh keep

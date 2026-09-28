@@ -118,7 +118,9 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     scan, alerts, webhook deploy);
   - `live.yml`: from 07:25 New York, the pre-market reports (07:30, 08:30, 09:15;
     `tascreen/premarket.py`), then breakout crossings during the session (Telegram);
-  - `xnews.yml`: every 10 min Mon-Fri 04-24 UTC (20 min on weekends), X news (`tascreen/xnews.py`;
+  - `xnews.yml`: one looping run (5.5 h, then it dispatches its continuation; GitHub cron is
+    unreliable): X news every 10 min 04-24 UTC (20 on weekends), and `--ensure-live`
+    starts live.yml if it is missing (`tascreen/xnews.py`;
     own group `xnews`, seen ids on the state repo's `xnews` branch);
   - `analyst.yml`: one analysis on request (the Telegram bot dispatches it);
   - `backfill.yml`: Saturdays 08:00 UTC, when the pattern rules changed;

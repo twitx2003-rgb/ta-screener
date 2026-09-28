@@ -125,6 +125,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="GitHub Actions (live.yml): during the session, alert on prices "
                              "crossing a bullish pattern's breakout line (--max-minutes, then "
                              "the job starts its continuation)")
+    parser.add_argument("--ensure-live", action="store_true",
+                        help="GitHub Actions (xnews.yml): start live.yml if it should be running "
+                             "(a trading day, 07:20-15:50 New York) and is not")
     parser.add_argument("--ci-premarket", action="store_true",
                         help="GitHub Actions (premarket.yml): the pre-market report when a slot "
                              "(07:30, 08:30, 09:15 New York) is due; one status line")
@@ -746,6 +749,34 @@ def premarket_until_open(settings, opens, sleep=None, now=None) -> list[str]:
     return statuses
 
 
+def ensure_live(settings, now=None) -> int:
+    """GitHub's schedule is not reliable (2026-09-28: nothing fired for two days), so the X
+    news loop checks every pass that the live watch (pre-market reports, then the session)
+    runs when it should, and starts it if not. One status line."""
+    from datetime import datetime, time as clock_time, timezone
+    from zoneinfo import ZoneInfo
+
+    from tascreen import github
+    from tascreen.market_hours import is_trading_day
+
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(ZoneInfo(settings.market.timezone))
+    if not settings.alerts.enabled or not is_trading_day(local.date()) \
+            or not clock_time(7, 20) <= local.time() < clock_time(15, 50):
+        print("ensure-live: not needed now")
+        return 0
+    active = github.active_runs("live.yml")
+    if active is None:
+        print("ensure-live: unknown (no key or no answer)")
+        return 0
+    if active:
+        print("ensure-live: running")
+        return 0
+    status = github.dispatch("live.yml", {"continued": ""})
+    print(f"ensure-live: started ({status})")
+    return 0 if status == 204 else 1
+
+
 def ci_premarket(settings) -> int:
     """The pre-market report (tascreen/premarket.py), once per slot. The public log gets
     one line of counts; the report goes to Telegram."""
@@ -1171,6 +1202,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.analyze, lambda: analyze(settings, args.analyze, args.out, with_llm=not args.no_llm,
                                        to_telegram=args.telegram)),
         (args.ci_premarket, lambda: ci_premarket(settings)),
+        (args.ensure_live, lambda: ensure_live(settings)),
         (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit)),
         (args.ci_live, lambda: ci_live(settings, args.max_minutes or 345)),
         (args.telegram_webhook, lambda: telegram_webhook(settings, args.telegram_webhook)),
