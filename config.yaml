@@ -95,7 +95,7 @@ alerts:
   # any above a forming pattern's breakout line. Pre-market prices, never a breakout.
   premarket: true
   premarket_min_pct: 4
-  premarket_min_volume: 50000
+  premarket_min_volume: 300000   # owner, 2026-09-28: at least 300,000 shares before the open
 
 xnews:
   # Breaking Wall Street news from X (owner's request, 2026-09-27): every 10 minutes

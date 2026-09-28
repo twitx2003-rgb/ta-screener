@@ -206,7 +206,7 @@ class AlertsSettings:
     # and 09:15 New York time, the $1B+ stocks moving at least this much on real volume
     premarket: bool = True
     premarket_min_pct: float = 4.0
-    premarket_min_volume: float = 50000.0
+    premarket_min_volume: float = 300000.0
 
     def __post_init__(self):
         for name in ("verge_pct", "watch_pct", "live_interval_minutes", "premarket_min_pct",
