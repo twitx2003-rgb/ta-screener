@@ -231,12 +231,12 @@ class XNewsSettings:
     accounts: tuple = ()
     min_importance: int = 3            # 1-5; 3 = a useful Wall Street update (owner, 2026-09-28)
     weekend_min_importance: int = 4    # Saturday and Sunday: only the dramatic, and what matters for the week
-    daily_read_cap: int = 3000         # posts read a day, at most (the reader is paid per post)
+    daily_read_cap: int = 2000         # posts read a day, at most (the reader is paid per post)
     with_replies: bool = False
     # Claude is shared with the chart analyses: the posts are read every
     # run, but judged together at most every `claude_every_minutes`, `claude_daily_cap` a day
-    claude_daily_cap: int = 60
-    claude_every_minutes: int = 20
+    claude_daily_cap: int = 45
+    claude_every_minutes: int = 30
     model: str = "sonnet"
     effort: str = "low"
     timeout_s: int = 300

@@ -112,13 +112,15 @@ xnews:
   min_importance: 3          # 1-5: 5 = market-moving now, 4 = relevant to specific stocks today,
                              # 3 = a useful Wall Street update (owner, 2026-09-28: not only the dramatic)
   weekend_min_importance: 4  # Saturday and Sunday: only the dramatic, and what matters for the week
-  daily_read_cap: 3000       # posts read a day, at most (cost guard)
+  # The owner keeps the cost where it was before the hours grew (2026-09-28): 2,000 posts
+  # a day at most (about 0.30 USD), so a month stays around 5-7 USD
+  daily_read_cap: 2000
   with_replies: false
-  # Claude's share of the subscription (also used by the chart analyses): the
-  # posts are read every 10 minutes, but judged together every 20 minutes at most, and at
-  # most 60 times a day (the 20-hour window 07:00-03:00 Israel time fits 60)
-  claude_daily_cap: 60
-  claude_every_minutes: 20
+  # Claude's share of the subscription (also used by the chart analyses), kept at the
+  # earlier 45 a day: the posts are read every 10 minutes, but judged together every
+  # 30 minutes at most (the 20-hour window 07:00-03:00 Israel time fits 40)
+  claude_daily_cap: 45
+  claude_every_minutes: 30
   model: "sonnet"
   effort: "low"
   timeout_s: 300
