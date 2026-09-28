@@ -179,7 +179,9 @@ def test_the_tick_sends_the_breakout_report_once_and_logs_counts_only(tmp_path, 
     run.ci_tick(settings, None, None)
     summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))
     assert summary["alerts"]["status"] == "sent" and sent and "פריצות שוריות" in sent[0]
-    assert set(summary["alerts"]) == {"status", "breakouts", "verge", "analyses", "messages",
+    # no Claude in tests: the research team fails, and the regular report says so
+    assert summary["alerts"]["research"] == "ConfigError" and sent[0].startswith("⚠️ צוות המחקר")
+    assert set(summary["alerts"]) == {"status", "breakouts", "verge", "analyses", "messages", "research",
                                       "intraday_held", "intraday_fell", "charts", "charts_missing"}
     run.ci_tick(settings, None, None)
     summary = json.loads((settings.log_dir / "ci_summary.json").read_text(encoding="utf-8"))

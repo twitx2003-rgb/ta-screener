@@ -125,6 +125,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="GitHub Actions (live.yml): during the session, alert on prices "
                              "crossing a bullish pattern's breakout line (--max-minutes, then "
                              "the job starts its continuation)")
+    parser.add_argument("--research-dry", action="store_true",
+                        help="The research team on the newest scan -> Telegram as a trial (nothing "
+                             "recorded); run.yml input research_dry, or a normal terminal")
     parser.add_argument("--ensure-live", action="store_true",
                         help="GitHub Actions (xnews.yml): start live.yml if it should be running "
                              "(a trading day, 07:20-15:50 New York) and is not")
@@ -538,6 +541,8 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
         summary["complete"] = complete
     if settings.alerts.enabled:
         summary["alerts"] = _evening_alerts(settings, store, target)
+    if settings.research.enabled:
+        summary["research_weekly"] = _research_weekly(settings, store)
     summary["seconds"] = round((datetime.now(timezone.utc) - started).total_seconds())
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     (settings.log_dir / "ci_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -571,15 +576,109 @@ def _evening_alerts(settings, store, target) -> dict:
     live = _read_log_json(settings, "live_summary.json")         # the session's watch, if it ran
     if not str(live.get("started", "")).startswith(target.isoformat()):
         live = {}
+    view = ScanRepository(store, load_rules()).current()
+    can_dispatch = bool(os.environ.get("GH_DISPATCH_TOKEN", "").strip())
+
+    def regular(note: str = "") -> dict:
+        return evening_report(store, view, settings.alerts, bot=bot, min_cases=settings.outcomes.min_cases,
+                              dispatch=github.dispatch, can_dispatch=can_dispatch, live_summary=live,
+                              news_of=lambda symbols: _news(settings, symbols), images=True, note=note)
+
     try:
-        return evening_report(store, ScanRepository(store, load_rules()).current(), settings.alerts,
-                              bot=bot, min_cases=settings.outcomes.min_cases, dispatch=github.dispatch,
-                              can_dispatch=bool(os.environ.get("GH_DISPATCH_TOKEN", "").strip()),
-                              live_summary=live, news_of=lambda symbols: _news(settings, symbols),
-                              images=True)
+        if not settings.research.enabled:
+            return regular()
+        from tascreen import research
+
+        return research.evening_report(store, view, settings.alerts, bot=bot, min_cases=settings.outcomes.min_cases,
+                                       run=_research_runner(settings, store, view), dispatch=github.dispatch,
+                                       can_dispatch=can_dispatch, fallback=regular, live_summary=live)
     except ScreenerError as exc:
         log.error("breakout report failed: %s", exc)             # the private log only
         return {"status": "failed", "error": type(exc).__name__}
+
+
+def _market_moves(settings) -> dict:
+    """The index funds' session moves for the research team; {} if TradingView fails."""
+    from tascreen import explain
+
+    try:
+        indexes = make_tradingview(settings).with_session(
+            lambda session: explain.fetch_indexes(session, settings.tradingview.rate_limit_delays))
+        return explain.moves(indexes, premarket=False)
+    except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("index funds for the research: %s", type(exc).__name__)
+        return {}
+
+
+def _research_runner(settings, store, view):
+    """research.research bound to this run's Claude, news, market and analyst engine."""
+    from tascreen import research
+    from tascreen.analyst.facts import analyse
+    from tascreen.llm import ClaudeCodeLLM
+
+    cfg = settings.research
+
+    def run(breakouts, verge):
+        llm = ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s)
+        return research.research(view, store, breakouts, verge, llm=llm, verge_pct=settings.alerts.verge_pct,
+                                 shortlist_size=cfg.shortlist, max_picks=cfg.max_picks,
+                                 news_of=lambda symbols: _news(settings, symbols),
+                                 market=_market_moves(settings), analyse=analyse)
+    return run
+
+
+def _research_weekly(settings, store) -> dict:
+    """Once a week (from Saturday's runs): the coach reviews the picks, rewrites the
+    lessons, and the owner gets the track record. Counts only in the return."""
+    from datetime import datetime, timezone
+
+    from tascreen import notify, research
+    from tascreen.llm import ClaudeCodeLLM
+
+    now = datetime.now(timezone.utc)
+    if now.weekday() != 5 or not research.weekly_due(store, now):
+        return {"status": "not due"}
+    if not research.read_picks(store):
+        return {"status": "no picks yet"}
+    bot = notify.from_environment()
+    if bot is None:
+        return {"status": "telegram not configured"}
+    cfg = settings.research
+    try:
+        review = research.weekly_review(store, ClaudeCodeLLM(model=cfg.model, effort=cfg.effort,
+                                                             timeout_s=cfg.timeout_s), now)
+    except ScreenerError as exc:
+        log.error("weekly research review failed: %s", exc)
+        return {"status": "failed", "error": type(exc).__name__}
+    bot.send(research.weekly_message(review), html=True)
+    return {"status": "sent", **review["counts"], "lessons": review["lessons"]}
+
+
+def research_dry(settings) -> int:
+    """The research team on the newest scan, sent to Telegram marked as a trial (nothing
+    recorded, no analyses started). One status line."""
+    from tascreen import alerts, notify, research
+    from tascreen.patterns.rules import load_rules
+    from tascreen.store import Store
+    from tascreen.web.data import ScanRepository
+
+    store = Store(settings.data_dir)
+    view = ScanRepository(store, load_rules()).current()
+    if view is None:
+        print("research-dry: no scan")
+        return 1
+    rates = alerts.hit_rates(store.read_ledger(), settings.outcomes.min_cases)
+    breakouts = alerts.bullish_breakouts(view, store.read_bars, rates)
+    verge = [{**v, "hit_rate": rates.get(v["pattern"])}
+             for v in alerts.on_the_verge(view, settings.alerts.verge_pct)]
+    result = _research_runner(settings, store, view)(breakouts, verge)
+    bot = notify.from_environment()
+    if bot is not None and result["status"] in ("picked", "none"):
+        for message in research.report_messages(view.day, result):
+            bot.send("🧪 ניסיון של צוות המחקר (לא נשמר)\n\n" + message, html=True)
+    print(f"research-dry: status={result['status']} candidates={result['candidates']} "
+          f"shortlist={len(result['shortlist'])} picks={len(result['picks'])} dropped={len(result['dropped'])}")
+    return 0
 
 
 def _news(settings, symbols: list[str], client=None) -> dict:
@@ -1288,6 +1387,7 @@ def main(argv: list[str] | None = None) -> int:
                                        to_telegram=args.telegram)),
         (args.ci_premarket, lambda: ci_premarket(settings)),
         (args.ensure_live, lambda: ensure_live(settings)),
+        (args.research_dry, lambda: research_dry(settings)),
         (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit)),
         (args.ci_live, lambda: ci_live(settings, args.max_minutes or 345)),
         (args.telegram_webhook, lambda: telegram_webhook(settings, args.telegram_webhook)),

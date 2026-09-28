@@ -249,7 +249,8 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
                    can_dispatch: bool, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                    live_summary: dict[str, Any] | None = None,
                    news_of: Callable[[list[str]], dict[str, dict]] | None = None,
-                   images: bool = False, to_png: Callable[[str], bytes] | None = None) -> dict[str, Any]:
+                   images: bool = False, to_png: Callable[[str], bytes] | None = None,
+                   note: str = "") -> dict[str, Any]:
     """Send the session's report once, then (with `images`) each breakout's pattern chart
     in albums; start the full analyses of the strongest few. Returns counts for the
     public log (no symbols, no prices)."""
@@ -267,6 +268,8 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
     messages = evening_messages(view.day, breakouts, verge,
                                 verge_pct=cfg.verge_pct, coverage=coverage, analyses=chosen,
                                 intraday=intraday, live_summary=live_summary, news=news)
+    if note:                                        # e.g. the research team could not run
+        messages = [f"{html.escape(note)}\n\n{messages[0]}", *messages[1:]]
     for message in messages:
         bot.send(message, html=True)
     photos, no_chart = ([], 0)

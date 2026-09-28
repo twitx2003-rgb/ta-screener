@@ -124,6 +124,8 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     starts live.yml if it is missing (`tascreen/xnews.py`;
     own group `xnews`, seen ids on the state repo's `xnews` branch);
   - `analyst.yml`: one analysis on request (the Telegram bot dispatches it);
+  - the evening report is the research team's (`tascreen/research.py`, `--research-dry` to try;
+    weekly review on Saturday runs); if it fails, the regular report goes with a note;
   - `backfill.yml`: Saturdays 08:00 UTC, when the pattern rules changed;
   - `eval.yml`: an analyst evaluation round (outside the `state` group).
 - State: the PRIVATE repo `twitx2003-rgb/ta-screener-state` (TradingView sign-in, data

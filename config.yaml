@@ -145,3 +145,15 @@ explain:
   model: "sonnet"
   effort: "low"
   timeout_s: 300
+
+research:
+  # The breakout research team (owner, 2026-09-28): every evening three specialists and a
+  # chief strategist (tascreen/agents/) research the day's breakouts and verge candidates
+  # and send only the best, at most max_picks (or none). They learn weekly from how their
+  # picks ended. If the research fails, the regular report goes out with a note.
+  enabled: true
+  shortlist: 8               # candidates researched in depth (by a transparent score)
+  max_picks: 3
+  model: "sonnet"
+  effort: "high"
+  timeout_s: 900

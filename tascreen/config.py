@@ -318,6 +318,28 @@ class ExplainSettings:
             raise ConfigError("explain.effort must be low, medium, high, xhigh or max")
 
 
+@dataclass(frozen=True)
+class ResearchSettings:
+    # The breakout research team (tascreen/research.py; owner, 2026-09-28): the evening
+    # report brings only the best setups. Four Claude calls an evening, one a week.
+    enabled: bool = True
+    shortlist: int = 8
+    max_picks: int = 3
+    model: str = "sonnet"
+    effort: str = "high"
+    timeout_s: int = 900
+
+    def __post_init__(self):
+        for name in ("shortlist", "max_picks", "timeout_s"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        if not 1 <= self.max_picks <= self.shortlist <= 15:
+            raise ConfigError("research: need 1 <= max_picks <= shortlist <= 15")
+        if self.effort not in ("low", "medium", "high", "xhigh", "max"):
+            raise ConfigError("research.effort must be low, medium, high, xhigh or max")
+        if self.timeout_s < 60:
+            raise ConfigError("research.timeout_s must be at least 60")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
@@ -330,6 +352,7 @@ _SECTIONS = {
     "alerts": AlertsSettings,
     "xnews": XNewsSettings,
     "explain": ExplainSettings,
+    "research": ResearchSettings,
 }
 
 
@@ -347,6 +370,7 @@ class Settings:
     alerts: AlertsSettings = field(default_factory=AlertsSettings)
     xnews: XNewsSettings = field(default_factory=XNewsSettings)
     explain: ExplainSettings = field(default_factory=ExplainSettings)
+    research: ResearchSettings = field(default_factory=ResearchSettings)
 
     @property
     def data_dir(self) -> Path:

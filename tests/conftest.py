@@ -26,6 +26,20 @@ def _no_real_messages(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_claude(monkeypatch):
+    """Tests never start the real Claude Code: without an explicit command, making one
+    fails as it does where Claude is not installed. (The research team runs from the
+    nightly tick; from a normal terminal a test would otherwise have called it.)"""
+    import tascreen.llm
+    from tascreen.errors import ConfigError
+
+    def missing():
+        raise ConfigError("Claude Code is not available in tests")
+
+    monkeypatch.setattr(tascreen.llm.ClaudeCodeLLM, "find_cli", staticmethod(missing))
+
+
+@pytest.fixture(autouse=True)
 def _restore_root_logging():
     """run.main() installs console handlers bound to the test's captured stderr;
     once that capture closes, later tests would log into a closed stream."""
