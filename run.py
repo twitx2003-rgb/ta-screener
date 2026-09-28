@@ -1037,6 +1037,7 @@ def xnews_pass(settings) -> int:
         send_photo=lambda url, caption: bot.send_photo_url(url, caption, html=True),
         state_path=state_path, now=now,
         min_importance=cfg.min_importance, daily_read_cap=cfg.daily_read_cap,
+        weekend_min_importance=cfg.weekend_min_importance,
         llm_daily_cap=cfg.claude_daily_cap, llm_min_interval_s=cfg.claude_every_minutes * 60,
         with_replies=cfg.with_replies)
     print("xnews: " + " ".join(f"{k}={v}" for k, v in summary.items()))

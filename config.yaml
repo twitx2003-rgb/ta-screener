@@ -109,13 +109,15 @@ xnews:
     MorganStanley, BofA_Merrill, Citi, UBS, Barclays, HSBC, Fidelity, Vanguard_Group,
     BlackRock, StateStreet, InvescoUS, PIMCO, TrowePrice, JanusHenderson, ARKInvest,
     CathieDWood]
-  min_importance: 4          # 1-5: 5 = market-moving now, 4 = relevant to specific stocks today
+  min_importance: 3          # 1-5: 5 = market-moving now, 4 = relevant to specific stocks today,
+                             # 3 = a useful Wall Street update (owner, 2026-09-28: not only the dramatic)
+  weekend_min_importance: 4  # Saturday and Sunday: only the dramatic, and what matters for the week
   daily_read_cap: 3000       # posts read a day, at most (cost guard)
   with_replies: false
   # Claude's share of the subscription (also used by the chart analyses): the
   # posts are read every 10 minutes, but judged together every 20 minutes at most, and at
-  # most 45 times a day (about 42 fit in the 14-hour window, so the cap is a safety net)
-  claude_daily_cap: 45
+  # most 60 times a day (the 20-hour window 07:00-03:00 Israel time fits 60)
+  claude_daily_cap: 60
   claude_every_minutes: 20
   model: "sonnet"
   effort: "low"

@@ -117,7 +117,7 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   - `run.yml`: nightly 21:40 UTC Mon-Fri, catch-ups 01:10 / 05:10 UTC Tue-Sat (update,
     scan, alerts, webhook deploy);
   - `live.yml`: breakout crossings during the session (Telegram);
-  - `xnews.yml`: every 10 min Mon-Fri 10-24 UTC, breaking news from X (`tascreen/xnews.py`;
+  - `xnews.yml`: every 10 min Mon-Fri 04-24 UTC (20 min on weekends), X news (`tascreen/xnews.py`;
     own group `xnews`, seen ids on the state repo's `xnews` branch);
   - `analyst.yml`: one analysis on request (the Telegram bot dispatches it);
   - `backfill.yml`: Saturdays 08:00 UTC, when the pattern rules changed;

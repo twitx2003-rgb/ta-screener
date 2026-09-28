@@ -229,12 +229,13 @@ class XNewsSettings:
     enabled: bool = True
     until: str = "2026-12-27"          # the owner asked for three months; after it, one notice and silence
     accounts: tuple = ()
-    min_importance: int = 4            # 1-5; 4 = clearly relevant to specific stocks today
+    min_importance: int = 3            # 1-5; 3 = a useful Wall Street update (owner, 2026-09-28)
+    weekend_min_importance: int = 4    # Saturday and Sunday: only the dramatic, and what matters for the week
     daily_read_cap: int = 3000         # posts read a day, at most (the reader is paid per post)
     with_replies: bool = False
     # Claude is shared with the chart analyses: the posts are read every
     # run, but judged together at most every `claude_every_minutes`, `claude_daily_cap` a day
-    claude_daily_cap: int = 45
+    claude_daily_cap: int = 60
     claude_every_minutes: int = 20
     model: str = "sonnet"
     effort: str = "low"
@@ -258,11 +259,13 @@ class XNewsSettings:
         except Exception as exc:
             raise ConfigError(f"xnews.accounts: {exc}") from None
         object.__setattr__(self, "accounts", names)
-        for name in ("min_importance", "daily_read_cap", "timeout_s", "claude_daily_cap",
+        for name in ("min_importance", "weekend_min_importance", "daily_read_cap", "timeout_s", "claude_daily_cap",
                      "claude_every_minutes"):
             object.__setattr__(self, name, int(getattr(self, name)))
         if not 1 <= self.min_importance <= 5:
             raise ConfigError("xnews.min_importance must be 1..5")
+        if not 1 <= self.weekend_min_importance <= 5:
+            raise ConfigError("xnews.weekend_min_importance must be 1..5")
         if not 20 <= self.daily_read_cap <= 50000:
             raise ConfigError("xnews.daily_read_cap must be 20..50000")
         if self.effort not in ("low", "medium", "high", "xhigh", "max"):

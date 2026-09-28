@@ -27,6 +27,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Callable
 
@@ -188,17 +189,21 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 # --- Claude picks what matters ------------------------------------------------------------
 
 SYSTEM = """\
-You screen posts from X for an Israeli private investor who trades US stocks. You get the
-new posts of accounts the investor follows. Pick ONLY what could move US stocks, sectors,
-indices, rates or the dollar today: breaking company news (earnings, guidance, deals,
-FDA, lawsuits, management changes, big contracts), macro data and Fed remarks, government
-actions (tariffs, sanctions, export rules), market-wide events (halts, outages, sharp
-moves). Skip opinions, jokes, promotions, ads, "good morning", repeats of old news,
-engagement bait, chart doodles and anything already stale.
+You screen posts from X for an Israeli private investor who trades US stocks and wants
+to follow Wall Street through the day: the breaking news, and also the ordinary news and
+updates. You get the new posts of accounts the investor follows. Pick what is about US
+stocks, sectors, indices, rates, the dollar or commodities: company news (earnings,
+guidance, deals, FDA, lawsuits, management changes, contracts, analyst upgrades and
+downgrades), macro data, the economic calendar and Fed remarks, government actions
+(tariffs, sanctions, export rules), market moves and wraps (indices, sectors, notable
+movers), fund flows, positioning and sentiment data, and charts that show one of these.
+Skip jokes, promotions, ads, "good morning", engagement bait, personal opinions with no
+news or data in them, anything not about markets, and repeats of a post already in the
+list.
 
-Rate each picked post 1-5 (5 = market-moving now; 4 = clearly relevant to specific
-stocks today; 3 or lower = only mildly interesting). Return an empty list when nothing
-qualifies; that is the usual case.
+Rate each picked post 1-5: 5 = market-moving now; 4 = clearly relevant to specific stocks
+or sectors today; 3 = a useful Wall Street update (a market move, data, an analyst call,
+a notable chart); 2 or 1 = only loosely related.
 
 For each pick write `summary_he`: ONE short sentence of plain Hebrew, at most about 15
 words, saying what happened and which tickers / market it touches. No preamble, no
@@ -234,11 +239,23 @@ def user_prompt(posts: list[Post]) -> str:
                        for p in posts], ensure_ascii=False, indent=1)
 
 
-def triage(posts: list[Post], llm, min_importance: int) -> tuple[list[tuple[Post, dict]], int]:
+WEEKEND_NOTE = ("It is the weekend and US markets are closed: rate 4 or 5 only what is dramatic, "
+                "or what the investor needs to know before the coming trading week (events, data "
+                "and earnings due, big news from the weekend).")
+
+
+def is_weekend(now: datetime) -> bool:
+    """Saturday or Sunday in New York (the owner, 2026-09-28: on weekends only the dramatic
+    and what matters for the coming week)."""
+    return now.astimezone(ZoneInfo("America/New_York")).weekday() >= 5
+
+
+def triage(posts: list[Post], llm, min_importance: int, note: str = "") -> tuple[list[tuple[Post, dict]], int]:
     """(the picks at or above `min_importance`, in post order; how many answers were rejected)."""
     if not posts:
         return [], 0
-    answer, _ = llm.complete(system=SYSTEM, user=user_prompt(posts), schema=schema())
+    user = (note + "\n\n" if note else "") + user_prompt(posts)
+    answer, _ = llm.complete(system=SYSTEM, user=user, schema=schema())
     by_id = {p.id: p for p in posts}
     picks: dict[str, dict] = {}
     rejected = 0
@@ -266,7 +283,7 @@ def triage(posts: list[Post], llm, min_importance: int) -> tuple[list[tuple[Post
 def item(post: Post, pick_: dict, *, with_image: bool = False) -> str:
     """One pick in Telegram HTML: mark, account, the sentence and a link; then the short
     analysis, and under a photo the line that says what the picture shows."""
-    mark = "🔴" if pick_["importance"] >= 5 else "🟠"
+    mark = {5: "🔴", 4: "🟠"}.get(pick_["importance"], "🔵")
     text = (f"{mark} <b>{html.escape(post.author)}</b>: {html.escape(pick_['summary_he'])} "
             f'<a href="{html.escape(post.url, quote=True)}">↗</a>')
     if pick_.get("analysis_he"):
@@ -404,6 +421,7 @@ def _row_post(row: dict) -> Post:
 
 def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], Any], send: Callable[[str], None],
              state_path: Path, now: datetime, min_importance: int, daily_read_cap: int,
+             weekend_min_importance: int = 4,
              llm_daily_cap: int = 45, llm_min_interval_s: int = 1200,
              send_photo: Callable[[str, str], None] | None = None,
              fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
@@ -452,7 +470,11 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     if due:
         try:
             llm = llm_factory()
-            picks, summary["rejected"] = triage([_row_post(r) for r in pending], llm, min_importance)
+            weekend = is_weekend(now)
+            picks, summary["rejected"] = triage(
+                [_row_post(r) for r in pending], llm,
+                max(min_importance, weekend_min_importance) if weekend else min_importance,
+                WEEKEND_NOTE if weekend else "")
         except UsageLimit:
             model["paused_until"] = stamp + LIMIT_PAUSE_S
             picks, status = [], "claude limit"

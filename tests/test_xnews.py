@@ -295,3 +295,17 @@ def test_a_short_analysis_goes_under_the_news_unless_it_gives_advice(tmp_path):
     first, second = sent[0].split("\n\n")
     assert first.endswith("↗</a>\n💡 העלאת תחזית מצביעה על ביקוש חזק; מניות הענף רגישות לזה")
     assert "💡" not in second and "למכור" not in second
+
+
+def test_on_the_weekend_only_the_dramatic_goes_out(tmp_path):
+    llm = picker({"post_id": "131", "importance": 3, "summary_he": "עדכון רגיל"},
+                 {"post_id": "132", "importance": 4, "summary_he": "חשוב לשבוע הבא"})
+    page = {"tweets": [row("131"), row("132")], "has_next_page": False}
+    saturday = datetime(2026, 1, 10, 15, 0, tzinfo=timezone.utc)
+    sent = []
+    run(tmp_path, FakeReader(page), llm, sent, now=saturday, min_importance=3)
+    assert "חשוב לשבוע הבא" in sent[0] and "עדכון רגיל" not in sent[0]
+    assert llm.calls[-1].startswith("It is the weekend")
+    sent = []
+    run(tmp_path / "weekday", FakeReader(page), llm, sent, min_importance=3)        # a Monday
+    assert "עדכון רגיל" in sent[0] and not llm.calls[-1].startswith("It is the weekend")
