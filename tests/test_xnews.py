@@ -351,3 +351,23 @@ def test_a_repeat_of_what_was_sent_is_dropped_and_the_sent_list_is_shown(tmp_pat
     assert shown == [{"author": "NewsDesk", "summary_he": "הפד הוריד ריבית", "minutes_ago": 40}]
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert [r["id"] for r in state["recent"]] == ["151", "152"]          # kept for the explainer
+
+
+def test_only_the_best_few_go_out_and_the_budget_refills():
+    posts = [xnews.to_post(row(str(i), author=f"Desk{i}")) for i in range(5)]
+
+    def pk(post, importance, sources=0):
+        return (post, {"importance": importance, "summary_he": "x", "analysis_he": "",
+                       "sources": [("Other", "https://x.com/Other/status/9")] * sources})
+
+    day, t0, cap = "2027-01-15", 1_800_000_000, {"max_per_round": 2, "daily_max": 12}
+    picks = [pk(posts[0], 3), pk(posts[1], 4), pk(posts[2], 3, 2), pk(posts[3], 5), pk(posts[4], 4, 1)]
+    out, budget, held = xnews.ration(picks, {}, t0, day, **cap)
+    assert [p.id for p, _ in out] == ["3", "4"] and held == 3     # the 5, then the 4 told by two accounts
+    out, budget, held = xnews.ration([pk(posts[0], 4), pk(posts[1], 5)], budget, t0 + 600, day, **cap)
+    assert [p.id for p, _ in out] == ["1"] and held == 1          # 10 minutes later: only a 5
+    out, budget, _ = xnews.ration([pk(posts[0], 3)], budget, t0 + 600 + 6000, day, **cap)
+    assert len(out) == 1 and budget["sent"] == 2                  # 100 minutes on: one regular story
+    full = {"tokens": 2, "at": t0, "day": day, "sent": 12}
+    assert [p.id for p, _ in xnews.ration([pk(posts[0], 4), pk(posts[1], 5)], full, t0, day, **cap)[0]] == ["1"]
+    assert len(xnews.ration([pk(posts[0], 4)], full, t0, "2027-01-16", **cap)[0]) == 1    # a new day

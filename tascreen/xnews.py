@@ -198,6 +198,33 @@ SENT_WINDOW_S = 2 * 3600     # stories sent this recently are shown to the dedup
 RECENT_WINDOW_S = 3 * 3600   # posts kept this long for the market explainer (tascreen/explain.py)
 RECENT_MAX = 300
 SOURCES_SHOWN = 3
+# The owner wants few, hand-picked stories (2026-09-28: 29 went out in 90 minutes): a round
+# sends at most `max_per_round`, the most important first, and the regular ones (below 5)
+# share a budget that refills through the news hours, so the evening is not left empty.
+# A story rated 5 (market-moving now) is never held back by the budget.
+NEWS_HOURS = 20              # 07:00-03:00 Israel time (.github/xnews.sh)
+URGENT = 5
+
+
+def ration(picks: list[tuple["Post", dict]], budget: dict, stamp: int, day: str, *,
+           max_per_round: int, daily_max: int) -> tuple[list[tuple["Post", dict]], dict, int]:
+    """(the picks to send, most important first; the budget after them; how many were held
+    back). The budget is a token per regular story, refilled at `daily_max` per NEWS_HOURS
+    up to `max_per_round`, and at most `daily_max` regular stories a day. A story rated 5
+    needs no token but uses one if there is one; more sources rank a story higher."""
+    rate = daily_max / (NEWS_HOURS * 3600)
+    tokens = float(budget.get("tokens", max_per_round))
+    tokens = min(float(max_per_round), tokens + max(0, stamp - int(budget.get("at", stamp))) * rate)
+    sent_today = int(budget.get("sent", 0)) if budget.get("day") == day else 0
+    order = sorted(range(len(picks)), key=lambda i: (-picks[i][1]["importance"], -len(picks[i][1]["sources"]), i))
+    ranked = [picks[i] for i in order]
+    urgent = [pk for pk in ranked if pk[1]["importance"] >= URGENT][:max_per_round]
+    tokens = max(0.0, tokens - len(urgent))
+    room = max(0, min(max_per_round - len(urgent), int(tokens), daily_max - sent_today))
+    regular = [pk for pk in ranked if pk[1]["importance"] < URGENT][:room]
+    tokens -= len(regular)
+    after = {"tokens": round(tokens, 4), "at": stamp, "day": day, "sent": sent_today + len(regular)}
+    return urgent + regular, after, len(picks) - len(urgent) - len(regular)
 
 
 def schema() -> dict:
@@ -432,6 +459,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
              state_path: Path, now: datetime, min_importance: int, daily_read_cap: int,
              weekend_min_importance: int = 4,
              llm_daily_cap: int = 45, llm_min_interval_s: int = 1200,
+             max_per_round: int = 2, daily_max: int = 12,
              send_photo: Callable[[str, str], None] | None = None,
              fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
              first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
@@ -440,8 +468,9 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     Posts are read every run, but Claude is asked at most every `llm_min_interval_s`
     and `llm_daily_cap` times a day (the subscription is shared with the chart
     analyses); the posts in between wait in the state's "pending" list and are
-    judged together. The state is saved only after the message went out, so a failed
-    send is retried by the next run and a sent post is never sent again."""
+    judged together. Of the picks, only the best few go out (`ration`). The state is saved
+    only after the message went out, so a failed send is retried by the next run and a sent
+    post is never sent again."""
     state = load_state(state_path)
     stamp = int(now.timestamp())
     day = now.astimezone(timezone.utc).strftime("%Y-%m-%d")
@@ -451,6 +480,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     model = state.get("llm") if isinstance(state.get("llm"), dict) else {}
     if model.get("day") != day:
         model = {"day": day, "calls": 0, "last": model.get("last", 0), "paused_until": model.get("paused_until", 0)}
+    budget = state.get("budget") if isinstance(state.get("budget"), dict) else {}
     summary: dict[str, Any] = {"accounts": len(accounts), "read": 0, "new": 0, "waiting": 0,
                                "judged": 0, "sent": 0, "rejected": 0, "calls": 0,
                                "claude_today": model["calls"]}
@@ -501,6 +531,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             model["last"] = stamp
             summary["judged"] = len(pending)
             pending = []
+            picks, budget, summary["held_back"] = ration(picks, budget, stamp, day, max_per_round=max_per_round,
+                                                         daily_max=daily_max)
         if send_photo is not None and any(p.photo for p, _ in picks):
             try:                             # a second look, at the pictures: never blocks the news
                 summary["explained"] = explain_images(picks, llm, fetch)
@@ -519,7 +551,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     summary["waiting"] = len(pending)
     summary["claude_today"] = model["calls"]
     save_state(state_path, {"since": since, "seen": seen, "pending": pending, "reads": reads, "llm": model,
-                            "sent_recent": sent_recent[-40:], "recent": recent})
+                            "budget": budget, "sent_recent": sent_recent[-40:], "recent": recent})
     summary["status"] = status
     return summary
 

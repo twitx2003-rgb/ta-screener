@@ -168,3 +168,19 @@ def test_band_edges_must_start_at_the_floor():
 
     with pytest.raises(ConfigError):
         UniverseSettings(band_edges=(2e9, 5e9))
+
+
+def test_a_universe_saved_under_a_lower_floor_is_cut_to_the_new_one(tmp_path):
+    import dataclasses
+
+    import run
+    from test_scan import _universe
+    from tascreen.config import Settings
+    from tascreen.store import Store
+
+    settings = dataclasses.replace(Settings(root=tmp_path),
+                                   universe=UniverseSettings(min_market_cap=5e9, band_edges=(5e9, 1e10)))
+    Store(settings.data_dir).write_universe(run._market_today(settings),
+                                            _universe([f"NYSE:S{i}" for i in range(5)]), {})
+    day, frame = run.usable_universe(settings)
+    assert sorted(frame["market_cap"]) == [5e9, 6e9]

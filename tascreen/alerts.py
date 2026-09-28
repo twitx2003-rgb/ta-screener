@@ -20,6 +20,7 @@ import json
 import math
 import time
 import urllib.parse
+from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -74,6 +75,22 @@ def hit_rates(ledger: pd.DataFrame | None, min_cases: int) -> dict[str, float]:
     return out
 
 
+def proven_patterns(ledger: pd.DataFrame | None, min_cases: int, min_pct: float) -> set[str] | None:
+    """The patterns worth an alert (owner, 2026-09-28: fewer breakouts, more meaningful and
+    varied; wedges and flags filled the chat): at least `min_pct` of their ended bullish
+    breakouts in our ledger reached the target (a failure or an expiry counts against it),
+    over at least `min_cases` of them. None (no filter) without a ledger."""
+    if ledger is None or ledger.empty or "direction" not in ledger.columns:
+        return None
+    rows = ledger.loc[(ledger["direction"] == "bullish") & ledger["outcome"].isin(FINAL)]
+    out = set()
+    for pattern, group in rows.groupby("pattern"):
+        if len(group) >= min_cases and group["target"].notna().any() \
+                and (group["outcome"] == "target").mean() * 100 >= min_pct:
+            out.add(str(pattern))
+    return out
+
+
 def _stocks(view: ScanView) -> dict[str, dict[str, Any]]:
     cols = [c for c in ("symbol", "close", "rel_volume", "last_date") if c in view.stocks.columns]
     return {row["symbol"]: row for row in view.stocks[cols].to_dict("records")}
@@ -108,12 +125,15 @@ def bullish_breakouts(view: ScanView, bars_of: Callable[[str], pd.DataFrame | No
     return out
 
 
-def forming_bullish(view: ScanView) -> list[dict[str, Any]]:
+def forming_bullish(view: ScanView, patterns: set[str] | None = None) -> list[dict[str, Any]]:
     """Forming chart patterns that break out upward (bullish, or either way) whose stock's
-    last bar is the scan's session, with the close's distance below the line."""
+    last bar is the scan's session, with the close's distance below the line. Only
+    `patterns`, if given."""
     d = view.detections
     rows = d.loc[(d["family"] == "chart") & (d["status"] == "forming")
                  & d["direction"].isin(["bullish", "either"])]
+    if patterns is not None:
+        rows = rows.loc[rows["pattern"].isin(patterns)]
     stocks, day = _stocks(view), view.day.isoformat()
     out = []
     for row in rows.to_dict("records"):
@@ -296,24 +316,25 @@ def evening_report(store: Store, view: ScanView, cfg: AlertsSettings, *, bot: An
 
 
 # ------------------------------------------------------------------ during the session
-def watch_list(view: ScanView, watch_pct: float, max_symbols: int) -> list[str]:
+def watch_list(view: ScanView, watch_pct: float, max_symbols: int,
+               patterns: set[str] | None = None) -> list[str]:
     """The stocks to price during the session: a forming bullish pattern's line at most
     `watch_pct` above the last close, nearest first, at most `max_symbols` stocks."""
     out: list[str] = []
-    for item in forming_bullish(view):
+    for item in forming_bullish(view, patterns):
         if item["gap_pct"] <= watch_pct and item["symbol"] not in out:
             out.append(item["symbol"])
     return out[:max_symbols]
 
 
 def watch_tiers(view: ScanView, verge_pct: float, watch_pct: float,
-                max_symbols: int) -> tuple[list[str], list[str]]:
+                max_symbols: int, patterns: set[str] | None = None) -> tuple[list[str], list[str]]:
     """The watch list split in two: stocks whose nearest line is within `verge_pct`
     (priced every pass) and the rest (priced every few passes: they need a bigger move)."""
     nearest: dict[str, float] = {}
-    for item in forming_bullish(view):
+    for item in forming_bullish(view, patterns):
         nearest.setdefault(item["symbol"], item["gap_pct"])      # sorted: the nearest first
-    watched = watch_list(view, watch_pct, max_symbols)
+    watched = watch_list(view, watch_pct, max_symbols, patterns)
     return ([s for s in watched if nearest[s] <= verge_pct],
             [s for s in watched if nearest[s] > verge_pct])
 
@@ -380,17 +401,28 @@ async def fetch_live_prices(session: Any, symbols: list[str], session_day: date,
 
 
 def live_crossings(view: ScanView, prices: dict[str, float], session_day: date,
-                   already: dict[str, Any]) -> list[dict[str, Any]]:
-    """Forming patterns whose breakout line the live price is above, not sent yet today."""
+                   already: dict[str, Any], *, patterns: set[str] | None = None,
+                   min_above_pct: float = 0.0, per_pattern: int | None = None) -> list[dict[str, Any]]:
+    """Forming patterns whose breakout line the live price is above, not sent yet today.
+    Only `patterns` (None: all); the price at least `min_above_pct` above the line (a touch
+    is not a breakout: it is looked at again next pass); at most `per_pattern` of one
+    pattern a session, counting `already` (variety), the farthest above the line first."""
     found = crossings(view.stocks, view.detections, prices, session_day)
-    found = found.loc[found["direction"] == "bullish"]
+    found = found.loc[found["direction"] == "bullish"].reset_index(drop=True)
+    found = found.loc[(found["price"] / found["level"]).sort_values(ascending=False, kind="stable").index]
     d = view.detections
     out, seen = [], set(already)
+    per = Counter(k.partition("|")[2] for k in already)
     for row in found.itertuples(index=False):
         key = f"{row.symbol}|{row.pattern}"
-        if key in seen:
+        if key in seen or (patterns is not None and row.pattern not in patterns):
+            continue
+        if row.price < row.level * (1 + min_above_pct / 100):
+            continue
+        if per_pattern is not None and per[row.pattern] >= per_pattern:
             continue
         seen.add(key)
+        per[row.pattern] += 1
         match = d.loc[(d["symbol"] == row.symbol) & (d["pattern"] == row.pattern)
                       & (d["status"] == "forming")]
         first = match.iloc[0] if len(match) else None

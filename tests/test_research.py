@@ -4,7 +4,7 @@ scan_setup store: a forming double bottom and a head and shoulders top)."""
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pandas as pd
 import pytest
@@ -73,6 +73,25 @@ def test_the_team_picks_and_a_made_up_number_drops_a_pick(tmp_path):
     none = research.research(view, store, [], verge, llm=team(lambda ds: []), verge_pct=10.0, shortlist_size=8,
                              max_picks=3)
     assert none["status"] == "none" and none["picks"] == []
+
+
+def test_variety_in_the_shortlist_and_the_picks_and_only_proven_patterns(tmp_path):
+    cands = [{"symbol": f"NYSE:W{i}", "pattern": "rising_wedge", "kind": "verge", "gap_pct": 0.5,
+              "hit_rate": 60.0} for i in range(4)]
+    cands.append({"symbol": "NYSE:DB", "pattern": "double_bottom", "kind": "verge", "gap_pct": 1.5,
+                  "hit_rate": 50.0})
+    short = research.shortlist(cands, {}, date(2026, 1, 5), 2.0, 8)
+    assert [c["symbol"] for c in short] == ["NYSE:W0", "NYSE:W1", "NYSE:DB"]
+    dossiers = [{"symbol": s, "pattern": p} for s, p in
+                (("NYSE:A", "double_bottom"), ("NYSE:B", "double_bottom"), ("NYSE:C", "rectangle"))]
+    plain = {"conviction": 7, "why_he": "מגמה עולה ונפח גבוה.", "cancels_he": "אם הקו לא נפרץ.",
+             "watch_he": "סגירה מעל הקו."}
+    out = research.run_team(dossiers, team(lambda ds: [{"symbol": d["symbol"], **plain} for d in ds]))
+    assert [p["symbol"] for p in out["picks"]] == ["NYSE:A", "NYSE:C"]     # one pick per pattern
+    settings, store, view, verge = _view(tmp_path)
+    result = research.research(view, store, [], verge, llm=team(good_pick), verge_pct=10.0, shortlist_size=8,
+                               max_picks=3, patterns={"rectangle"})
+    assert result["status"] == "none" and result["unproven"] == len(verge) and result["candidates"] == 0
 
 
 class Bot:

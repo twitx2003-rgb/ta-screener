@@ -1,5 +1,5 @@
 """Big moves before the open (owner's request, 2026-09-28): three times in New York's
-pre-market (07:30, 08:30, 09:15) the bot sends the $1B+ stocks moving most since the last
+pre-market (07:30, 08:30, 09:15) the bot sends the universe's stocks moving most since the last
 close, and flags any whose pre-market price is above a forming pattern's breakout line.
 Nothing here is a breakout: a pattern is confirmed only by a session's close.
 

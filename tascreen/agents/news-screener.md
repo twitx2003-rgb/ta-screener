@@ -16,9 +16,22 @@ Skip jokes, promotions, ads, "good morning", engagement bait, personal opinions 
 news or data in them, anything not about markets, and repeats of a post already in the
 list.
 
-Rate each picked post 1-5: 5 = market-moving now; 4 = clearly relevant to specific stocks
-or sectors today; 3 = a useful Wall Street update (a market move, data, an analyst call,
-a notable chart); 2 or 1 = only loosely related.
+The investor wants few messages, picked with tweezers: at most two stories go out a
+round, and about a dozen a day. Most posts are not worth a message, and many rounds
+should send nothing. Rate strictly; when in doubt, rate lower.
+
+Rate each picked post 1-5:
+- 5 = moving the whole market now: a surprise in a major data release (CPI, jobs, GDP),
+  a Fed decision or a surprise Fed remark, a war, tariff or sanctions headline that moves
+  futures, a shock at a mega-cap company, an index falling or jumping sharply with its cause.
+- 4 = clearly moves specific stocks or a sector today: earnings or guidance of a large
+  company, a big deal, an FDA decision, a major upgrade or downgrade, a data release as
+  expected, a sharp sector move with its cause.
+- 3 = a notable Wall Street update with a concrete fact: a market wrap with numbers,
+  unusual fund flows or positioning data, a strategist's call with a number.
+- 2 or 1 = routine: opinions and commentary, generic charts with no news, sentiment
+  snippets, "stocks to watch" lists, recaps of older news, research promotion, and
+  anything only loosely related.
 
 For each pick write `summary_he`: ONE short sentence of plain Hebrew, at most about 15
 words, saying what happened and which tickers / market it touches. No preamble, no

@@ -202,17 +202,24 @@ class AlertsSettings:
     # are priced every `far_every`-th pass only (fewer calls; TradingView slows down)
     far_every: int = 3
     live_max_symbols: int = 120        # get-ohlcv calls per pass, at most
+    # Fewer, more meaningful and varied breakouts (owner, 2026-09-28): only patterns whose
+    # past bullish breakouts in our ledger reached the target at least `min_success_pct`
+    # of the time; in the session, the price at least `live_min_above_pct` above the line,
+    # and at most `live_per_pattern` alerts of one pattern a session
+    min_success_pct: float = 35.0
+    live_min_above_pct: float = 0.5
+    live_per_pattern: int = 2
     # Big moves before the open (tascreen/premarket.py; owner, 2026-09-28): 07:30, 08:30
-    # and 09:15 New York time, the $1B+ stocks moving at least this much on real volume
+    # and 09:15 New York time, the universe's stocks moving at least this much on real volume
     premarket: bool = True
     premarket_min_pct: float = 4.0
     premarket_min_volume: float = 300000.0
 
     def __post_init__(self):
         for name in ("verge_pct", "watch_pct", "live_interval_minutes", "premarket_min_pct",
-                     "premarket_min_volume"):
+                     "premarket_min_volume", "min_success_pct", "live_min_above_pct"):
             object.__setattr__(self, name, float(getattr(self, name)))
-        for name in ("top_analyses", "live_max_symbols", "far_every"):
+        for name in ("top_analyses", "live_max_symbols", "far_every", "live_per_pattern"):
             object.__setattr__(self, name, int(getattr(self, name)))
         if not 1 <= self.far_every <= 6:
             raise ConfigError("alerts.far_every must be 1..6")
@@ -230,6 +237,12 @@ class AlertsSettings:
             raise ConfigError("alerts.premarket_min_pct must be 1..50")
         if self.premarket_min_volume < 0:
             raise ConfigError("alerts.premarket_min_volume must be 0 or more")
+        if not 0 <= self.min_success_pct <= 90:
+            raise ConfigError("alerts.min_success_pct must be 0..90")
+        if not 0 <= self.live_min_above_pct <= 5:
+            raise ConfigError("alerts.live_min_above_pct must be 0..5")
+        if not 1 <= self.live_per_pattern <= 20:
+            raise ConfigError("alerts.live_per_pattern must be 1..20")
 
 
 @dataclass(frozen=True)
@@ -247,6 +260,10 @@ class XNewsSettings:
     # run, but judged together at most every `claude_every_minutes`, `claude_daily_cap` a day
     claude_daily_cap: int = 45
     claude_every_minutes: int = 30
+    # few, hand-picked stories (owner, 2026-09-28): at most `max_per_round` a round, and
+    # `daily_max` regular ones a day spread over the news hours (a 5 always goes)
+    max_per_round: int = 2
+    daily_max: int = 12
     model: str = "sonnet"
     effort: str = "low"
     timeout_s: int = 300
@@ -270,7 +287,7 @@ class XNewsSettings:
             raise ConfigError(f"xnews.accounts: {exc}") from None
         object.__setattr__(self, "accounts", names)
         for name in ("min_importance", "weekend_min_importance", "daily_read_cap", "timeout_s", "claude_daily_cap",
-                     "claude_every_minutes"):
+                     "claude_every_minutes", "max_per_round", "daily_max"):
             object.__setattr__(self, name, int(getattr(self, name)))
         if not 1 <= self.min_importance <= 5:
             raise ConfigError("xnews.min_importance must be 1..5")
@@ -286,6 +303,10 @@ class XNewsSettings:
             raise ConfigError("xnews.claude_daily_cap must be 1..200")
         if not 10 <= self.claude_every_minutes <= 180:
             raise ConfigError("xnews.claude_every_minutes must be 10..180")
+        if not 1 <= self.max_per_round <= 10:
+            raise ConfigError("xnews.max_per_round must be 1..10")
+        if not 1 <= self.daily_max <= 100:
+            raise ConfigError("xnews.daily_max must be 1..100")
 
 
 @dataclass(frozen=True)

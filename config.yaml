@@ -22,12 +22,13 @@ tradingview:
 
 universe:
   # US stocks above this market cap (USD), from TradingView's screener.
+  # $5B (owner, 2026-09-28; was $1B): the scan, the live watch and the pre-market reports.
   market: "america"
-  min_market_cap: 1.0e9
+  min_market_cap: 5.0e9
   # The screener has no paging, so the universe is fetched in market-cap bands;
   # a band holding more than row_cap is split automatically. The last band is
   # open-ended.
-  band_edges: [1.0e9, 1.5e9, 2.0e9, 3.0e9, 5.0e9, 1.0e10, 3.0e10, 1.0e11]
+  band_edges: [5.0e9, 1.0e10, 3.0e10, 1.0e11]
   # Rows per call. The tool allows 1000, but the MCP server refuses results over
   # 1 MB (live: roughly 430 rows). An answer that is too big splits its band too.
   row_cap: 400
@@ -89,8 +90,16 @@ alerts:
                              # as TradingView allows; get-ohlcv, one call a stock)
   far_every: 3               # stocks beyond verge_pct from their line: every 3rd pass only
   live_max_symbols: 120      # stocks watched, at most, nearest to their line first
+  # Fewer, more meaningful and varied breakouts (owner, 2026-09-28: "mostly wedges"). Only
+  # patterns whose past bullish breakouts in our ledger reached the target at least this
+  # often (failed and expired count against; 2026-09 ledger: double, triple and head and
+  # shoulders bottoms, rectangles, ascending triangles pass; wedges, flags, cups do not).
+  # The live watch and the evening research team both use it.
+  min_success_pct: 35
+  live_min_above_pct: 0.5    # in the session: the price this far above the line, not a touch
+  live_per_pattern: 2        # alerts of one pattern a session, at most
   # Big moves before the open (owner, 2026-09-28): at 07:30, 08:30 and 09:15 New York
-  # time (14:30, 15:30, 16:15 Israel time in summer), the $1B+ stocks moving at least
+  # time (14:30, 15:30, 16:15 Israel time in summer), the $5B+ stocks moving at least
   # premarket_min_pct since the last close on at least premarket_min_volume shares, and
   # any above a forming pattern's breakout line. Pre-market prices, never a breakout.
   premarket: true
@@ -128,6 +137,11 @@ xnews:
   # 30 minutes at most (the 20-hour window 07:00-03:00 Israel time fits 40)
   claude_daily_cap: 45
   claude_every_minutes: 30
+  # Few, hand-picked stories (owner, 2026-09-28: "not a story from every scan"): at most
+  # max_per_round a round (the most important), and daily_max regular ones a day, spread
+  # over the news hours (about one every 100 minutes). A 5 (market-moving now) always goes.
+  max_per_round: 2
+  daily_max: 12
   model: "sonnet"
   effort: "low"
   timeout_s: 300

@@ -15,6 +15,11 @@ Talk to the owner in simple Hebrew. Code, comments and commits stay in English.
 - **What is news (2026-09-28):** not only the dramatic. Rating 1-5 by the
   `news-screener` role; sent from 3 up (`xnews.min_importance`): 🔴 5 market-moving now,
   🟠 4 relevant to specific stocks or sectors today, 🔵 3 a useful Wall Street update.
+- **Few, picked with tweezers (2026-09-28, after 29 stories in 90 minutes):** a strict
+  scale in `news-screener.md` (routine commentary, generic charts and sentiment are 2),
+  and `xnews.ration`: at most `max_per_round` (2) a round, the most important first (more
+  sources rank higher), and `daily_max` (12) regular stories a day from a budget that
+  refills through the 20 news hours (about one every 100 minutes). A 5 always goes.
 - **Weekend (Saturday, Sunday in New York):** only 4-5, dramatic or what matters for the
   coming week (`weekend_min_importance`, `WEEKEND_NOTE`).
 - **Hours:** 07:00-03:00 Israel time (04-24 UTC); a pass every 10 minutes on weekdays,

@@ -292,7 +292,8 @@ def usable_universe(settings, *, max_age_days: float | None = None):
         log.error("the newest saved universe is from %s (%d days old, limit %g)", day, age,
                   max_age_days)
         return None
-    return day, frame
+    # a universe saved under a lower floor (the owner raised it to $5B, 2026-09-28)
+    return day, frame.loc[frame["market_cap"] >= settings.universe.min_market_cap].reset_index(drop=True)
 
 
 def bars(settings, limit: int | None, stop_at=None) -> int:
@@ -619,9 +620,13 @@ def _research_runner(settings, store, view):
     cfg = settings.research
 
     def run(breakouts, verge):
+        from tascreen import alerts
+
         llm = ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s)
+        proven = alerts.proven_patterns(store.read_ledger(), settings.outcomes.min_cases,
+                                        settings.alerts.min_success_pct)
         return research.research(view, store, breakouts, verge, llm=llm, verge_pct=settings.alerts.verge_pct,
-                                 shortlist_size=cfg.shortlist, max_picks=cfg.max_picks,
+                                 shortlist_size=cfg.shortlist, max_picks=cfg.max_picks, patterns=proven,
                                  news_of=lambda symbols: _news(settings, symbols),
                                  market=_market_moves(settings), analyse=analyse)
     return run
@@ -743,7 +748,8 @@ def ci_live(settings, max_minutes: float) -> int:
     view = ScanRepository(store, load_rules()).current()
     if view is None:
         return finish("no scan")
-    near, far = alerts.watch_tiers(view, cfg.verge_pct, cfg.watch_pct, cfg.live_max_symbols)
+    proven = alerts.proven_patterns(store.read_ledger(), settings.outcomes.min_cases, cfg.min_success_pct)
+    near, far = alerts.watch_tiers(view, cfg.verge_pct, cfg.watch_pct, cfg.live_max_symbols, proven)
     summary.update(watched=len(near) + len(far), watched_near=len(near), watched_far=len(far),
                    data_delay_min=None)
     if not near and not far:
@@ -789,7 +795,8 @@ def ci_live(settings, max_minutes: float) -> int:
             summary["median_call_s"] = round(statistics.median(all_seconds), 2)
         if settings.explain.enabled:
             _session_move(settings, client, bot, store, day, sent, index_history, summary)
-        found = alerts.live_crossings(view, got["prices"], day, sent.get("live", {}))
+        found = alerts.live_crossings(view, got["prices"], day, sent.get("live", {}), patterns=proven,
+                                      min_above_pct=cfg.live_min_above_pct, per_pattern=cfg.live_per_pattern)
         if found:
             symbols, at = [c["symbol"] for c in found], datetime.now(timezone.utc)
             news = _news(settings, symbols, client)
@@ -970,8 +977,9 @@ def ci_premarket(settings) -> int:
     crossings = []
     view = ScanRepository(store, load_rules()).current()
     if view is not None and movers["up"]:
+        proven = alerts.proven_patterns(store.read_ledger(), settings.outcomes.min_cases, cfg.min_success_pct)
         crossings = alerts.live_crossings(view, {m["symbol"]: m["price"] for m in movers["up"]}, day,
-                                          sent.get("premarket_crossings", {}))
+                                          sent.get("premarket_crossings", {}), patterns=proven)
     why = _explain(settings, "pre-market", indexes, movers["up"] + movers["down"], now) if indexes else None
     bot.send(premarket.message(slot, movers, crossings, cfg.premarket_min_pct,
                                index_line=explain.index_line(indexes, premarket=True), why=why), html=True)
@@ -1331,7 +1339,7 @@ def xnews_pass(settings) -> int:
         min_importance=cfg.min_importance, daily_read_cap=cfg.daily_read_cap,
         weekend_min_importance=cfg.weekend_min_importance,
         llm_daily_cap=cfg.claude_daily_cap, llm_min_interval_s=cfg.claude_every_minutes * 60,
-        with_replies=cfg.with_replies)
+        max_per_round=cfg.max_per_round, daily_max=cfg.daily_max, with_replies=cfg.with_replies)
     print("xnews: " + " ".join(f"{k}={v}" for k, v in summary.items()))
     return 0
 

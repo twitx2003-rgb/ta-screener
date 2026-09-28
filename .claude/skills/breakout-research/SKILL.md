@@ -13,7 +13,10 @@ Talk to the owner in simple Hebrew. Code, comments and commits stay in English.
   every breakout. Only what passes the research is sent.
 - Candidates: the day's confirmed bullish breakouts and the forming patterns on the verge
   (`alerts.bullish_breakouts`, `alerts.on_the_verge`).
-- **Live crossings during the session stay as they were:** immediate, no research.
+- **Live crossings during the session:** immediate, no research, but picked in code
+  (owner, 2026-09-28): only proven patterns (the same `proven_patterns` gate), the price
+  at least `live_min_above_pct` (0.5%) above the line, at most `live_per_pattern` (2)
+  of one pattern a session. Stocks above $5B only (`universe.min_market_cap`).
 - Keep Claude's share small: the team works in batches (four calls a day).
 
 ## The steps
@@ -24,12 +27,15 @@ Talk to the owner in simple Hebrew. Code, comments and commits stay in English.
    against the whole list and the sector, days to earnings, TradingView headlines
    (`alerts.fetch_news`). No model invents a number: every number in the text must be in
    the dossier (`analyst/text_rules`), and advice or forecast wording is dropped.
-2. **Shortlist (code):** at most 8 by a transparent score.
+2. **Shortlist (code):** only patterns with a proven record (`alerts.proven_patterns`:
+   at least `alerts.min_success_pct`, 35%, of their ended bullish breakouts reached the
+   target, failed and expired counting against); at most 8 by a transparent score, at
+   most 2 of one pattern (owner, 2026-09-28: "mostly wedges", wants variety and meaning).
 3. **Three specialists, one call each over the whole shortlist:** `pattern-auditor`
    (is it the textbook pattern, breakout quality), `context-analyst` (market, sector,
    news, earnings), `statistician` (what similar setups did in our ledger).
-4. **`chief-strategist`:** at most 3 picks, or none; for each, why, what cancels it and
-   what to watch next session.
+4. **`chief-strategist`:** at most 3 picks, or none, one per pattern; for each, why,
+   what cancels it and what to watch next session.
 5. **Evening message:** only the picks (chart, reasons, the full analysis via
    `analyst.yml`), and "נבדקו N, נבחרו K". No pick: a short note. Research failed:
    the old report with a note, so a day is never lost.

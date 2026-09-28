@@ -188,6 +188,28 @@ def test_the_watch_list_and_a_crossing_told_once(tmp_path):
     assert "לא סופי עד הסגירה" in text and "11:40 שעון ניו יורק" in text and "DB</a>" in text
 
 
+def test_only_proven_patterns_a_clear_crossing_and_variety(tmp_path):
+    from tascreen.alerts import live_crossings, proven_patterns, watch_list
+    from scan_setup import LIVE_PRICE
+
+    settings, store, view, session = _live_setup(tmp_path)
+    ledger = pd.DataFrame({"pattern": ["double_bottom"] * 4 + ["rising_wedge"] * 4 + ["flag"] * 2,
+                           "direction": ["bullish"] * 9 + ["bearish"],
+                           "outcome": ["target", "target", "failed", "expired",
+                                       "target", "expired", "expired", "failed", "target", "target"],
+                           "target": [110.0] * 10})
+    assert proven_patterns(ledger, 3, 35) == {"double_bottom"}      # a wedge 1 in 4; one bullish flag
+    assert proven_patterns(None, 3, 35) is None
+    assert watch_list(view, 10.0, 5, {"rising_wedge"}) == []
+    assert live_crossings(view, {"NASDAQ:DB": LIVE_PRICE}, session, {}, patterns={"rising_wedge"}) == []
+    line = live_crossings(view, {"NASDAQ:DB": LIVE_PRICE}, session, {})[0]["line"]
+    assert live_crossings(view, {"NASDAQ:DB": line * 1.002}, session, {}, min_above_pct=0.5) == []   # a touch
+    assert live_crossings(view, {"NASDAQ:DB": line * 1.01}, session, {}, min_above_pct=0.5)
+    two = {"NYSE:A|double_bottom": {}, "NYSE:B|double_bottom": {}}
+    assert live_crossings(view, {"NASDAQ:DB": LIVE_PRICE}, session, two, per_pattern=2) == []
+    assert live_crossings(view, {"NASDAQ:DB": LIVE_PRICE}, session, two, per_pattern=3)
+
+
 def test_ci_live_prices_the_watch_list_and_alerts_once(tmp_path, monkeypatch):
     import asyncio
 

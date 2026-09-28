@@ -94,10 +94,21 @@ def score(c: dict[str, Any], stock: dict[str, Any], day: date, verge_pct: float)
     return round(s, 2)
 
 
-def shortlist(cands: list[dict], stocks: dict[str, dict], day: date, verge_pct: float, n: int) -> list[dict]:
+SHORTLIST_PER_PATTERN = 2    # variety (owner, 2026-09-28): one pattern never fills the shortlist
+
+
+def shortlist(cands: list[dict], stocks: dict[str, dict], day: date, verge_pct: float, n: int,
+              per_pattern: int = SHORTLIST_PER_PATTERN) -> list[dict]:
+    """The `n` best scored candidates, at most `per_pattern` of one pattern."""
     scored = [{**c, "score": score(c, stocks.get(c["symbol"], {}), day, verge_pct)} for c in cands]
     scored.sort(key=lambda c: (-c["score"], c["symbol"]))
-    return scored[:n]
+    out: list[dict] = []
+    per: dict[str, int] = {}
+    for c in scored:
+        if per.get(c["pattern"], 0) < per_pattern:
+            per[c["pattern"]] = per.get(c["pattern"], 0) + 1
+            out.append(c)
+    return out[:n]
 
 
 # ------------------------------------------------------------------ dossiers
@@ -241,17 +252,19 @@ def run_team(dossiers: list[dict], llm, lessons: str = "", max_picks: int = 3) -
                              user=_dumps({**base, "verdicts": by_symbol}), schema=_chief_schema())
     picks, dropped = [], []
     dossier_of = {d["symbol"]: d for d in dossiers}
+    patterns: set[str] = set()
     for p in answer.get("picks") or []:
         if not isinstance(p, dict) or p.get("symbol") not in shortlist_symbols:
             dropped.append("not in the shortlist")
             continue
-        if any(q["symbol"] == p["symbol"] for q in picks):
-            continue
+        if any(q["symbol"] == p["symbol"] for q in picks) or dossier_of[p["symbol"]]["pattern"] in patterns:
+            continue                            # variety: one pick per pattern, the chief's first
         allowed = _numbers(_dumps(dossier_of[p["symbol"]]) + _dumps(by_symbol[p["symbol"]]))
         problems = [text_problem(str(p.get(k, "")), allowed) for k in ("why_he", "cancels_he", "watch_he")]
         if any(problems):
             dropped.append(next(x for x in problems if x))
             continue
+        patterns.add(dossier_of[p["symbol"]]["pattern"])
         picks.append({"symbol": p["symbol"], "conviction": int(p.get("conviction") or 0),
                       "why_he": p["why_he"].strip(), "cancels_he": p["cancels_he"].strip(),
                       "watch_he": p["watch_he"].strip(),
@@ -264,12 +277,16 @@ def run_team(dossiers: list[dict], llm, lessons: str = "", max_picks: int = 3) -
 
 def research(view: ScanView, store: Store, breakouts: list[dict], verge: list[dict], *, llm, verge_pct: float,
              shortlist_size: int, max_picks: int, news_of: Callable[[list[str]], dict[str, dict]] | None = None,
-             market: dict[str, float] | None = None, analyse: Callable | None = None) -> dict[str, Any]:
-    """The whole evening: candidates -> shortlist -> dossiers -> team. status: "picked",
-    "none" (the team found nothing good enough) or "failed" (every pick broke a rule)."""
+             market: dict[str, float] | None = None, analyse: Callable | None = None,
+             patterns: set[str] | None = None) -> dict[str, Any]:
+    """The whole evening: candidates -> shortlist -> dossiers -> team. Only `patterns` (the
+    proven ones, alerts.proven_patterns; None: all). status: "picked", "none" (the team
+    found nothing good enough) or "failed" (every pick broke a rule)."""
     stocks = {r["symbol"]: r for r in view.stocks.to_dict("records")}
-    cands = candidates(view, breakouts, verge)
-    out: dict[str, Any] = {"candidates": len(cands), "breakouts": len(breakouts), "verge": len(verge),
+    every = candidates(view, breakouts, verge)
+    cands = [c for c in every if patterns is None or c["pattern"] in patterns]
+    out: dict[str, Any] = {"candidates": len(cands), "unproven": len(every) - len(cands),
+                           "breakouts": len(breakouts), "verge": len(verge),
                            "shortlist": [], "picks": [], "dropped": []}
     if not cands:
         return {**out, "status": "none"}
