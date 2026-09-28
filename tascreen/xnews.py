@@ -42,6 +42,9 @@ ACCOUNT = re.compile(r"^@?([A-Za-z0-9_]{1,15})$")
 QUERY_ACCOUNTS = 10          # accounts per search call ("from:a OR from:b ..."); fewer calls, same posts
 MAX_PAGES = 5                # pages of up to 20 posts per call; more than 100 new posts in 10 minutes is a flood
 OVERLAP_S = 120              # each search starts a little before the last one ended; ids dedupe
+# After a gap (the night, a weekend, a stopped workflow) only the last hour is read: older
+# posts are no longer news, and a night of 63 accounts at once would flood the chat.
+MAX_LOOKBACK_S = 3600
 SENT_KEPT = 2000             # post ids remembered so a post is never judged or sent twice
 SUMMARY_MAX = 220            # the owner wants it short (2026-09-27): one sentence
 ANALYSIS_MAX = 360           # ...and then a short analysis (owner, same day): 1-2 sentences
@@ -451,7 +454,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     seen = list(state.get("seen") or [])
     pending = [r for r in state.get("pending") or []
                if isinstance(r, dict) and stamp - int(r.get("added", 0)) <= PENDING_MAX_AGE_S]
-    since = int(state.get("since") or stamp - first_lookback_s)
+    since = max(int(state.get("since") or stamp - first_lookback_s), stamp - MAX_LOOKBACK_S)
     if reads["posts"] < daily_read_cap:
         posts = source.new_posts(accounts, since - OVERLAP_S, with_replies=with_replies)
         summary["calls"], summary["read"] = source.calls, len(posts)

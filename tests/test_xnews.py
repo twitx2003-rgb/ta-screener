@@ -309,3 +309,12 @@ def test_on_the_weekend_only_the_dramatic_goes_out(tmp_path):
     sent = []
     run(tmp_path / "weekday", FakeReader(page), llm, sent, min_importance=3)        # a Monday
     assert "עדכון רגיל" in sent[0] and not llm.calls[-1].startswith("It is the weekend")
+
+
+def test_after_a_night_only_the_last_hour_is_read(tmp_path):
+    (tmp_path / "state.json").write_text(json.dumps({"since": int(NOW.timestamp()) - 17 * 3600}),
+                                         encoding="utf-8")
+    reader = FakeReader()
+    run(tmp_path, reader, picker(), [])
+    since = int(NOW.timestamp()) - xnews.MAX_LOOKBACK_S - xnews.OVERLAP_S
+    assert f"since_time:{since} " in reader.queries[0]["query"]
