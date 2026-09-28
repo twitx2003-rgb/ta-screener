@@ -54,10 +54,6 @@ EOF
 paths:
   data: "$PWD/state/data"
   logs: "$PWD/state/logs"
-web:
-  open_browser: false
-live:
-  update_after_close: false
 EOF
     ;;
 bars)
