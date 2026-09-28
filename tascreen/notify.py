@@ -42,6 +42,25 @@ def redact(text: str) -> str:
     return _TOKEN.sub("<token>", str(text))
 
 
+RLM = "\u200f"                  # RIGHT-TO-LEFT MARK: invisible, a strong right-to-left letter
+_HEBREW = re.compile(r"[\u0590-\u05ff]")
+
+
+def rtl(text: str) -> str:
+    """Every line right-aligned (owner, 2026-09-28). Telegram aligns a line by its first
+    strong letter, so a line that opens with an emoji and a Latin ticker or account name
+    came out left-aligned; an RLM in front makes it right-to-left. Lines that already open
+    with a Hebrew letter are left as they are."""
+    return "\n".join(line if not line or line.startswith(RLM) or _HEBREW.match(line) else RLM + line
+                     for line in str(text).split("\n"))
+
+
+def caption(text: str, limit: int = 1024) -> str:
+    """rtl() when it still fits Telegram's caption limit (a cut could split an HTML tag)."""
+    right = rtl(text)
+    return right if len(right) <= limit else str(text)[:limit]
+
+
 class Telegram:
     def __init__(self, token: str, chat_id: str | int | None = None, *,
                  post: Callable[[str, dict], dict] | None = None,
@@ -125,21 +144,21 @@ class Telegram:
         return self.chat_id
 
     def send(self, text: str, *, html: bool = False) -> None:
-        params = {"chat_id": self._chat(), "text": text, "disable_web_page_preview": "true"}
+        params = {"chat_id": self._chat(), "text": rtl(text), "disable_web_page_preview": "true"}
         if html:
             params["parse_mode"] = "HTML"
         self.call("sendMessage", **params)
 
     def send_photo(self, content: bytes, caption: str = "", filename: str = "chart.png", *,
                    html: bool = False) -> None:
-        params = {"chat_id": self._chat(), "caption": caption[:1024]}
+        params = {"chat_id": self._chat(), "caption": _caption_of(caption)}
         if html:
             params["parse_mode"] = "HTML"
         self._answer("sendPhoto", self._upload("sendPhoto", params, ("photo", filename, content, "image/png")))
 
     def send_photo_url(self, url: str, caption: str = "", *, html: bool = False) -> None:
         """A photo Telegram fetches itself from `url` (the X news: pictures on pbs.twimg.com)."""
-        params = {"chat_id": self._chat(), "photo": url, "caption": caption[:1024]}
+        params = {"chat_id": self._chat(), "photo": url, "caption": _caption_of(caption)}
         if html:
             params["parse_mode"] = "HTML"
         self.call("sendPhoto", **params)
@@ -154,16 +173,19 @@ class Telegram:
             if len(batch) == 1:
                 self.send_photo(batch[0][0], batch[0][1], html=True)
                 continue
-            media = [{"type": "photo", "media": f"attach://p{n}", "caption": caption[:1024],
+            media = [{"type": "photo", "media": f"attach://p{n}", "caption": _caption_of(caption),
                       "parse_mode": "HTML"} for n, (_, caption) in enumerate(batch)]
             files = [(f"p{n}", f"p{n}.png", content, "image/png") for n, (content, _) in enumerate(batch)]
             params = {"chat_id": self._chat(), "media": json.dumps(media, ensure_ascii=False)}
             self._answer("sendMediaGroup", self._upload("sendMediaGroup", params, files))
 
     def send_document(self, content: bytes, filename: str, caption: str = "") -> None:
-        params = {"chat_id": self._chat(), "caption": caption[:1024]}
+        params = {"chat_id": self._chat(), "caption": _caption_of(caption)}
         self._answer("sendDocument", self._upload("sendDocument", params,
                                                   ("document", filename, content, "text/plain")))
+
+
+_caption_of = caption          # the methods' `caption` argument shadows the function
 
 
 def from_environment() -> Telegram | None:

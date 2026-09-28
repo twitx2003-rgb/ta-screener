@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .errors import ProviderError
+from .agents import prompt as agent_prompt
 from .analyst.text_rules import banned
 from .fields import pick
 from .llm import UsageLimit
@@ -191,34 +192,7 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 
 # --- Claude picks what matters ------------------------------------------------------------
 
-SYSTEM = """\
-You screen posts from X for an Israeli private investor who trades US stocks and wants
-to follow Wall Street through the day: the breaking news, and also the ordinary news and
-updates. You get the new posts of accounts the investor follows. Pick what is about US
-stocks, sectors, indices, rates, the dollar or commodities: company news (earnings,
-guidance, deals, FDA, lawsuits, management changes, contracts, analyst upgrades and
-downgrades), macro data, the economic calendar and Fed remarks, government actions
-(tariffs, sanctions, export rules), market moves and wraps (indices, sectors, notable
-movers), fund flows, positioning and sentiment data, and charts that show one of these.
-Skip jokes, promotions, ads, "good morning", engagement bait, personal opinions with no
-news or data in them, anything not about markets, and repeats of a post already in the
-list.
-
-Rate each picked post 1-5: 5 = market-moving now; 4 = clearly relevant to specific stocks
-or sectors today; 3 = a useful Wall Street update (a market move, data, an analyst call,
-a notable chart); 2 or 1 = only loosely related.
-
-For each pick write `summary_he`: ONE short sentence of plain Hebrew, at most about 15
-words, saying what happened and which tickers / market it touches. No preamble, no
-source name (it is shown separately), no filler. Use ONLY facts in the post: no numbers,
-names or causes that are not written there, no advice, no predictions. Keep tickers and
-company names in English. `post_id` must be copied exactly from the input.
-
-Then write `analysis_he`: a short analysis, 1-2 sentences of plain Hebrew (at most about
-35 words): why this matters for the market, which sectors or tickers are exposed, and
-the background a reader needs (for example what the data usually shows, or what the
-market was expecting, if the post says so). Explain, do not forecast: no price targets,
-no "will rise / will fall", no buy or sell wording, no advice."""
+SYSTEM = agent_prompt("news-screener")     # tascreen/agents/news-screener.md
 
 
 def schema() -> dict:
@@ -298,17 +272,7 @@ def item(post: Post, pick_: dict, *, with_image: bool = False) -> str:
 
 # --- what a picture shows ------------------------------------------------------------------
 
-IMAGE_SYSTEM = """\
-You explain pictures attached to market news posts, for an Israeli private investor who
-reads them on Telegram. The images come in the order of the list in the text, each with
-its post_id, author and post text.
-
-For each image write `image_he`: ONE short sentence of plain Hebrew, at most about 20
-words, saying what the picture shows and how to read it: what the chart or table
-measures, the period if it is visible, and the one point it makes. Describe only what is
-visible in the picture or written in its post: no advice, no forecasts. Keep tickers in
-English. If the picture is not a chart, table or data (a person, a logo, a meme), return
-an empty string. `post_id` must be copied exactly."""
+IMAGE_SYSTEM = agent_prompt("chart-reader")   # tascreen/agents/chart-reader.md
 
 IMAGES_MAX = 4               # pictures per model call
 IMAGE_BYTES_MAX = 5 * 1024 * 1024

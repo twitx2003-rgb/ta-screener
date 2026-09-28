@@ -82,7 +82,7 @@ def test_charts_go_in_albums_of_ten():
     assert [u[0] for u in uploads] == ["sendMediaGroup", "sendMediaGroup", "sendPhoto"]
     media = json.loads(uploads[0][1]["media"])
     assert len(media) == 10 and media[0] == {"type": "photo", "media": "attach://p0",
-                                             "caption": "<b>0</b>", "parse_mode": "HTML"}
+                                             "caption": "‏<b>0</b>", "parse_mode": "HTML"}
     assert [f[0] for f in uploads[0][2]] == [f"p{n}" for n in range(10)]
     assert uploads[2][1]["parse_mode"] == "HTML" and uploads[2][2][0] == "photo"
 

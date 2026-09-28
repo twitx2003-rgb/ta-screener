@@ -72,7 +72,7 @@ def test_the_daily_limit_answers_without_calling_the_model(tmp_path):
 def test_an_unknown_symbol_is_answered_with_only_symbol_characters(tmp_path):
     status, bot, llm = _request(tmp_path, "<b>zz</b> & rm")
     assert status == "not in the list" and not llm.calls
-    assert bot.sent[0][1].startswith("bzzbrm: המניה לא ברשימה")
+    assert bot.sent[0][1].startswith("‏bzzbrm: המניה לא ברשימה")  # right-aligned
     assert shown("") == "?" and shown("nasdaq:nvda") == "nasdaq:nvda"
 
 

@@ -67,4 +67,17 @@ def test_a_photo_by_address():
     bot = Telegram(TOKEN, 7, post=lambda method, params: calls.append((method, params)) or {"ok": True})
     bot.send_photo_url("https://pbs.twimg.com/media/synthetic.jpg", "<b>x</b>", html=True)
     assert calls == [("sendPhoto", {"chat_id": 7, "photo": "https://pbs.twimg.com/media/synthetic.jpg",
-                                    "caption": "<b>x</b>", "parse_mode": "HTML"})]
+                                    "caption": "\u200f<b>x</b>", "parse_mode": "HTML"})]
+
+
+def test_every_line_is_right_aligned():
+    from tascreen.notify import RLM, caption, rtl
+
+    text = "🔴 <b>NewsDesk</b>: חדשה\nשורה בעברית\n\nNVDA +5%"
+    assert rtl(text) == f"{RLM}🔴 <b>NewsDesk</b>: חדשה\nשורה בעברית\n\n{RLM}NVDA +5%"
+    assert rtl(rtl(text)) == rtl(text)
+    assert caption("x" * 1024) == "x" * 1024                      # no room: left as it was
+    calls = []
+    bot = Telegram(TOKEN, 7, post=lambda method, params: calls.append(params) or {"ok": True})
+    bot.send("NVDA עלתה")
+    assert calls[0]["text"] == RLM + "NVDA עלתה"

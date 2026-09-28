@@ -148,6 +148,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--x-vision-check", action="store_true",
                         help="One real post picture -> Claude's explanation -> Telegram (confirms the "
                              "picture call; normal terminal or xnews.yml with check_vision)")
+    parser.add_argument("--x-latest", type=int, nargs="?", const=60, metavar="MINUTES",
+                        help="Print the accounts' posts of the last MINUTES (default 60), for the "
+                             "news-analyst agent. Paid per post; this computer only, never in CI logs")
     parser.add_argument("--xnews", action="store_true",
                         help="One pass: new posts of xnews.accounts -> Claude picks -> Telegram "
                              "(normal terminal or xnews.yml)")
@@ -1085,6 +1088,23 @@ def x_discover(settings, account: str) -> int:
     return 0
 
 
+def x_latest(settings, minutes: int) -> int:
+    import os
+    import time
+
+    from tascreen import xnews
+
+    if os.environ.get("GITHUB_ACTIONS"):
+        raise ConfigError("--x-latest prints post texts: not in a public Actions log")
+    minutes = max(5, min(int(minutes), 360))
+    posts = _x_source().new_posts(list(settings.xnews.accounts), int(time.time()) - minutes * 60)
+    for post in posts:
+        print(f"[{post.created_at}] @{post.author}: {post.text}\n  {post.url}"
+              + (f"\n  picture: {post.photo}" if post.photo else ""))
+    print(f"\n{len(posts)} posts in the last {minutes} minutes")
+    return 0
+
+
 def x_vision_check(settings) -> int:
     """The picture call on a real post, end to end. The public log gets one status word;
     the explanation (or the error) goes to the owner's Telegram."""
@@ -1210,6 +1230,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.setup_x, lambda: setup_x(settings)),
         (args.x_discover, lambda: x_discover(settings, args.x_discover)),
         (args.x_vision_check, lambda: x_vision_check(settings)),
+        (args.x_latest is not None, lambda: x_latest(settings, args.x_latest)),
         (args.xnews, lambda: xnews_pass(settings)),
     )
     for requested, command in commands:
