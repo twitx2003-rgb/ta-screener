@@ -50,6 +50,13 @@ SENT_KEPT = 2000             # post ids remembered so a post is never judged or 
 SUMMARY_MAX = 220            # the owner wants it short (2026-09-27): one sentence
 ANALYSIS_MAX = 360           # ...and then a short analysis (owner, same day): 1-2 sentences
 PHOTO_HOST = "https://pbs.twimg.com/"
+# The reader's balance (owner, 2026-09-28): checked once a week, a Telegram warning when low.
+# twitterapi.io's low-balance e-mail: 1,000,000 credits = 10.00 USD; its price: 0.15 USD per
+# 1,000 posts. GET /oapi/my/info answered recharge_credits and total_bonus_credits (live, 2026-09-28).
+CREDITS_PER_USD = 100_000
+USD_PER_POST = 0.15 / 1000
+BALANCE_EVERY_S = 7 * 24 * 3600
+TOP_UP_URL = "https://twitterapi.io/dashboard"
 
 
 def account_name(raw: str) -> str:
@@ -89,6 +96,15 @@ class XSource:
             raise ProviderError(self._redact(f"X reader {path}: HTTP {exc.code}")) from None
         except (OSError, ValueError) as exc:
             raise ProviderError(self._redact(f"X reader {path}: {type(exc).__name__}: {exc}")) from None
+
+    def balance_usd(self) -> float:
+        """The account's credits (paid and bonus) in USD."""
+        info = self._get("/oapi/my/info", {})
+        if not isinstance(info, dict):
+            raise ProviderError(f"X reader balance: expected an object, got {type(info).__name__}")
+        credits = (float(pick(info, ["recharge_credits"], context="X reader balance"))
+                   + float(pick(info, ["total_bonus_credits"], context="X reader balance")))
+        return credits / CREDITS_PER_USD
 
     def search_page(self, query: str, cursor: str = "") -> dict:
         self.calls += 1
@@ -455,11 +471,35 @@ def _row_post(row: dict) -> Post:
                 created_at=str(row.get("created_at", "")), is_reply=False, photo=str(row.get("photo", "")))
 
 
+def low_balance_message(usd: float, daily_read_cap: int) -> str:
+    days = int(usd / (daily_read_cap * USD_PER_POST))
+    return (f"💳 <b>היתרה לקריאת הציוצים נמוכה: נשארו {usd:.2f} דולר.</b>\n"
+            f"גם בקצב הכי גבוה ({daily_read_cap:,} ציוצים ביום) זה מספיק לעוד {days} ימים לפחות. "
+            f"כשהיתרה תיגמר, החדשות יפסיקו להגיע.\n"
+            f'<a href="{TOP_UP_URL}">להטענה</a>')
+
+
+def check_balance(source: XSource, balance: dict, stamp: int, send: Callable[[str], None], *,
+                  low_usd: float, daily_read_cap: int) -> tuple[dict, bool | None]:
+    """Once every BALANCE_EVERY_S: the reader's balance, and a warning below `low_usd`.
+    (the state's "balance" entry after it; True/False = low or not, None = not checked).
+    A failed check is tried again next run; the amount never reaches the public log."""
+    if low_usd <= 0 or stamp - int(balance.get("checked", 0)) < BALANCE_EVERY_S:
+        return balance, None
+    try:
+        usd = source.balance_usd()
+    except ProviderError:
+        return balance, None
+    if usd < low_usd:
+        send(low_balance_message(usd, daily_read_cap))
+    return {"checked": stamp}, usd < low_usd
+
+
 def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], Any], send: Callable[[str], None],
              state_path: Path, now: datetime, min_importance: int, daily_read_cap: int,
              weekend_min_importance: int = 4,
              llm_daily_cap: int = 45, llm_min_interval_s: int = 1200,
-             max_per_round: int = 2, daily_max: int = 12,
+             max_per_round: int = 2, daily_max: int = 12, low_balance_usd: float = 0.0,
              send_photo: Callable[[str, str], None] | None = None,
              fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
              first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
@@ -481,12 +521,17 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     if model.get("day") != day:
         model = {"day": day, "calls": 0, "last": model.get("last", 0), "paused_until": model.get("paused_until", 0)}
     budget = state.get("budget") if isinstance(state.get("budget"), dict) else {}
+    balance = state.get("balance") if isinstance(state.get("balance"), dict) else {}
     summary: dict[str, Any] = {"accounts": len(accounts), "read": 0, "new": 0, "waiting": 0,
                                "judged": 0, "sent": 0, "rejected": 0, "calls": 0,
                                "claude_today": model["calls"]}
     if not accounts:
         summary["status"] = "no accounts"
         return summary
+    balance, low = check_balance(source, balance, stamp, send, low_usd=low_balance_usd,
+                                 daily_read_cap=daily_read_cap)
+    if low is not None:
+        summary["balance_low"] = low
     seen = list(state.get("seen") or [])
     pending = [r for r in state.get("pending") or []
                if isinstance(r, dict) and stamp - int(r.get("added", 0)) <= PENDING_MAX_AGE_S]
@@ -551,7 +596,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     summary["waiting"] = len(pending)
     summary["claude_today"] = model["calls"]
     save_state(state_path, {"since": since, "seen": seen, "pending": pending, "reads": reads, "llm": model,
-                            "budget": budget, "sent_recent": sent_recent[-40:], "recent": recent})
+                            "budget": budget, "balance": balance, "sent_recent": sent_recent[-40:],
+                            "recent": recent})
     summary["status"] = status
     return summary
 

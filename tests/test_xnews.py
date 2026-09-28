@@ -371,3 +371,28 @@ def test_only_the_best_few_go_out_and_the_budget_refills():
     full = {"tokens": 2, "at": t0, "day": day, "sent": 12}
     assert [p.id for p, _ in xnews.ration([pk(posts[0], 4), pk(posts[1], 5)], full, t0, day, **cap)[0]] == ["1"]
     assert len(xnews.ration([pk(posts[0], 4)], full, t0, "2027-01-16", **cap)[0]) == 1    # a new day
+
+
+def test_a_weekly_look_at_the_balance_warns_when_low(tmp_path):
+    answers = {"recharge_credits": 150_000, "total_bonus_credits": 20_000}
+    asked = []
+
+    def reader(path, params):
+        if path == "/oapi/my/info":
+            asked.append(path)
+            return dict(answers)
+        return {"tweets": [], "has_next_page": False}
+
+    sent = []
+    summary, _ = run(tmp_path, reader, picker(), sent, low_balance_usd=2.0)
+    assert summary["balance_low"] is True and len(sent) == 1
+    assert "נשארו 1.70 דולר" in sent[0] and "11 ימים לפחות" in sent[0]      # 1,000 posts a day: 0.15 USD
+    again, _ = run(tmp_path, reader, picker(), sent, low_balance_usd=2.0, now=datetime(2026, 1, 6, 15, 0,
+                                                                                       tzinfo=timezone.utc))
+    assert "balance_low" not in again and len(asked) == 1                  # a week has not passed
+    answers["recharge_credits"] = 900_000
+    week, _ = run(tmp_path, reader, picker(), sent, low_balance_usd=2.0, now=datetime(2026, 1, 13, 15, 0,
+                                                                                      tzinfo=timezone.utc))
+    assert week["balance_low"] is False and len(sent) == 1 and len(asked) == 2
+    with pytest.raises(ProviderError, match="recharge_credits"):
+        xnews.XSource(KEY, get=lambda path, params: {"credits": 5}).balance_usd()

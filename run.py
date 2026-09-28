@@ -1339,7 +1339,8 @@ def xnews_pass(settings) -> int:
         min_importance=cfg.min_importance, daily_read_cap=cfg.daily_read_cap,
         weekend_min_importance=cfg.weekend_min_importance,
         llm_daily_cap=cfg.claude_daily_cap, llm_min_interval_s=cfg.claude_every_minutes * 60,
-        max_per_round=cfg.max_per_round, daily_max=cfg.daily_max, with_replies=cfg.with_replies)
+        max_per_round=cfg.max_per_round, daily_max=cfg.daily_max, low_balance_usd=cfg.low_balance_usd,
+        with_replies=cfg.with_replies)
     print("xnews: " + " ".join(f"{k}={v}" for k, v in summary.items()))
     return 0
 

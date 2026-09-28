@@ -264,6 +264,7 @@ class XNewsSettings:
     # `daily_max` regular ones a day spread over the news hours (a 5 always goes)
     max_per_round: int = 2
     daily_max: int = 12
+    low_balance_usd: float = 2.0       # a weekly look at the reader's balance; warn below this (0: off)
     model: str = "sonnet"
     effort: str = "low"
     timeout_s: int = 300
@@ -307,6 +308,9 @@ class XNewsSettings:
             raise ConfigError("xnews.max_per_round must be 1..10")
         if not 1 <= self.daily_max <= 100:
             raise ConfigError("xnews.daily_max must be 1..100")
+        object.__setattr__(self, "low_balance_usd", float(self.low_balance_usd))
+        if not 0 <= self.low_balance_usd <= 100:
+            raise ConfigError("xnews.low_balance_usd must be 0..100")
 
 
 @dataclass(frozen=True)

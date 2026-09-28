@@ -142,6 +142,9 @@ xnews:
   # over the news hours (about one every 100 minutes). A 5 (market-moving now) always goes.
   max_per_round: 2
   daily_max: 12
+  # Once a week the reader's balance is looked at; below this (USD) the bot warns with a
+  # top-up link (owner, 2026-09-28). 0 turns it off.
+  low_balance_usd: 2
   model: "sonnet"
   effort: "low"
   timeout_s: 300
