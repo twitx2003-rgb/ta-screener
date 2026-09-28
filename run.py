@@ -661,6 +661,7 @@ def ci_live(settings, max_minutes: float) -> int:
         push_token_file(alerts.sent_path(store, day), "live watch started")
     client = make_tradingview(settings)
     all_seconds: list[float] = []
+    index_history: list = []                 # (time, {ticker: price}) for the hourly move
     while True:
         now = datetime.now(timezone.utc)
         if now >= ends:
@@ -687,6 +688,8 @@ def ci_live(settings, max_minutes: float) -> int:
         all_seconds += got["seconds"]
         if all_seconds:
             summary["median_call_s"] = round(statistics.median(all_seconds), 2)
+        if settings.explain.enabled:
+            _session_move(settings, client, bot, store, day, sent, index_history, summary)
         found = alerts.live_crossings(view, got["prices"], day, sent.get("live", {}))
         if found:
             symbols, at = [c["symbol"] for c in found], datetime.now(timezone.utc)
@@ -719,6 +722,37 @@ def ci_live(settings, max_minutes: float) -> int:
         wait = pass_started + interval * 60 - clock.monotonic()
         limit = min(ends, hand_over) - datetime.now(timezone.utc)
         clock.sleep(max(0.0, min(wait, limit.total_seconds())))
+
+
+def _session_move(settings, client, bot, store, day, sent, history, summary) -> None:
+    """One index-funds call per pass; on a sharp SPY/QQQ move, the explainer's message
+    (tascreen/explain.py move_due). Failures only skip this pass."""
+    from datetime import datetime, timedelta, timezone
+
+    from tascreen import alerts, explain
+
+    cfg = settings.explain
+    try:
+        indexes = client.with_session(
+            lambda session: explain.fetch_indexes(session, settings.tradingview.rate_limit_delays))
+    except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("index funds not fetched: %s", type(exc).__name__)
+        return
+    now = datetime.now(timezone.utc)
+    done = sent.setdefault("explain", [])
+    reason = explain.move_due(now, indexes, history, done, day_pct=cfg.day_move_pct,
+                              hour_pct=cfg.hour_move_pct, max_per_day=cfg.max_per_day,
+                              min_gap_minutes=cfg.min_gap_minutes)
+    history.append((now, {s.split(":")[-1]: v["close"] for s, v in indexes.items()}))
+    del history[:-30]
+    if reason is None:
+        return
+    why = _explain(settings, "session", indexes, [], now)
+    bot.send(explain.move_message(indexes, why), html=True)
+    done.append({"at": now.isoformat(timespec="seconds"), "reason": reason,
+                 "moves": explain.moves(indexes, premarket=False)})
+    alerts.write_sent(store, day, sent)
+    summary["explained_moves"] = summary.get("explained_moves", 0) + 1
 
 
 PREMARKET_LEAD_MINUTES = 135      # live.yml starts at 07:25 New York; the open is 09:30
@@ -780,6 +814,24 @@ def ensure_live(settings, now=None) -> int:
     return 0 if status == 204 else 1
 
 
+def _explain(settings, moment: str, indexes: dict, movers: list, now) -> str | None:
+    """The market explainer's sentences (tascreen/explain.py), or None: off, no Claude here
+    (inside Claude Code), or an answer that broke a rule. Never stops a report."""
+    from tascreen import explain
+    from tascreen.llm import ClaudeCodeLLM
+
+    cfg = settings.explain
+    if not cfg.enabled:
+        return None
+    try:
+        llm = ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s)
+        news = explain.recent_news(now, hours=cfg.news_hours)
+        return explain.explain(llm, moment=moment, indexes=indexes, movers=movers, news=news)
+    except (ScreenerError, OSError) as exc:
+        log.warning("market explainer: %s", type(exc).__name__)
+        return None
+
+
 def ci_premarket(settings) -> int:
     """The pre-market report (tascreen/premarket.py), once per slot. The public log gets
     one line of counts; the report goes to Telegram."""
@@ -802,21 +854,34 @@ def ci_premarket(settings) -> int:
     if day is None:
         print(f"premarket: status={slot}")
         return 0
-    movers = make_tradingview(settings).with_session(lambda session: premarket.fetch_movers(
-        session, settings.universe, settings.tradingview.rate_limit_delays,
-        min_pct=cfg.premarket_min_pct, min_volume=cfg.premarket_min_volume))
+    from tascreen import explain
+
+    async def fetch(session):
+        delays = settings.tradingview.rate_limit_delays
+        movers = await premarket.fetch_movers(session, settings.universe, delays,
+                                              min_pct=cfg.premarket_min_pct, min_volume=cfg.premarket_min_volume)
+        try:
+            indexes = await explain.fetch_indexes(session, delays)
+        except (ScreenerError, OSError, TimeoutError) as exc:
+            log.warning("index funds not fetched: %s", type(exc).__name__)
+            indexes = {}
+        return movers, indexes
+
+    movers, indexes = make_tradingview(settings).with_session(fetch)
     crossings = []
     view = ScanRepository(store, load_rules()).current()
     if view is not None and movers["up"]:
         crossings = alerts.live_crossings(view, {m["symbol"]: m["price"] for m in movers["up"]}, day,
                                           sent.get("premarket_crossings", {}))
-    bot.send(premarket.message(slot, movers, crossings, cfg.premarket_min_pct), html=True)
+    why = _explain(settings, "pre-market", indexes, movers["up"] + movers["down"], now) if indexes else None
+    bot.send(premarket.message(slot, movers, crossings, cfg.premarket_min_pct,
+                               index_line=explain.index_line(indexes, premarket=True), why=why), html=True)
     sent.setdefault("premarket", {})[slot] = now.isoformat(timespec="seconds")
     for c in crossings:
         sent.setdefault("premarket_crossings", {})[c["key"]] = slot
     alerts.write_sent(store, day, sent)
     print(f"premarket: status=sent slot={slot} up={len(movers['up'])} down={len(movers['down'])} "
-          f"stale={movers['stale']} crossings={len(crossings)}")
+          f"stale={movers['stale']} crossings={len(crossings)} indexes={len(indexes)} why={why is not None}")
     return 0
 
 

@@ -113,9 +113,15 @@ def _price(x: float) -> str:
     return f"{x:,.2f}"
 
 
-def message(slot: str, movers: dict[str, Any], crossings: list[dict[str, Any]], min_pct: float) -> str:
-    """The report in Telegram HTML."""
+def message(slot: str, movers: dict[str, Any], crossings: list[dict[str, Any]], min_pct: float, *,
+            index_line: str = "", why: str | None = None) -> str:
+    """The report in Telegram HTML; with the index funds' line and the market explainer's
+    sentences (tascreen/explain.py) when they are there."""
     lines = [f"🌅 <b>לפני הפתיחה</b> ({slot} בניו יורק) · מחירי טרום מסחר, לא סופיים"]
+    if index_line:
+        lines.append(index_line)
+    if why:
+        lines.append(f"🧭 <b>למה:</b> {html.escape(why)}")
     if crossings:
         lines.append("\n⚡ <b>מעל קו פריצה של תבנית</b> (פריצה רק אם תיסגר מעליו):")
         for c in crossings:
@@ -127,7 +133,7 @@ def message(slot: str, movers: dict[str, Any], crossings: list[dict[str, Any]], 
             for m in movers[side]:
                 name = f" · {html.escape(m['name'][:28])}" if m["name"] else ""
                 lines.append(f"{_link(m['symbol'])}{name} · {m['change_pct']:+.1f}% · {_price(m['price'])}")
-    if len(lines) == 1:
+    if not movers["up"] and not movers["down"] and not crossings:
         lines.append(f"אין מניות שזזות יותר מ-{min_pct:g}% לפני הפתיחה.")
     return "\n".join(lines)
 

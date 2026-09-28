@@ -288,6 +288,36 @@ class XNewsSettings:
             raise ConfigError("xnews.claude_every_minutes must be 10..180")
 
 
+@dataclass(frozen=True)
+class ExplainSettings:
+    # Why the market moves (tascreen/explain.py; owner, 2026-09-28): in the pre-market
+    # reports, and when SPY or QQQ moves sharply in the session. Claude, the owner's
+    # subscription; at most 3 pre-market + `max_per_day` session calls a day.
+    enabled: bool = True
+    news_hours: float = 3.0
+    day_move_pct: float = 1.0
+    hour_move_pct: float = 0.7
+    max_per_day: int = 3
+    min_gap_minutes: float = 45.0
+    model: str = "sonnet"
+    effort: str = "low"
+    timeout_s: int = 300
+
+    def __post_init__(self):
+        for name in ("news_hours", "day_move_pct", "hour_move_pct", "min_gap_minutes"):
+            object.__setattr__(self, name, float(getattr(self, name)))
+        for name in ("max_per_day", "timeout_s"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        if not 0.5 <= self.news_hours <= 12:
+            raise ConfigError("explain.news_hours must be 0.5..12")
+        if not 0.3 <= self.hour_move_pct <= self.day_move_pct <= 10:
+            raise ConfigError("explain: need 0.3 <= hour_move_pct <= day_move_pct <= 10")
+        if not 0 <= self.max_per_day <= 10:
+            raise ConfigError("explain.max_per_day must be 0..10")
+        if self.effort not in ("low", "medium", "high", "xhigh", "max"):
+            raise ConfigError("explain.effort must be low, medium, high, xhigh or max")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
@@ -299,6 +329,7 @@ _SECTIONS = {
     "outcomes": OutcomesSettings,
     "alerts": AlertsSettings,
     "xnews": XNewsSettings,
+    "explain": ExplainSettings,
 }
 
 
@@ -315,6 +346,7 @@ class Settings:
     outcomes: OutcomesSettings = field(default_factory=OutcomesSettings)
     alerts: AlertsSettings = field(default_factory=AlertsSettings)
     xnews: XNewsSettings = field(default_factory=XNewsSettings)
+    explain: ExplainSettings = field(default_factory=ExplainSettings)
 
     @property
     def data_dir(self) -> Path:

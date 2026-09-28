@@ -206,6 +206,8 @@ def test_ci_live_prices_the_watch_list_and_alerts_once(tmp_path, monkeypatch):
 
     class Session:
         async def call_tool(self, tool, arguments):
+            if tool == "mcp-tv-get-symbol-data-batch":         # the index funds (tascreen/explain.py)
+                return Result({"data": {}, "missing": [], "success": True})
             calls.append((tool, arguments["symbol"]))
             return Result(_ohlcv(session, LIVE_PRICE))
 

@@ -131,3 +131,17 @@ xnews:
   model: "sonnet"
   effort: "low"
   timeout_s: 300
+
+explain:
+  # Why the market moves (owner, 2026-09-28): Claude reads the index funds, the biggest
+  # movers and the last hours of X news, and writes a few Hebrew sentences: in each
+  # pre-market report, and when SPY or QQQ moves sharply in the session.
+  enabled: true
+  news_hours: 3              # how far back the X news goes
+  day_move_pct: 1.0          # SPY or QQQ this far from the last close
+  hour_move_pct: 0.7         # ...or this much within about an hour
+  max_per_day: 3             # session explanations a day, at most
+  min_gap_minutes: 45
+  model: "sonnet"
+  effort: "low"
+  timeout_s: 300

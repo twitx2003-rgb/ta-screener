@@ -192,7 +192,12 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 
 # --- Claude picks what matters ------------------------------------------------------------
 
-SYSTEM = agent_prompt("news-screener")     # tascreen/agents/news-screener.md
+# tascreen/agents/news-screener.md, with news-deduper.md: one call does both jobs
+SYSTEM = agent_prompt("news-screener", "news-deduper")
+SENT_WINDOW_S = 2 * 3600     # stories sent this recently are shown to the deduper
+RECENT_WINDOW_S = 3 * 3600   # posts kept this long for the market explainer (tascreen/explain.py)
+RECENT_MAX = 300
+SOURCES_SHOWN = 3
 
 
 def schema() -> dict:
@@ -203,17 +208,21 @@ def schema() -> dict:
             "properties": {"post_id": {"type": "string"},
                            "importance": {"type": "integer", "minimum": 1, "maximum": 5},
                            "summary_he": {"type": "string"},
-                           "analysis_he": {"type": "string"}},
-            "required": ["post_id", "importance", "summary_he", "analysis_he"],
+                           "analysis_he": {"type": "string"},
+                           "same_story_as": {"type": "string"},
+                           "repeat_of_sent": {"type": "boolean"}},
+            "required": ["post_id", "importance", "summary_he", "analysis_he", "same_story_as",
+                         "repeat_of_sent"],
             "additionalProperties": False}}},
         "required": ["picks"],
         "additionalProperties": False,
     }
 
 
-def user_prompt(posts: list[Post]) -> str:
-    return json.dumps([{"post_id": p.id, "author": p.author, "time": p.created_at, "text": p.text}
-                       for p in posts], ensure_ascii=False, indent=1)
+def user_prompt(posts: list[Post], already_sent: list[dict] | None = None) -> str:
+    return json.dumps({"already_sent": already_sent or [],
+                       "posts": [{"post_id": p.id, "author": p.author, "time": p.created_at, "text": p.text}
+                                 for p in posts]}, ensure_ascii=False, indent=1)
 
 
 WEEKEND_NOTE = ("It is the weekend and US markets are closed: rate 4 or 5 only what is dramatic, "
@@ -227,15 +236,22 @@ def is_weekend(now: datetime) -> bool:
     return now.astimezone(ZoneInfo("America/New_York")).weekday() >= 5
 
 
-def triage(posts: list[Post], llm, min_importance: int, note: str = "") -> tuple[list[tuple[Post, dict]], int]:
-    """(the picks at or above `min_importance`, in post order; how many answers were rejected)."""
+def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
+           already_sent: list[dict] | None = None,
+           counts: dict[str, int] | None = None) -> tuple[list[tuple[Post, dict]], int]:
+    """(the picks at or above `min_importance`, in post order; how many answers were rejected).
+    A post marked as the same story as another is folded into it (its account becomes a
+    source of the main one); a repeat of a story sent in the last two hours is dropped.
+    `counts` gets "merged" and "repeats"."""
     if not posts:
         return [], 0
-    user = (note + "\n\n" if note else "") + user_prompt(posts)
+    user = (note + "\n\n" if note else "") + user_prompt(posts, already_sent)
     answer, _ = llm.complete(system=SYSTEM, user=user, schema=schema())
     by_id = {p.id: p for p in posts}
     picks: dict[str, dict] = {}
     rejected = 0
+    same: dict[str, str] = {}
+    repeats: set[str] = set()
     for item in answer.get("picks") or []:
         if not isinstance(item, dict):
             rejected += 1
@@ -248,12 +264,31 @@ def triage(posts: list[Post], llm, min_importance: int, note: str = "") -> tuple
         if post_id not in by_id or not summary or not 1 <= importance <= 5:
             rejected += 1                  # an invented post, or an empty or broken answer
             continue
+        main = str(item.get("same_story_as") or "")
+        if main and main != post_id and main in by_id:
+            same[post_id] = main
+            continue
+        if item.get("repeat_of_sent") is True:
+            repeats.add(post_id)
+            continue
         if importance >= min_importance:
             analysis = str(item.get("analysis_he", "")).strip()
             if banned(analysis):             # advice or forecast wording: the news goes without it
                 analysis = ""
             picks[post_id] = {"importance": importance, "summary_he": summary[:SUMMARY_MAX],
-                              "analysis_he": analysis[:ANALYSIS_MAX]}
+                              "analysis_he": analysis[:ANALYSIS_MAX], "sources": []}
+    merged = 0
+    for dup, main in same.items():          # a chain (a -> b -> c) ends at its last main post
+        seen = {dup}
+        while main in same and main not in seen:
+            seen.add(main)
+            main = same[main]
+        if main in picks:
+            picks[main]["sources"].append((by_id[dup].author, by_id[dup].url))
+            merged += 1
+    if counts is not None:
+        counts["merged"] = counts.get("merged", 0) + merged
+        counts["repeats"] = counts.get("repeats", 0) + len(repeats)
     return [(p, picks[p.id]) for p in posts if p.id in picks], rejected
 
 
@@ -261,8 +296,15 @@ def item(post: Post, pick_: dict, *, with_image: bool = False) -> str:
     """One pick in Telegram HTML: mark, account, the sentence and a link; then the short
     analysis, and under a photo the line that says what the picture shows."""
     mark = {5: "🔴", 4: "🟠"}.get(pick_["importance"], "🔵")
-    text = (f"{mark} <b>{html.escape(post.author)}</b>: {html.escape(pick_['summary_he'])} "
-            f'<a href="{html.escape(post.url, quote=True)}">↗</a>')
+    sources = [(post.author, post.url)]
+    for author, url in pick_.get("sources") or []:
+        if author not in {a for a, _ in sources}:
+            sources.append((author, url))
+    names = " · ".join(f"<b>{html.escape(a)}</b>" for a, _ in sources[:SOURCES_SHOWN])
+    if len(sources) > SOURCES_SHOWN:
+        names += f" +{len(sources) - SOURCES_SHOWN}"
+    links = " ".join(f'<a href="{html.escape(u, quote=True)}">↗</a>' for _, u in sources[:SOURCES_SHOWN])
+    text = f"{mark} {names}: {html.escape(pick_['summary_he'])} {links}"
     if pick_.get("analysis_he"):
         text += f"\n💡 {html.escape(pick_['analysis_he'])}"
     if with_image and pick_.get("image_he"):
@@ -418,6 +460,10 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     seen = list(state.get("seen") or [])
     pending = [r for r in state.get("pending") or []
                if isinstance(r, dict) and stamp - int(r.get("added", 0)) <= PENDING_MAX_AGE_S]
+    sent_recent = [r for r in state.get("sent_recent") or []
+                   if isinstance(r, dict) and stamp - int(r.get("at", 0)) <= SENT_WINDOW_S]
+    recent = [r for r in state.get("recent") or []
+              if isinstance(r, dict) and stamp - int(r.get("added", 0)) <= RECENT_WINDOW_S]
     since = max(int(state.get("since") or stamp - first_lookback_s), stamp - MAX_LOOKBACK_S)
     if reads["posts"] < daily_read_cap:
         posts = source.new_posts(accounts, since - OVERLAP_S, with_replies=with_replies)
@@ -427,6 +473,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
         summary["new"] = len(new)
         seen = (seen + [p.id for p in new])[-SENT_KEPT:]
         pending = (pending + [_post_row(p, stamp) for p in new])[-PENDING_MAX:]
+        recent = (recent + [_post_row(p, stamp) for p in new])[-RECENT_MAX:]
         reads["posts"] += len(posts)
         since = stamp
     else:
@@ -438,10 +485,14 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
         try:
             llm = llm_factory()
             weekend = is_weekend(now)
+            counts: dict[str, int] = {}
+            already = [{"author": r["author"], "summary_he": r["summary_he"],
+                        "minutes_ago": (stamp - int(r["at"])) // 60} for r in sent_recent]
             picks, summary["rejected"] = triage(
                 [_row_post(r) for r in pending], llm,
                 max(min_importance, weekend_min_importance) if weekend else min_importance,
-                WEEKEND_NOTE if weekend else "")
+                WEEKEND_NOTE if weekend else "", already_sent=already, counts=counts)
+            summary.update(counts)
         except UsageLimit:
             model["paused_until"] = stamp + LIMIT_PAUSE_S
             picks, status = [], "claude limit"
@@ -460,12 +511,15 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
                 summary["explain_error"] = type(exc).__name__
         if picks:
             summary["photos"] = deliver(picks, send, send_photo)
+            sent_recent += [{"at": stamp, "author": p.author, "summary_he": k["summary_he"]}
+                            for p, k in picks]
         summary["sent"] = len(picks)
     elif pending and model["calls"] >= llm_daily_cap:
         status = "claude daily cap"
     summary["waiting"] = len(pending)
     summary["claude_today"] = model["calls"]
-    save_state(state_path, {"since": since, "seen": seen, "pending": pending, "reads": reads, "llm": model})
+    save_state(state_path, {"since": since, "seen": seen, "pending": pending, "reads": reads, "llm": model,
+                            "sent_recent": sent_recent[-40:], "recent": recent})
     summary["status"] = status
     return summary
 

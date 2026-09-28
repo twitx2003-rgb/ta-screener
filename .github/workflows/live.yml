@@ -61,6 +61,9 @@ jobs:
       - name: Install
         run: |
           python -m pip install -q -r requirements.txt
+          # Claude Code for the market explainer (tascreen/explain.py)
+          curl -fsSL https://claude.ai/install.sh | bash > /dev/null 2>&1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           # the crossing charts: librsvg, Hebrew and monospace fonts (SIL OFL)
           sudo apt-get update -qq > /dev/null
           sudo apt-get install -y -qq --no-install-recommends librsvg2-bin fonts-noto-core fonts-ibm-plex > /dev/null
@@ -72,6 +75,7 @@ jobs:
 
       - name: Watch the session
         env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}

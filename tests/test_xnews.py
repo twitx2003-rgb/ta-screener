@@ -318,3 +318,36 @@ def test_after_a_night_only_the_last_hour_is_read(tmp_path):
     run(tmp_path, reader, picker(), [])
     since = int(NOW.timestamp()) - xnews.MAX_LOOKBACK_S - xnews.OVERLAP_S
     assert f"since_time:{since} " in reader.queries[0]["query"]
+
+
+def test_one_story_from_three_accounts_goes_out_once_with_its_sources(tmp_path):
+    page = {"tweets": [row("141", author="DeItaone"), row("142", author="zerohedge"),
+                       row("143", author="markets")], "has_next_page": False}
+    llm = picker({"post_id": "141", "importance": 5, "summary_he": "המדד עלה", "analysis_he": "",
+                  "same_story_as": "", "repeat_of_sent": False},
+                 {"post_id": "142", "importance": 5, "summary_he": "כפול", "analysis_he": "",
+                  "same_story_as": "141", "repeat_of_sent": False},
+                 {"post_id": "143", "importance": 3, "summary_he": "כפול", "analysis_he": "",
+                  "same_story_as": "142", "repeat_of_sent": False})           # a chain ends at 141
+    sent = []
+    summary, _ = run(tmp_path, FakeReader(page), llm, sent)
+    assert summary["sent"] == 1 and summary["merged"] == 2 and "כפול" not in sent[0]
+    assert sent[0].startswith("🔴 <b>DeItaone</b> · <b>zerohedge</b> · <b>markets</b>: המדד עלה")
+    assert sent[0].count("↗") == 3
+
+
+def test_a_repeat_of_what_was_sent_is_dropped_and_the_sent_list_is_shown(tmp_path):
+    llm = picker({"post_id": "151", "importance": 5, "summary_he": "הפד הוריד ריבית", "analysis_he": "",
+                  "same_story_as": "", "repeat_of_sent": False})
+    run(tmp_path, FakeReader({"tweets": [row("151")], "has_next_page": False}), llm, [])
+    llm2 = picker({"post_id": "152", "importance": 5, "summary_he": "שוב הריבית", "analysis_he": "",
+                   "same_story_as": "", "repeat_of_sent": True})
+    sent = []
+    later = datetime(2026, 1, 5, 15, 40, tzinfo=timezone.utc)
+    summary, _ = run(tmp_path, FakeReader({"tweets": [row("152")], "has_next_page": False}), llm2, sent,
+                     now=later)
+    assert summary["repeats"] == 1 and sent == []
+    shown = json.loads(llm2.calls[-1])["already_sent"]
+    assert shown == [{"author": "NewsDesk", "summary_he": "הפד הוריד ריבית", "minutes_ago": 40}]
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert [r["id"] for r in state["recent"]] == ["151", "152"]          # kept for the explainer
