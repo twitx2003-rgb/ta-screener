@@ -43,9 +43,11 @@ ACCOUNT = re.compile(r"^@?([A-Za-z0-9_]{1,15})$")
 QUERY_ACCOUNTS = 10          # accounts per search call ("from:a OR from:b ..."); fewer calls, same posts
 MAX_PAGES = 5                # pages of up to 20 posts per call; more than 100 new posts in 10 minutes is a flood
 OVERLAP_S = 120              # each search starts a little before the last one ended; ids dedupe
-# After a gap (the night, a weekend, a stopped workflow) only the last hour is read: older
-# posts are no longer news, and a night of 63 accounts at once would flood the chat.
-MAX_LOOKBACK_S = 3600
+# After a gap (the night, a weekend, a stopped workflow) at most this much is read back. It
+# was one hour (a night of 63 accounts flooded the chat); since `ration` sends at most two a
+# round, it covers the night (03:00-07:00 Israel), so the morning digest (tascreen/digest.py)
+# has the US evening's news too (owner, 2026-09-29).
+MAX_LOOKBACK_S = int(4.5 * 3600)
 SENT_KEPT = 2000             # post ids remembered so a post is never judged or sent twice
 SUMMARY_MAX = 220            # the owner wants it short (2026-09-27): one sentence
 ANALYSIS_MAX = 360           # ...and then a short analysis (owner, same day): 1-2 sentences
@@ -214,6 +216,10 @@ SENT_WINDOW_S = 2 * 3600     # stories sent this recently are shown to the dedup
 RECENT_WINDOW_S = 3 * 3600   # posts kept this long for the market explainer (tascreen/explain.py)
 RECENT_MAX = 300
 SOURCES_SHOWN = 3
+# Every pick (sent or held back by `ration`) for the morning digest: from a session's open
+# to 10:00 the next day, and over a weekend from Friday's open to Monday (owner, 2026-09-29)
+DAY_LOG_S = 4 * 24 * 3600
+DAY_LOG_MAX = 800
 # The owner wants few, hand-picked stories (2026-09-28: 29 went out in 90 minutes): a round
 # sends at most `max_per_round`, the most important first, and the regular ones (below 5)
 # share a budget that refills through the news hours, so the evening is not left empty.
@@ -539,6 +545,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
                    if isinstance(r, dict) and stamp - int(r.get("at", 0)) <= SENT_WINDOW_S]
     recent = [r for r in state.get("recent") or []
               if isinstance(r, dict) and stamp - int(r.get("added", 0)) <= RECENT_WINDOW_S]
+    day_log = [r for r in state.get("day_log") or []
+               if isinstance(r, dict) and stamp - int(r.get("at", 0)) <= DAY_LOG_S]
     since = max(int(state.get("since") or stamp - first_lookback_s), stamp - MAX_LOOKBACK_S)
     if reads["posts"] < daily_read_cap:
         posts = source.new_posts(accounts, since - OVERLAP_S, with_replies=with_replies)
@@ -576,8 +584,14 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             model["last"] = stamp
             summary["judged"] = len(pending)
             pending = []
+            every = picks
             picks, budget, summary["held_back"] = ration(picks, budget, stamp, day, max_per_round=max_per_round,
                                                          daily_max=daily_max)
+            chosen = {p.id for p, _ in picks}
+            day_log = (day_log + [{"at": stamp, "id": p.id, "author": p.author, "url": p.url, "time": p.created_at,
+                                   "importance": k["importance"], "summary_he": k["summary_he"],
+                                   "analysis_he": k["analysis_he"], "sources": [a for a, _ in k["sources"]],
+                                   "sent": p.id in chosen} for p, k in every])[-DAY_LOG_MAX:]
         if send_photo is not None and any(p.photo for p, _ in picks):
             try:                             # a second look, at the pictures: never blocks the news
                 summary["explained"] = explain_images(picks, llm, fetch)
@@ -597,7 +611,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     summary["claude_today"] = model["calls"]
     save_state(state_path, {"since": since, "seen": seen, "pending": pending, "reads": reads, "llm": model,
                             "budget": budget, "balance": balance, "sent_recent": sent_recent[-40:],
-                            "recent": recent})
+                            "recent": recent, "day_log": day_log})
     summary["status"] = status
     return summary
 

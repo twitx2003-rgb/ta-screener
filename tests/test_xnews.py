@@ -396,3 +396,15 @@ def test_a_weekly_look_at_the_balance_warns_when_low(tmp_path):
     assert week["balance_low"] is False and len(sent) == 1 and len(asked) == 2
     with pytest.raises(ProviderError, match="recharge_credits"):
         xnews.XSource(KEY, get=lambda path, params: {"credits": 5}).balance_usd()
+
+
+def test_every_pick_is_logged_for_the_morning_digest(tmp_path):
+    page = {"tweets": [row(str(n), author=f"Desk{n}") for n in range(1, 5)], "has_next_page": False}
+    llm = picker(*[{"post_id": str(n), "importance": 4, "summary_he": f"ידיעה {n}", "analysis_he": ""}
+                   for n in range(1, 5)])
+    sent = []
+    summary, _ = run(tmp_path, FakeReader(page), llm, sent)
+    assert summary["sent"] == 2 and summary["held_back"] == 2                  # the budget: two a round
+    log = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["day_log"]
+    assert [r["id"] for r in log] == ["1", "2", "3", "4"] and sum(r["sent"] for r in log) == 2
+    assert log[0]["summary_he"] == "ידיעה 1" and log[0]["importance"] == 4 and log[0]["url"].endswith("/1")
