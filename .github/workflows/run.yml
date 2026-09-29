@@ -75,6 +75,7 @@ jobs:
           # the evening breakout report (Telegram) and its full analyses (analyst.yml)
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID }}
           GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
           LIMIT: ${{ inputs.limit }}
         run: |
@@ -105,6 +106,7 @@ jobs:
           # stay GitHub secrets, handed to each deployment and never stored in the project
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID }}
           GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
         run: |
           site="$RUNNER_TEMP/ta-screener"
@@ -115,7 +117,7 @@ jobs:
           started=$(date +%s)
           npx --yes "$VERCEL_CLI" link --yes --project ta-screener --token "$VERCEL_TOKEN" > "$logs/vercel-link.txt" 2>&1
           npx --yes "$VERCEL_CLI" deploy --prod --yes --token "$VERCEL_TOKEN" \
-              -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" -e TELEGRAM_CHAT_ID="$TELEGRAM_CHAT_ID" \
+              -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" -e TELEGRAM_CHAT_ID="$TELEGRAM_CHAT_ID" -e TELEGRAM_GROUP_ID="$TELEGRAM_GROUP_ID" \
               -e GH_DISPATCH_TOKEN="$GH_DISPATCH_TOKEN" > deploy-url.txt 2> "$logs/vercel-deploy.txt"
           code=$?
           echo "deploy exit $code after $(( $(date +%s) - started )) s"
@@ -126,6 +128,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID }}
           GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
         run: |
           if [ -z "$GH_DISPATCH_TOKEN" ]; then echo "webhook: no GH_DISPATCH_TOKEN secret yet, the bot stays silent"; exit 0; fi
@@ -136,6 +139,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID }}
           STATUS: ${{ job.status }}
         run: python run.py --ci-notify "$STATUS" 2> /dev/null || true
 

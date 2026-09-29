@@ -14,6 +14,10 @@ on:
       symbol:
         description: "Stock symbol, for example NVDA"
         required: true
+      chat:
+        description: "Where to answer (the bot passes the chat it was asked in); empty: the group"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -51,12 +55,14 @@ jobs:
       - name: Analyse and send to Telegram
         env:
           SYMBOL: ${{ inputs.symbol }}
+          REPLY_TO: ${{ inputs.chat }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID }}
         run: |
           set +e
-          python -u run.py --ci-analyze "$SYMBOL" --archive analyses --daily-limit "$DAILY_LIMIT" \
+          python -u run.py --ci-analyze "$SYMBOL" --reply-to "$REPLY_TO" --archive analyses --daily-limit "$DAILY_LIMIT" \
               > "logs/analyst-$(date -u +%Y%m%dT%H%M%S).log" 2>&1
           code=$?
           line=$(grep -h '^analysis: ' logs/analyst-*.log | tail -n 1)

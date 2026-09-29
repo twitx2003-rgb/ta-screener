@@ -189,10 +189,13 @@ _caption_of = caption          # the methods' `caption` argument shadows the fun
 
 
 def from_environment() -> Telegram | None:
-    """The bot from TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID, else the owner's saved file."""
+    """The bot from TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID, else the owner's saved file. It
+    sends to TELEGRAM_GROUP_ID when that is set (owner, 2026-09-29: everything goes to the
+    owner's group; TELEGRAM_CHAT_ID stays the owner's private chat, for analyses asked there)."""
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    group = (os.environ.get("TELEGRAM_GROUP_ID") or "").strip()
     if token and chat:
-        return Telegram(token, chat)
+        return Telegram(token, group or chat.strip())
     path = CREDENTIALS.expanduser()
     try:
         saved = json.loads(path.read_text(encoding="utf-8"))

@@ -141,6 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="With --ci-analyze: the analyses kept so far (one folder per UTC day)")
     parser.add_argument("--daily-limit", type=int, default=10,
                         help="With --ci-analyze: analyses per UTC day, at most")
+    parser.add_argument("--reply-to", metavar="CHAT", default="",
+                        help="With --ci-analyze: answer in this chat, if it is the owner's private "
+                             "chat or group (the webhook passes the chat it was asked in)")
     parser.add_argument("--limit", type=int, metavar="N",
                         help="With --bars/--update/--backfill-outcomes: only the N largest "
                              "symbols (a pilot run)")
@@ -1153,9 +1156,12 @@ def datetime_stamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M")
 
 
-def ci_analyze(settings, text: str, archive: str, daily_limit: int) -> int:
-    """GitHub Actions (analyst.yml): one requested analysis. The log is public: this
-    prints one status line; the details go to the private log the workflow keeps."""
+def ci_analyze(settings, text: str, archive: str, daily_limit: int, reply_to: str = "") -> int:
+    """GitHub Actions (analyst.yml): one requested analysis, answered in the chat it was
+    asked in (the owner's private chat or group; anything else: where the bot sends). The
+    log is public: this prints one status line; the details go to the private log."""
+    import os
+
     from tascreen import notify
     from tascreen.analyst.request import company_name, handle_request
     from tascreen.store import Store
@@ -1164,6 +1170,9 @@ def ci_analyze(settings, text: str, archive: str, daily_limit: int) -> int:
     if bot is None:
         print("analysis: telegram is not configured")
         return 1
+    known = {(os.environ.get(name) or "").strip() for name in ("TELEGRAM_CHAT_ID", "TELEGRAM_GROUP_ID")} - {""}
+    if reply_to.strip() in known:
+        bot.chat_id = reply_to.strip()
     store = Store(settings.data_dir)
     try:
         status = handle_request(text, bars_dir=store.bars_dir, read_bars=store.read_bars,
@@ -1397,7 +1406,8 @@ def main(argv: list[str] | None = None) -> int:
         (args.ci_premarket, lambda: ci_premarket(settings)),
         (args.ensure_live, lambda: ensure_live(settings)),
         (args.research_dry, lambda: research_dry(settings)),
-        (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit)),
+        (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit,
+                                             args.reply_to)),
         (args.ci_live, lambda: ci_live(settings, args.max_minutes or 345)),
         (args.telegram_webhook, lambda: telegram_webhook(settings, args.telegram_webhook)),
         (args.analyze_eval is not None, lambda: analyze_eval(settings, args.analyze_eval or None, args.until)),

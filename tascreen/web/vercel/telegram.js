@@ -2,9 +2,11 @@
 // tascreen/web/export.py copies this file to api/telegram.js, the only thing deployed.
 //
 // The owner writes a symbol to the bot; Telegram posts the update here; this starts the
-// analyst workflow on GitHub (which answers in Telegram a few minutes later) and says so.
+// analyst workflow on GitHub (which answers in the same chat a few minutes later) and says so.
 // Guards: Telegram's secret header (an HMAC of the bot token: no extra secret to keep),
-// the owner's chat and user id only, and a symbol pattern only. It always answers 200, so
+// the owner's private chat, or the owner's group (TELEGRAM_GROUP_ID; owner, 2026-09-29: any
+// member may ask there, with a cashtag like $NVDA only, so the members' own conversation
+// never starts an analysis), and a symbol pattern only. The analyses have a daily limit. It always answers 200, so
 // Telegram never retries an update. The keys come from the deployment's run-time
 // environment (vercel deploy -e ...), which run.yml fills from the GitHub secrets.
 "use strict";
@@ -14,6 +16,9 @@ const SYMBOL = /^\$?(?:[A-Za-z]{2,8}:)?[A-Za-z][A-Za-z0-9.\-]{0,9}$/;
 const WORKFLOW = "https://api.github.com/repos/twitx2003-rgb/ta-screener/actions/workflows/analyst.yml/dispatches";
 const HELP = "שלחו סימול של מניה, למשל NVDA, ותקבלו ניתוח טכני: גרף, הסבר קצר וסקריפט ל-TradingView. " +
   "לא ייעוץ השקעות.";
+const GROUP_HELP = "כדי לקבל ניתוח טכני של מניה, כתבו $ ואחריו הסימול, למשל $NVDA. " +
+  "התשובה מגיעה לקבוצה תוך כמה דקות. לא ייעוץ השקעות.";
+const COMMAND = /^\/(start|help)(@\w+)?$/i;
 
 function webhookSecret(botToken) {
   return crypto.createHmac("sha256", botToken).update("ta-screener telegram webhook").digest("hex");
@@ -36,25 +41,33 @@ async function say(token, chat, text) {
 function keys(env) {
   const clean = (name) => String(env[name] || "").trim();
   return {token: clean("TELEGRAM_BOT_TOKEN"), owner: clean("TELEGRAM_CHAT_ID"),
-          dispatch: clean("GH_DISPATCH_TOKEN")};
+          group: clean("TELEGRAM_GROUP_ID"), dispatch: clean("GH_DISPATCH_TOKEN")};
 }
 
 // GET: which keys this deployment has (yes/no only, never a value), to check a deployment.
 function status(env) {
   const k = keys(env);
-  return {ok: true, bot: k.token.length > 0, owner: k.owner.length > 0, dispatch: k.dispatch.length > 0};
+  return {ok: true, bot: k.token.length > 0, owner: k.owner.length > 0, group: k.group.length > 0,
+          dispatch: k.dispatch.length > 0};
 }
 
 async function handle(req, env) {
-  const {token, owner, dispatch} = keys(env);
+  const {token, owner, group, dispatch} = keys(env);
   if (req.method !== "POST" || !token || !owner) return "not set up";
   if (!same((req.headers || {})["x-telegram-bot-api-secret-token"], webhookSecret(token))) return "bad secret";
   const message = (req.body && req.body.message) || {};
-  if (String((message.chat || {}).id) !== owner || String((message.from || {}).id) !== owner) {
-    return "not the owner";
-  }
+  const chat = String((message.chat || {}).id), from = (message.from || {});
   const text = String(message.text || "").trim();
-  if (!SYMBOL.test(text)) {
+  if (group && chat === group) {
+    if (from.is_bot) return "group: a bot";
+    if (COMMAND.test(text)) {
+      await say(token, chat, GROUP_HELP);
+      return "group help";
+    }
+    if (!text.startsWith("$") || !SYMBOL.test(text)) return "group conversation";
+  } else if (chat !== owner || String(from.id) !== owner) {
+    return "not the owner";
+  } else if (!SYMBOL.test(text)) {
     await say(token, owner, HELP);
     return "help";
   }
@@ -67,13 +80,13 @@ async function handle(req, env) {
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "ta-screener-bot",
     },
-    body: JSON.stringify({ref: "main", inputs: {symbol}}),
+    body: JSON.stringify({ref: "main", inputs: {symbol, chat}}),
   });
   if (started.status === 204) {
-    await say(token, owner, `מנתח את ${symbol}. התשובה תגיע תוך כמה דקות.`);
+    await say(token, chat, `מנתח את ${symbol}. התשובה תגיע תוך כמה דקות.`);
     return "started";
   }
-  await say(token, owner, `לא הצלחתי להפעיל את הניתוח (GitHub ${started.status}). נסו שוב מאוחר יותר.`);
+  await say(token, chat, `לא הצלחתי להפעיל את הניתוח (GitHub ${started.status}). נסו שוב מאוחר יותר.`);
   return "dispatch failed";
 }
 
