@@ -52,6 +52,30 @@ def _request(tmp_path, text, *, limit=10, llm=None):
     return status, bot, llm
 
 
+def test_a_word_written_alone_in_the_group_gets_no_answer(tmp_path):
+    bars_dir = tmp_path / "bars"
+    bars_dir.mkdir()
+    bot = _Bot()
+    status = handle_request("LOL", bars_dir=bars_dir, read_bars=lambda s: None, archive=tmp_path / "a",
+                            bot=bot, make_llm=lambda: pytest.fail("no model"), quiet_unknown=True,
+                            now=lambda: NOW)
+    assert status == "not in the list (no answer)" and bot.sent == []
+
+
+def test_the_png_waits_for_the_tools_installed_in_the_background(tmp_path, monkeypatch):
+    from tascreen.analyst.png import wait_for_tools
+
+    flag = tmp_path / "rsvg.ready"
+    monkeypatch.setenv("RSVG_READY_FLAG", str(flag))
+    ticks = iter(range(1000))
+    naps = []
+    assert not wait_for_tools(3, clock=lambda: next(ticks), sleep=naps.append)       # never came
+    flag.touch()
+    assert wait_for_tools(3, clock=lambda: 0, sleep=naps.append) and len(naps) == 2      # at once
+    monkeypatch.delenv("RSVG_READY_FLAG")
+    assert wait_for_tools(0)                                                       # not on a runner
+
+
 def test_a_request_sends_chart_text_and_script_and_keeps_the_files(tmp_path):
     status, bot, llm = _request(tmp_path, "syn")
     assert status == "sent NYSE:SYN" and len(llm.calls) == 1

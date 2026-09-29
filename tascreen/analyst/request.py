@@ -85,8 +85,10 @@ def handle_request(text: str, *, bars_dir: Path, read_bars: Callable[[str], pd.D
                    archive: Path, bot: Telegram, make_llm: Callable[[], LLM],
                    daily_limit: int = DAILY_LIMIT, to_png: Callable[[Path, Path], Path] | None = None,
                    name_of: Callable[[str], str | None] = lambda symbol: None,
-                   now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> str:
-    """Answer one request; returns a short status for the public log."""
+                   now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                   quiet_unknown: bool = False) -> str:
+    """Answer one request; returns a short status for the public log. With `quiet_unknown`
+    (a capital word written alone in the owner's group) an unknown symbol gets no answer."""
     stamp = now()
     today = archive / stamp.strftime("%Y-%m-%d")
     done = [p for p in today.iterdir() if p.is_dir()] if today.exists() else []
@@ -99,6 +101,8 @@ def handle_request(text: str, *, bars_dir: Path, read_bars: Callable[[str], pd.D
         if bars is None:
             raise ConfigError(f"no stored bars for {symbol}")
     except ConfigError:
+        if quiet_unknown:
+            return "not in the list (no answer)"
         bot.send(f"{shown(text)}: המניה לא ברשימה. הבוט מנתח מניות אמריקאיות ששוויין מעל מיליארד "
                  "דולר. אפשר לכתוב למשל NVDA או NASDAQ:NVDA.")
         return "not in the list"

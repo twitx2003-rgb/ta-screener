@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from ..errors import ProviderError
@@ -42,8 +43,24 @@ def _size(svg: Path) -> tuple[int, int]:
     return (round(float(found.group(1))), round(float(found.group(2)))) if found else (W, H)
 
 
+def wait_for_tools(timeout_s: float = 180.0, *, clock=time.monotonic, sleep=time.sleep) -> bool:
+    """analyst.yml installs librsvg and the fonts in the background while Claude writes the
+    text (owner, 2026-09-29: a faster answer) and touches RSVG_READY_FLAG when done. False
+    if it did not come in time (then the browser fallback draws the PNG)."""
+    flag = os.environ.get("RSVG_READY_FLAG", "").strip()
+    if not flag:
+        return True
+    deadline = clock() + timeout_s
+    while not Path(flag).exists():
+        if clock() >= deadline:
+            return False
+        sleep(0.5)
+    return True
+
+
 def svg_to_png(svg: Path, png: Path, *, timeout_s: int = 60) -> Path:
     png.unlink(missing_ok=True)
+    wait_for_tools()
     width, height = _size(svg)
     rsvg = shutil.which("rsvg-convert")
     if rsvg:

@@ -24,7 +24,7 @@ global.fetch = async (url, opts) => {
   calls.push({url, body: JSON.parse(opts.body), auth: (opts.headers || {}).Authorization || null});
   return {status: url.includes("api.github.com") ? dispatchStatus : 200};
 };
-const update = (text, chat = 42, from = 42) => ({message: {chat: {id: chat}, from: {id: from}, text}});
+const update = (text, chat = 42, from = 42) => ({message: {message_id: 5, chat: {id: chat}, from: {id: from}, text}});
 const good = {"x-telegram-bot-api-secret-token": fn.webhookSecret(token)};
 async function run(name, req) { calls = []; return {name, outcome: await fn.handle(req, env), calls}; }
 (async () => {
@@ -36,6 +36,10 @@ async function run(name, req) { calls = []; return {name, outcome: await fn.hand
   out.push(await run("group", {method: "POST", headers: good, body: update("NVDA", -100, 42)}));
   out.push(await run("member asks", {method: "POST", headers: good, body: update(" $amd ", -555, 7)}));
   out.push(await run("members talk", {method: "POST", headers: good, body: update("OK", -555, 7)}));
+  out.push(await run("a ticker alone", {method: "POST", headers: good, body: update("NVDA", -555, 7)}));
+  out.push(await run("with its exchange", {method: "POST", headers: good, body: update("NASDAQ:AMD", -555, 7)}));
+  out.push(await run("a word in capitals", {method: "POST", headers: good, body: update("LOL", -555, 7)}));
+  out.push(await run("a word", {method: "POST", headers: good, body: update("nice", -555, 7)}));
   out.push(await run("shekel key", {method: "POST", headers: good, body: update("\u20AAamd", -555, 7)}));
   out.push(await run("spaced", {method: "POST", headers: good, body: update("$ msft", -555, 7)}));
   out.push(await run("mention", {method: "POST", headers: good,
@@ -81,30 +85,39 @@ def test_the_webhook_answers_only_the_owner_and_only_symbols(tmp_path):
     for name, outcome in (("no secret", "bad secret"), ("wrong secret", "bad secret"),
                           ("stranger", "not the owner"), ("group", "not the owner"),
                           ("get", "not set up"), ("members talk", "group conversation"),
-                          ("price talk", "group conversation"),
+                          ("price talk", "group conversation"), ("a word in capitals", "group conversation"),
+                          ("a word", "group conversation"),
                           ("a bot in the group", "group: a bot")):
         assert by[name]["outcome"] == outcome and not by[name]["calls"], name
     help_calls = by["not a symbol"]["calls"]
     assert by["not a symbol"]["outcome"] == "help" and len(help_calls) == 1
     assert "api.telegram.org" in help_calls[0]["url"] and "NVDA" in help_calls[0]["body"]["text"]
-    dispatch, told = by["symbol"]["calls"]
+    dispatch, seen = by["symbol"]["calls"]
     assert dispatch["url"].endswith("/actions/workflows/analyst.yml/dispatches")
-    assert dispatch["body"] == {"ref": "main", "inputs": {"symbol": "NVDA", "chat": "42"}}
-    assert dispatch["auth"] == "Bearer dispatch-key" and "dispatch-key" not in told["url"]
-    assert told["body"]["chat_id"] == "42" and "מנתח את NVDA" in told["body"]["text"]
+    assert dispatch["body"] == {"ref": "main", "inputs": {"symbol": "NVDA", "chat": "42", "quiet": ""}}
+    assert dispatch["auth"] == "Bearer dispatch-key" and "dispatch-key" not in seen["url"]
+    # no "analysing..." message: a reaction on the request (owner: no extra text)
+    assert seen["url"].endswith("/setMessageReaction") and "text" not in seen["body"]
+    assert seen["body"]["chat_id"] == "42" and seen["body"]["message_id"] == 5
+    assert seen["body"]["reaction"][0]["type"] == "emoji"
     assert by["padded keys"]["outcome"] == "started"            # a pasted newline is harmless
     assert by["padded keys"]["calls"][0]["auth"] == "Bearer dispatch-key"
     assert by["status"]["full"] == {"ok": True, "bot": True, "owner": True, "group": True, "dispatch": True}
     assert by["status"]["empty"] == {"ok": True, "bot": False, "owner": False, "group": False, "dispatch": False}
-    # the owner's group: any member, with a cashtag only; the answer goes to the group
-    asked, said = by["member asks"]["calls"]
+    # the owner's group: any member; the answer goes to the group
+    asked, seen = by["member asks"]["calls"]
     assert by["member asks"]["outcome"] == "started"
-    assert asked["body"]["inputs"] == {"symbol": "AMD", "chat": "-555"} and said["body"]["chat_id"] == "-555"
+    assert asked["body"]["inputs"] == {"symbol": "AMD", "chat": "-555", "quiet": ""}
+    assert seen["body"]["chat_id"] == "-555" and seen["url"].endswith("/setMessageReaction")
+    # a ticker alone, like in the private chat; an unknown one gets no answer (quiet)
+    for name, symbol in (("a ticker alone", "NVDA"), ("with its exchange", "NASDAQ:AMD")):
+        assert by[name]["outcome"] == "started", name
+        assert by[name]["calls"][0]["body"]["inputs"] == {"symbol": symbol, "chat": "-555", "quiet": "true"}
     for name, symbol in (("shekel key", "AMD"), ("spaced", "MSFT"), ("mention", "TSLA")):
         assert by[name]["outcome"] == "started" and by[name]["calls"][0]["body"]["inputs"]["symbol"] == symbol, name
     assert by["unclear"]["outcome"] == "group help" and by["unclear"]["calls"][0]["body"]["chat_id"] == "-555"
     assert by["group help"]["outcome"] == "group help" and len(by["group help"]["calls"]) == 1
-    assert by["group help"]["calls"][0]["body"]["chat_id"] == "-555" and "$NVDA" in by["group help"]["calls"][0]["body"]["text"]
+    assert by["group help"]["calls"][0]["body"]["chat_id"] == "-555" and "NVDA" in by["group help"]["calls"][0]["body"]["text"]
     assert by["refused"]["outcome"] == "dispatch failed"
     assert "GitHub 401" in by["refused"]["calls"][1]["body"]["text"]
     assert by["thrown"]["status"] == 200                         # Telegram never retries

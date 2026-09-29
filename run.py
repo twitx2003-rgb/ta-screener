@@ -141,6 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="With --ci-analyze: the analyses kept so far (one folder per UTC day)")
     parser.add_argument("--daily-limit", type=int, default=10,
                         help="With --ci-analyze: analyses per UTC day, at most")
+    parser.add_argument("--quiet-unknown", action="store_true",
+                        help="With --ci-analyze: no answer for an unknown symbol (a capital word "
+                             "written alone in the group may be just a word)")
     parser.add_argument("--reply-to", metavar="CHAT", default="",
                         help="With --ci-analyze: answer in this chat, if it is the owner's private "
                              "chat or group (the webhook passes the chat it was asked in)")
@@ -1156,7 +1159,8 @@ def datetime_stamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M")
 
 
-def ci_analyze(settings, text: str, archive: str, daily_limit: int, reply_to: str = "") -> int:
+def ci_analyze(settings, text: str, archive: str, daily_limit: int, reply_to: str = "",
+               quiet_unknown: bool = False) -> int:
     """GitHub Actions (analyst.yml): one requested analysis, answered in the chat it was
     asked in (the owner's private chat or group; anything else: where the bot sends). The
     log is public: this prints one status line; the details go to the private log."""
@@ -1177,7 +1181,7 @@ def ci_analyze(settings, text: str, archive: str, daily_limit: int, reply_to: st
     try:
         status = handle_request(text, bars_dir=store.bars_dir, read_bars=store.read_bars,
                                 archive=Path(archive), bot=bot, make_llm=lambda: _analyst_llm(settings),
-                                daily_limit=daily_limit,
+                                daily_limit=daily_limit, quiet_unknown=quiet_unknown,
                                 name_of=lambda s: company_name(store.scans_dir, s))
     except Exception as exc:
         log.exception("the analysis failed")
@@ -1407,7 +1411,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.ensure_live, lambda: ensure_live(settings)),
         (args.research_dry, lambda: research_dry(settings)),
         (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit,
-                                             args.reply_to)),
+                                             args.reply_to, args.quiet_unknown)),
         (args.ci_live, lambda: ci_live(settings, args.max_minutes or 345)),
         (args.telegram_webhook, lambda: telegram_webhook(settings, args.telegram_webhook)),
         (args.analyze_eval is not None, lambda: analyze_eval(settings, args.analyze_eval or None, args.until)),

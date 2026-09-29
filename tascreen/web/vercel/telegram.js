@@ -2,13 +2,15 @@
 // tascreen/web/export.py copies this file to api/telegram.js, the only thing deployed.
 //
 // The owner writes a symbol to the bot; Telegram posts the update here; this starts the
-// analyst workflow on GitHub (which answers in the same chat a few minutes later) and says so.
+// analyst workflow on GitHub (which answers in the same chat within a minute) and marks
+// the request with a 👀 reaction instead of a message (owner, 2026-09-29: no extra text).
 // Guards: Telegram's secret header (an HMAC of the bot token: no extra secret to keep),
 // the owner's private chat, or the owner's group (TELEGRAM_GROUP_ID; owner, 2026-09-29: any
-// member may ask there, with a cashtag like $NVDA only, so the members' own conversation
-// never starts an analysis), and a symbol pattern only. The analyses have a daily limit. It always answers 200, so
-// Telegram never retries an update. The keys come from the deployment's run-time
-// environment (vercel deploy -e ...), which run.yml fills from the GitHub secrets.
+// member may ask there, like in the private chat: a ticker in capitals, "NVDA", or "$nvda";
+// the members' own conversation never starts an analysis, and an unknown capital word gets
+// no answer), and a symbol pattern only. The analyses have a daily limit. It always answers
+// 200, so Telegram never retries an update. The keys come from the deployment's run-time
+// environment (vercel deploy -e ...), which webhook.yml and run.yml fill from the secrets.
 "use strict";
 const crypto = require("crypto");
 
@@ -16,9 +18,15 @@ const SYMBOL = /^\$?(?:[A-Za-z]{2,8}:)?[A-Za-z][A-Za-z0-9.\-]{0,9}$/;
 const WORKFLOW = "https://api.github.com/repos/twitx2003-rgb/ta-screener/actions/workflows/analyst.yml/dispatches";
 const HELP = "שלחו סימול של מניה, למשל NVDA, ותקבלו ניתוח טכני: גרף, הסבר קצר וסקריפט ל-TradingView. " +
   "לא ייעוץ השקעות.";
-const GROUP_HELP = "כדי לקבל ניתוח טכני של מניה, כתבו $ ואחריו הסימול, למשל $NVDA. " +
-  "התשובה מגיעה לקבוצה תוך כמה דקות. לא ייעוץ השקעות.";
+const GROUP_HELP = "כדי לקבל ניתוח טכני של מניה, כתבו את הסימול באותיות גדולות, למשל NVDA. " +
+  "התשובה מגיעה לקבוצה תוך דקה. לא ייעוץ השקעות.";
 const COMMAND = /^\/(start|help)(@\w+)?$/i;
+// a ticker written alone in the group, in capitals ("NVDA", "NASDAQ:NVDA", "BRK.B")
+const BARE = /^(?:[A-Z]{2,8}:)?[A-Z][A-Z0-9.\-]{0,9}$/;
+// capital words people write in a chat, not tickers
+const CHAT_WORDS = new Set(["OK", "LOL", "WOW", "YES", "NO", "HI", "OMG", "WTF", "BTW", "THX", "TNX", "GM", "GN",
+                            "USA", "CEO", "FYI", "ASAP", "IMO", "LMAO", "WAIT"]);
+const SEEN = "👀";
 
 function webhookSecret(botToken) {
   return crypto.createHmac("sha256", botToken).update("ta-screener telegram webhook").digest("hex");
@@ -34,6 +42,16 @@ async function say(token, chat, text) {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({chat_id: chat, text}),
+  });
+}
+
+// the request's "seen" mark; a chat that allows no reactions just gets none
+async function react(token, chat, messageId) {
+  if (!messageId) return;
+  await fetch(`https://api.telegram.org/bot${token}/setMessageReaction`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({chat_id: chat, message_id: messageId, reaction: [{type: "emoji", emoji: SEEN}]}),
   });
 }
 
@@ -61,9 +79,11 @@ async function handle(req, env) {
   const text = String(message.text || "").replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "").trim();
   // "$NVDA", "$ NVDA", or the Hebrew keyboard's currency key: the shekel sign
   let asked = text.replace(/^[$₪]\s*/, "");
+  let quiet = "";                       // "true": an unknown symbol gets no answer
   if (group && chat === group) {
     if (from.is_bot) return "group: a bot";
-    // in the group a request is "$NVDA" or "@bot NVDA"; anything else is the members' talk
+    // in the group a request is a ticker in capitals, "$NVDA" or "@bot NVDA"; anything
+    // else is the members' talk
     const mention = text.match(/^@\w+bot\s+(\S+)$/i);
     if (mention) asked = mention[1];
     const request = Boolean(mention) || /^[$₪]\s*[A-Za-z]/.test(text) || /^@\w+bot\b/i.test(text);
@@ -71,7 +91,10 @@ async function handle(req, env) {
       await say(token, chat, GROUP_HELP);
       return "group help";
     }
-    if (!request) return "group conversation";
+    if (!request) {
+      if (!BARE.test(text) || CHAT_WORDS.has(text)) return "group conversation";
+      quiet = "true";
+    }
   } else if (chat !== owner || String(from.id) !== owner) {
     return "not the owner";
   } else if (!SYMBOL.test(asked)) {
@@ -87,10 +110,10 @@ async function handle(req, env) {
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "ta-screener-bot",
     },
-    body: JSON.stringify({ref: "main", inputs: {symbol, chat}}),
+    body: JSON.stringify({ref: "main", inputs: {symbol, chat, quiet}}),
   });
   if (started.status === 204) {
-    await say(token, chat, `מנתח את ${symbol}. התשובה תגיע תוך כמה דקות.`);
+    await react(token, chat, message.message_id);
     return "started";
   }
   await say(token, chat, `לא הצלחתי להפעיל את הניתוח (GitHub ${started.status}). נסו שוב מאוחר יותר.`);
