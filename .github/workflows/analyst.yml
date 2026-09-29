@@ -84,6 +84,7 @@ jobs:
           code=$?
           line=$(grep -h '^analysis: ' logs/analyst-*.log | tail -n 1)
           echo "${line:-analysis: no status line (see the kept log)}"
+          if command -v rsvg-convert > /dev/null; then echo "png: rsvg-convert"; else echo "png: browser fallback"; fi
           exit $code
 
       - name: Keep the analysis
