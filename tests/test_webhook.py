@@ -36,6 +36,12 @@ async function run(name, req) { calls = []; return {name, outcome: await fn.hand
   out.push(await run("group", {method: "POST", headers: good, body: update("NVDA", -100, 42)}));
   out.push(await run("member asks", {method: "POST", headers: good, body: update(" $amd ", -555, 7)}));
   out.push(await run("members talk", {method: "POST", headers: good, body: update("OK", -555, 7)}));
+  out.push(await run("shekel key", {method: "POST", headers: good, body: update("\u20AAamd", -555, 7)}));
+  out.push(await run("spaced", {method: "POST", headers: good, body: update("$ msft", -555, 7)}));
+  out.push(await run("mention", {method: "POST", headers: good,
+                                 body: update("@ta_screener_alert_bot tsla", -555, 7)}));
+  out.push(await run("unclear", {method: "POST", headers: good, body: update("$ what is this", -555, 7)}));
+  out.push(await run("price talk", {method: "POST", headers: good, body: update("$100 is a lot", -555, 7)}));
   out.push(await run("group help", {method: "POST", headers: good,
                                     body: update("\u200E/start@ta_screener_alert_bot\u200E", -555, 7)}));
   out.push(await run("a bot in the group", {method: "POST", headers: good,
@@ -75,6 +81,7 @@ def test_the_webhook_answers_only_the_owner_and_only_symbols(tmp_path):
     for name, outcome in (("no secret", "bad secret"), ("wrong secret", "bad secret"),
                           ("stranger", "not the owner"), ("group", "not the owner"),
                           ("get", "not set up"), ("members talk", "group conversation"),
+                          ("price talk", "group conversation"),
                           ("a bot in the group", "group: a bot")):
         assert by[name]["outcome"] == outcome and not by[name]["calls"], name
     help_calls = by["not a symbol"]["calls"]
@@ -93,6 +100,9 @@ def test_the_webhook_answers_only_the_owner_and_only_symbols(tmp_path):
     asked, said = by["member asks"]["calls"]
     assert by["member asks"]["outcome"] == "started"
     assert asked["body"]["inputs"] == {"symbol": "AMD", "chat": "-555"} and said["body"]["chat_id"] == "-555"
+    for name, symbol in (("shekel key", "AMD"), ("spaced", "MSFT"), ("mention", "TSLA")):
+        assert by[name]["outcome"] == "started" and by[name]["calls"][0]["body"]["inputs"]["symbol"] == symbol, name
+    assert by["unclear"]["outcome"] == "group help" and by["unclear"]["calls"][0]["body"]["chat_id"] == "-555"
     assert by["group help"]["outcome"] == "group help" and len(by["group help"]["calls"]) == 1
     assert by["group help"]["calls"][0]["body"]["chat_id"] == "-555" and "$NVDA" in by["group help"]["calls"][0]["body"]["text"]
     assert by["refused"]["outcome"] == "dispatch failed"

@@ -59,20 +59,26 @@ async function handle(req, env) {
   const chat = String((message.chat || {}).id), from = (message.from || {});
   // direction marks a Hebrew keyboard (or a copied line) puts around a command or symbol
   const text = String(message.text || "").replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "").trim();
+  // "$NVDA", "$ NVDA", or the Hebrew keyboard's currency key: the shekel sign
+  let asked = text.replace(/^[$₪]\s*/, "");
   if (group && chat === group) {
     if (from.is_bot) return "group: a bot";
-    if (COMMAND.test(text)) {
+    // in the group a request is "$NVDA" or "@bot NVDA"; anything else is the members' talk
+    const mention = text.match(/^@\w+bot\s+(\S+)$/i);
+    if (mention) asked = mention[1];
+    const request = Boolean(mention) || /^[$₪]\s*[A-Za-z]/.test(text) || /^@\w+bot\b/i.test(text);
+    if (COMMAND.test(text) || (request && !SYMBOL.test(asked))) {
       await say(token, chat, GROUP_HELP);
       return "group help";
     }
-    if (!text.startsWith("$") || !SYMBOL.test(text)) return "group conversation";
+    if (!request) return "group conversation";
   } else if (chat !== owner || String(from.id) !== owner) {
     return "not the owner";
-  } else if (!SYMBOL.test(text)) {
+  } else if (!SYMBOL.test(asked)) {
     await say(token, owner, HELP);
     return "help";
   }
-  const symbol = text.replace(/^\$/, "").toUpperCase();
+  const symbol = asked.toUpperCase();
   const started = await fetch(WORKFLOW, {
     method: "POST",
     headers: {
