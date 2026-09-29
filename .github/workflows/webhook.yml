@@ -1,0 +1,70 @@
+# The Telegram bot's webhook alone (tascreen/web/vercel/telegram.js, a Vercel function),
+# deployed as soon as it changes on main, or by hand (owner, 2026-09-29: "don't wait for the
+# nightly run"). The nightly run (run.yml) deploys it too. No state and no TradingView, so it
+# never waits for, or delays, the other workflows. This log is public: the deployment's own
+# output stays in the runner.
+name: webhook
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tascreen/web/vercel/**"
+      - "tascreen/web/export.py"
+      - ".github/workflows/webhook.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webhook
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -q -r requirements.txt
+
+      - name: Deploy the bot's webhook to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_CLI: vercel@59.26.0
+          # run-time keys of the function; they stay GitHub secrets, handed to each deployment
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID }}
+          GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
+        run: |
+          site="$RUNNER_TEMP/ta-screener"
+          python run.py --export-webhook "$site" > /dev/null || { echo "export failed"; exit 1; }
+          cd "$site"
+          npx --yes "$VERCEL_CLI" link --yes --project ta-screener --token "$VERCEL_TOKEN" > /dev/null 2>&1
+          npx --yes "$VERCEL_CLI" deploy --prod --yes --token "$VERCEL_TOKEN" \
+              -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" -e TELEGRAM_CHAT_ID="$TELEGRAM_CHAT_ID" \
+              -e TELEGRAM_GROUP_ID="$TELEGRAM_GROUP_ID" \
+              -e GH_DISPATCH_TOKEN="$GH_DISPATCH_TOKEN" > /dev/null 2> "$RUNNER_TEMP/deploy.txt"
+          code=$?
+          echo "deploy exit $code"
+          if [ "$code" -ne 0 ]; then grep -i "error" "$RUNNER_TEMP/deploy.txt" | head -n 3; fi
+          exit $code
+
+      - name: Point the Telegram bot at the webhook
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
+        run: |
+          python run.py --telegram-webhook "https://ta-screener.vercel.app/api/telegram/" 2> /dev/null || echo "webhook: not set"
