@@ -40,6 +40,11 @@ async function run(name, req) { calls = []; return {name, outcome: await fn.hand
   out.push(await run("with its exchange", {method: "POST", headers: good, body: update("NASDAQ:AMD", -555, 7)}));
   out.push(await run("a word in capitals", {method: "POST", headers: good, body: update("LOL", -555, 7)}));
   out.push(await run("a word", {method: "POST", headers: good, body: update("nice", -555, 7)}));
+  out.push(await run("a phone's capital", {method: "POST", headers: good, body: update("Nvda", -555, 7)}));
+  out.push(await run("small letters", {method: "POST", headers: good, body: update("brk.b", -555, 7)}));
+  out.push(await run("NICE in capitals", {method: "POST", headers: good, body: update("NICE", -555, 7)}));
+  out.push(await run("a long word", {method: "POST", headers: good, body: update("thanks", -555, 7)}));
+  out.push(await run("Yes", {method: "POST", headers: good, body: update("Yes", -555, 7)}));
   out.push(await run("shekel key", {method: "POST", headers: good, body: update("\u20AAamd", -555, 7)}));
   out.push(await run("spaced", {method: "POST", headers: good, body: update("$ msft", -555, 7)}));
   out.push(await run("mention", {method: "POST", headers: good,
@@ -86,7 +91,8 @@ def test_the_webhook_answers_only_the_owner_and_only_symbols(tmp_path):
                           ("stranger", "not the owner"), ("group", "not the owner"),
                           ("get", "not set up"), ("members talk", "group conversation"),
                           ("price talk", "group conversation"), ("a word in capitals", "group conversation"),
-                          ("a word", "group conversation"),
+                          ("a word", "group conversation"), ("a long word", "group conversation"),
+                          ("Yes", "group conversation"),
                           ("a bot in the group", "group: a bot")):
         assert by[name]["outcome"] == outcome and not by[name]["calls"], name
     help_calls = by["not a symbol"]["calls"]
@@ -110,7 +116,8 @@ def test_the_webhook_answers_only_the_owner_and_only_symbols(tmp_path):
     assert asked["body"]["inputs"] == {"symbol": "AMD", "chat": "-555", "quiet": ""}
     assert seen["body"]["chat_id"] == "-555" and seen["url"].endswith("/setMessageReaction")
     # a ticker alone, like in the private chat; an unknown one gets no answer (quiet)
-    for name, symbol in (("a ticker alone", "NVDA"), ("with its exchange", "NASDAQ:AMD")):
+    for name, symbol in (("a ticker alone", "NVDA"), ("with its exchange", "NASDAQ:AMD"),
+                         ("a phone's capital", "NVDA"), ("small letters", "BRK.B"), ("NICE in capitals", "NICE")):
         assert by[name]["outcome"] == "started", name
         assert by[name]["calls"][0]["body"]["inputs"] == {"symbol": symbol, "chat": "-555", "quiet": "true"}
     for name, symbol in (("shekel key", "AMD"), ("spaced", "MSFT"), ("mention", "TSLA")):

@@ -17,14 +17,26 @@ const crypto = require("crypto");
 const SYMBOL = /^\$?(?:[A-Za-z]{2,8}:)?[A-Za-z][A-Za-z0-9.\-]{0,9}$/;
 const WORKFLOW = "https://api.github.com/repos/twitx2003-rgb/ta-screener/actions/workflows/analyst.yml/dispatches";
 const HELP = "שלחו סימול של מניה, למשל NVDA, ותקבלו ניתוח טכני: גרף והסבר קצר. לא ייעוץ השקעות.";
-const GROUP_HELP = "כדי לקבל ניתוח טכני של מניה, כתבו את הסימול באותיות גדולות, למשל NVDA. " +
+const GROUP_HELP = "כדי לקבל ניתוח טכני של מניה, כתבו רק את הסימול, למשל NVDA. " +
   "התשובה מגיעה לקבוצה תוך דקה. לא ייעוץ השקעות.";
 const COMMAND = /^\/(start|help)(@\w+)?$/i;
-// a ticker written alone in the group, in capitals ("NVDA", "NASDAQ:NVDA", "BRK.B")
-const BARE = /^(?:[A-Z]{2,8}:)?[A-Z][A-Z0-9.\-]{0,9}$/;
-// capital words people write in a chat, not tickers
-const CHAT_WORDS = new Set(["OK", "LOL", "WOW", "YES", "NO", "HI", "OMG", "WTF", "BTW", "THX", "TNX", "GM", "GN",
-                            "USA", "CEO", "FYI", "ASAP", "IMO", "LMAO", "WAIT"]);
+// a ticker written alone in the group, in any case (a phone makes "nvda" "Nvda"): at most
+// five letters, and a class letter or an exchange ("NVDA", "brk.b", "NASDAQ:NVDA")
+const BARE = /^(?:[A-Za-z]{2,8}:)?[A-Za-z]{1,5}(?:[.\-][A-Za-z])?$/;
+// what people write alone in a chat: in capitals, only these are not tickers...
+const CAPS_WORDS = new Set(["OK", "LOL", "WOW", "YES", "NO", "HI", "OMG", "WTF", "BTW", "THX", "TNX", "GM", "GN",
+                            "FYI", "ASAP", "IMO", "LMAO", "USA", "CEO"]);
+// ...and in small letters these words too (some are tickers, like "now" or "all": in
+// capitals, NOW and ALL ask for them)
+const WORDS = new Set([...[...CAPS_WORDS].map((w) => w.toLowerCase()),
+  "okay", "hey", "yeah", "yep", "nope", "bye", "sure", "what", "why", "how", "who", "when", "where", "wait",
+  "nice", "cool", "good", "great", "fine", "done", "true", "same", "love", "haha", "sorry", "maybe", "bro",
+  "dude", "man", "now", "all", "it", "on", "go", "up", "down", "top", "big", "buy", "sell", "hold", "long",
+  "short", "the", "and", "yes", "wow", "thank", "thx", "pls", "plz", "please", "ok"]);
+
+function chatWord(text) {
+  return text === text.toUpperCase() ? CAPS_WORDS.has(text) : WORDS.has(text.toLowerCase());
+}
 const SEEN = "👀";
 
 function webhookSecret(botToken) {
@@ -91,7 +103,7 @@ async function handle(req, env) {
       return "group help";
     }
     if (!request) {
-      if (!BARE.test(text) || CHAT_WORDS.has(text)) return "group conversation";
+      if (!BARE.test(text) || chatWord(text)) return "group conversation";
       quiet = "true";
     }
   } else if (chat !== owner || String(from.id) !== owner) {
