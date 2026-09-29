@@ -16,6 +16,10 @@ on:
     - cron: "47 * * * *"
   workflow_dispatch:
     inputs:
+      digest_trial:
+        description: "Only try the morning digest now, sent to the owner's private chat (not recorded)"
+        type: boolean
+        default: false
       check_vision:
         description: "Only check the picture explanations (one real post picture -> Telegram)"
         type: boolean
@@ -25,7 +29,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: xnews            # its own group: never waits for, or delays, the nightly run
+  # its own group: never waits for, or delays, the nightly run; a digest trial runs beside the loop
+  group: ${{ inputs.digest_trial && 'xnews-digest-trial' || 'xnews' }}
   cancel-in-progress: false
 
 jobs:
@@ -63,7 +68,14 @@ jobs:
           TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID }}
           GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
           CHECK_VISION: ${{ inputs.check_vision }}
+          DIGEST_TRIAL: ${{ inputs.digest_trial }}
         run: |
+          if [ "$DIGEST_TRIAL" = "true" ]; then
+            python -u run.py --digest-trial > "$RUNNER_TEMP/digest.log" 2>&1
+            code=$?
+            grep -h '^digest: ' "$RUNNER_TEMP/digest.log" | tail -n 1
+            exit $code
+          fi
           if [ "$CHECK_VISION" = "true" ]; then
             python -u run.py --x-vision-check > "$RUNNER_TEMP/xnews.log" 2>&1
             code=$?
@@ -80,6 +92,10 @@ jobs:
               bash .github/xnews.sh keep > /dev/null || echo "xnews state: could not keep"
             fi
             python -u run.py --ensure-live 2> /dev/null | grep -h '^ensure-live: ' || true
+            # the morning digest at 10:00 Israel time (tascreen/digest.py): a no-op when not due
+            if python -u run.py --digest 2> "$RUNNER_TEMP/digest.log" | grep -h '^digest: ' | grep -v 'not due'; then
+              bash .github/xnews.sh keep > /dev/null || echo "xnews state: could not keep"
+            fi
             step=600
             if [ "$(date -u +%u)" -ge 6 ]; then step=1200; fi
             if [ $(( $(date +%s) + step )) -ge "$end" ]; then break; fi
@@ -88,5 +104,5 @@ jobs:
           python -c "from tascreen import github; print('continuation:', github.dispatch('xnews.yml', {}))"
 
       - name: Keep what was seen
-        if: always() && inputs.check_vision != true
+        if: always() && inputs.check_vision != true && inputs.digest_trial != true
         run: bash .github/xnews.sh keep

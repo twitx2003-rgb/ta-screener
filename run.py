@@ -128,6 +128,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--research-dry", action="store_true",
                         help="The research team on the newest scan -> Telegram as a trial (nothing "
                              "recorded); run.yml input research_dry, or a normal terminal")
+    parser.add_argument("--digest", action="store_true",
+                        help="The morning digest (10:00 Israel time) if it is due; the X news loop runs it")
+    parser.add_argument("--digest-now", action="store_true",
+                        help="The morning digest now, due or not (a trial; it still counts as today's)")
+    parser.add_argument("--digest-trial", action="store_true",
+                        help="The morning digest now, to the owner's private chat, not recorded "
+                             "(xnews.yml input digest_trial)")
     parser.add_argument("--ensure-live", action="store_true",
                         help="GitHub Actions (xnews.yml): start live.yml if it should be running "
                              "(a trading day, 07:20-15:50 New York) and is not")
@@ -550,6 +557,7 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
         summary["alerts"] = _evening_alerts(settings, store, target)
     if settings.research.enabled:
         summary["research_weekly"] = _research_weekly(settings, store)
+    summary["market"] = _market_snapshot(settings, store, target)
     summary["seconds"] = round((datetime.now(timezone.utc) - started).total_seconds())
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     (settings.log_dir / "ci_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -602,6 +610,79 @@ def _evening_alerts(settings, store, target) -> dict:
     except ScreenerError as exc:
         log.error("breakout report failed: %s", exc)             # the private log only
         return {"status": "failed", "error": type(exc).__name__}
+
+
+def _market_snapshot(settings, store, day) -> str:
+    """The index funds' moves in the session just scanned, kept for the morning digest
+    (data/market/<day>.json; tascreen/digest.py). Once per session; a status word."""
+    path = store.root / "market" / f"{day.isoformat()}.json"
+    if path.exists():
+        return "kept"
+    moves = _market_moves(settings)
+    if not moves:
+        return "not fetched"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(moves), encoding="utf-8")
+    return "saved"
+
+
+def _saved_moves(settings, day) -> dict:
+    """The morning digest's index moves: the nightly run's file, from the private state repo
+    (the news loop has no bars or scans) or, on this computer, the local one; {} if none."""
+    import os
+
+    from tascreen import explain
+
+    local = settings.data_dir / "market" / f"{day.isoformat()}.json"
+    raw = local.read_bytes() if local.exists() else None
+    token = os.environ.get("STATE_REPO_TOKEN", "").strip()
+    if raw is None and token:
+        raw = explain._get(f"https://api.github.com/repos/{explain.STATE_REPO}/contents/data/market/"
+                           f"{day.isoformat()}.json?ref=main",
+                           {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.raw+json",
+                            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "ta-screener"})
+    try:
+        moves = json.loads(raw or b"{}")
+    except ValueError:
+        return {}
+    return {k: float(v) for k, v in moves.items() if isinstance(v, (int, float))} if isinstance(moves, dict) else {}
+
+
+def digest(settings, force: bool = False, trial: bool = False) -> int:
+    """The morning digest (tascreen/digest.py) when it is due, or now with `force`. From the
+    X news loop (.github/workflows/xnews.yml): it has Claude, the news state and the group.
+    A `trial` goes to the owner's private chat and is not recorded. One status line (counts
+    only: the public log)."""
+    import os
+    from datetime import datetime, timezone
+
+    from tascreen import digest as morning, notify
+    from tascreen.digest_render import to_png
+    from tascreen.llm import ClaudeCodeLLM
+
+    bot = notify.from_environment()
+    if bot is None:
+        print("digest: status=telegram not configured")
+        return 0
+    cfg, folder = settings.xnews, settings.data_dir / "xnews"
+    record = settings.log_dir / "digest-trial.json" if trial else folder / "digest.json"
+    if trial:
+        record.unlink(missing_ok=True)
+        bot.chat_id = (os.environ.get("TELEGRAM_CHAT_ID") or str(bot.chat_id)).strip()
+    try:
+        result = morning.run(
+            now=datetime.now(timezone.utc), state_path=folder / "state.json", record_path=record,
+            market_tz=settings.market.timezone,
+            make_llm=lambda: ClaudeCodeLLM(model=cfg.model, effort="medium", timeout_s=cfg.timeout_s),
+            send_photo=lambda png, caption: bot.send_photo(png, caption, "digest.png", html=True),
+            moves_of=lambda day: _saved_moves(settings, day), draw=to_png, folder=settings.log_dir / "digest",
+            force=force or trial)
+    except Exception as exc:                        # the loop goes on; the next pass tries again
+        log.exception("the morning digest failed")
+        print(f"digest: status=failed ({type(exc).__name__})")
+        return 1
+    print("digest: " + " ".join(f"{k}={v}" for k, v in result.items()))
+    return 0
 
 
 def _market_moves(settings) -> dict:
@@ -1419,6 +1500,9 @@ def main(argv: list[str] | None = None) -> int:
                                        to_telegram=args.telegram)),
         (args.ci_premarket, lambda: ci_premarket(settings)),
         (args.ensure_live, lambda: ensure_live(settings)),
+        (args.digest, lambda: digest(settings)),
+        (args.digest_now, lambda: digest(settings, force=True)),
+        (args.digest_trial, lambda: digest(settings, trial=True)),
         (args.research_dry, lambda: research_dry(settings)),
         (args.ci_analyze, lambda: ci_analyze(settings, args.ci_analyze, args.archive, args.daily_limit,
                                              args.reply_to, args.quiet_unknown)),

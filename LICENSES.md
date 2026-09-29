@@ -12,6 +12,7 @@ code only: no market data, and no text from the books it follows.
 | **Code taken from market-research-pipeline** (TradingView client, contracts, market calendar) | Same author | Copied, not a dependency. |
 | **Starlette**, **uvicorn** (tests; they come with mcp) | BSD-3-Clause | A small local server in the MCP client tests. (FastAPI, Jinja2 and httpx went with the website, removed 2026-09-27.) |
 | **Fonts**: Noto (Hebrew), IBM Plex Mono | SIL Open Font License 1.1 | Installed on the GitHub runner (apt) to draw the Telegram charts; not stored in the repo. |
+| **Heebo** font (`tascreen/fonts/`) | SIL Open Font License 1.1 (`Heebo-OFL.txt` beside it) | Stored in the repo (the licence allows redistribution with its text) so the morning digest's picture looks the same on the runner and here. |
 
 
 ## Bulkowski's books

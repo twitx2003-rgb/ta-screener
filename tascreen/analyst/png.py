@@ -17,8 +17,11 @@ from ..errors import ProviderError
 from .chart import H, W
 
 SCALE = 2                     # a phone screen shows the double-size image sharply
-BROWSERS = ("msedge", "microsoft-edge", "google-chrome", "chromium", "chromium-browser", "chrome")
-WINDOWS_BROWSERS = (r"Microsoft\Edge\Application\msedge.exe", r"Google\Chrome\Application\chrome.exe")
+# Chrome first: on the owner's computer Edge's headless mode exits without a picture
+# (2026-09-29); Edge stays the last resort.
+BROWSERS = ("google-chrome", "chromium", "chromium-browser", "chrome")
+WINDOWS_BROWSERS = (r"Google\Chrome\Application\chrome.exe", r"Microsoft\Edge\Application\msedge.exe")
+EDGE = ("msedge", "microsoft-edge")
 
 
 def _browser() -> str | None:
@@ -26,10 +29,14 @@ def _browser() -> str | None:
         found = shutil.which(name)
         if found:
             return found
-    for root in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles")):
-        for rel in WINDOWS_BROWSERS:
+    for rel in WINDOWS_BROWSERS:
+        for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
             if root and (Path(root) / rel).exists():
                 return str(Path(root) / rel)
+    for name in EDGE:
+        found = shutil.which(name)
+        if found:
+            return found
     return None
 
 
@@ -56,6 +63,25 @@ def wait_for_tools(timeout_s: float = 180.0, *, clock=time.monotonic, sleep=time
             return False
         sleep(0.5)
     return True
+
+
+def html_to_png(page: Path, png: Path, *, width: int, height: int, timeout_s: int = 90) -> Path:
+    """A page of a known size as a PNG, by the browser (the morning digest, 2026-09-29).
+    The page's fonts load from local files; a short virtual-time budget lets them in."""
+    png.unlink(missing_ok=True)
+    browser = _browser()
+    if browser is None:
+        raise ProviderError("no Edge/Chrome to turn the page into a PNG")
+    with tempfile.TemporaryDirectory(prefix="ta-shot-", ignore_cleanup_errors=True) as profile:
+        args = [browser, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--allow-file-access-from-files",
+                f"--user-data-dir={profile}", f"--window-size={width},{height}", "--force-device-scale-factor=1",
+                "--virtual-time-budget=3000", f"--screenshot={png.resolve()}", page.resolve().as_uri()]
+        if os.environ.get("CI"):                      # a runner: Chrome's sandbox may be unavailable
+            args.insert(1, "--no-sandbox")
+        subprocess.run(args, capture_output=True, timeout=timeout_s)
+    if not png.exists() or png.stat().st_size == 0:
+        raise ProviderError(f"could not turn {page.name} into a PNG")
+    return png
 
 
 def svg_to_png(svg: Path, png: Path, *, timeout_s: int = 60) -> Path:

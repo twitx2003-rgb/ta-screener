@@ -20,6 +20,13 @@ Talk to the owner in simple Hebrew. Code, comments and commits stay in English.
   and `xnews.ration`: at most `max_per_round` (2) a round, the most important first (more
   sources rank higher), and `daily_max` (12) regular stories a day from a budget that
   refills through the 20 news hours (about one every 100 minutes). A 5 always goes.
+- **The morning digest (2026-09-29):** at 10:00 Israel time a designed, light picture in the
+  group (`tascreen/digest.py`, `digest_render.py`, role `digest-editor`): 6-8 short Hebrew
+  items from the picks since the last session's open (the news state's `day_log` keeps every
+  pick, sent or held back), the big picture, what is due, and the index funds' last-session
+  moves (saved by the nightly run in `data/market/`). Tuesday to Saturday from the previous
+  open; none on Sunday; Monday from Friday's open. Run by the news loop (`run.py --digest`,
+  a no-op when not due; `--digest-now` to try), three tries a morning at most.
 - **The reader's balance (2026-09-28):** once a week `xnews.check_balance` reads
   `/oapi/my/info` (100,000 credits = 1 USD); below `low_balance_usd` (2) the bot warns
   with a top-up link. The amount goes to Telegram only, never to the public log.

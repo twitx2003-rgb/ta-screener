@@ -40,6 +40,27 @@ def _no_real_claude(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_tradingview(monkeypatch):
+    """Tests never open a TradingView session: run.py's client would use the owner's real
+    sign-in (~/.ta-screener/tv_tokens.json) and could refresh it (2026-09-29: the nightly
+    tick's index snapshot tried, and a test waited 145 s on the rate limit). A test that
+    needs a client patches run.make_tradingview itself, or points token_path at a temp file."""
+    from pathlib import Path
+
+    import run
+    from tascreen.errors import ConfigError
+
+    real, owners = run.make_tradingview, Path("~/.ta-screener").expanduser().resolve()
+
+    def guarded(settings, interactive=False):
+        if owners in Path(settings.tradingview.token_path).expanduser().resolve().parents:
+            raise ConfigError("TradingView is not available in tests (the owner's sign-in)")
+        return real(settings, interactive)
+
+    monkeypatch.setattr(run, "make_tradingview", guarded)
+
+
+@pytest.fixture(autouse=True)
 def _restore_root_logging():
     """run.main() installs console handlers bound to the test's captured stderr;
     once that capture closes, later tests would log into a closed stream."""
