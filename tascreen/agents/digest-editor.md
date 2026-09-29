@@ -9,12 +9,16 @@ picture, read in half a minute, of what happened on Wall Street since the last s
 open. You get the stories the news desk picked in that time (each with an id, the time in
 Israel, an importance 1-5, a one-sentence Hebrew summary and a short Hebrew analysis, its
 account and how many accounts told it), and the index funds' moves in the last session if
-known.
+known. Most of them were never sent to the investor: only a few a day are (importance 3
+and up, within a budget), and the updates rated 2 never are.
 
 Choose the 6 to 8 stories that matter most for today's trading: what moved the market or
 a sector, big company news (earnings, guidance, deals, FDA, legal), macro data, the Fed
 and rates, the dollar, oil, and geopolitics that moves futures. Prefer a story many
-accounts told and a high importance. Merge stories about the same event into one item
+accounts told and a high importance, but the investor also wants the interesting updates
+they may have missed: when the big stories leave room, add one or two notable updates
+rated 2 (a telling data point, a sector trend, positioning or flows) that add to the
+picture. Merge stories about the same event into one item
 (list all their ids). Leave out opinions, generic charts and what repeats another item.
 Order the items from the most important.
 

@@ -216,10 +216,12 @@ SENT_WINDOW_S = 2 * 3600     # stories sent this recently are shown to the dedup
 RECENT_WINDOW_S = 3 * 3600   # posts kept this long for the market explainer (tascreen/explain.py)
 RECENT_MAX = 300
 SOURCES_SHOWN = 3
-# Every pick (sent or held back by `ration`) for the morning digest: from a session's open
-# to 10:00 the next day, and over a weekend from Friday's open to Monday (owner, 2026-09-29)
+# Every pick for the morning digest (owner, 2026-09-29): sent, held back by `ration`, and
+# the updates rated 2 that are never sent ("interesting, not necessarily sent"), from a
+# session's open to 10:00 the next day, and over a weekend from Friday's open to Monday
 DAY_LOG_S = 4 * 24 * 3600
-DAY_LOG_MAX = 800
+DAY_LOG_MAX = 1500
+DIGEST_FROM = 2
 # The owner wants few, hand-picked stories (2026-09-28: 29 went out in 90 minutes): a round
 # sends at most `max_per_round`, the most important first, and the regular ones (below 5)
 # share a budget that refills through the news hours, so the evening is not left empty.
@@ -571,9 +573,9 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             counts: dict[str, int] = {}
             already = [{"author": r["author"], "summary_he": r["summary_he"],
                         "minutes_ago": (stamp - int(r["at"])) // 60} for r in sent_recent]
+            threshold = max(min_importance, weekend_min_importance) if weekend else min_importance
             picks, summary["rejected"] = triage(
-                [_row_post(r) for r in pending], llm,
-                max(min_importance, weekend_min_importance) if weekend else min_importance,
+                [_row_post(r) for r in pending], llm, min(DIGEST_FROM, threshold),
                 WEEKEND_NOTE if weekend else "", already_sent=already, counts=counts)
             summary.update(counts)
         except UsageLimit:
@@ -584,7 +586,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             model["last"] = stamp
             summary["judged"] = len(pending)
             pending = []
-            every = picks
+            every = picks                    # all for the digest; only the important may be sent
+            picks = [pk for pk in every if pk[1]["importance"] >= threshold]
             picks, budget, summary["held_back"] = ration(picks, budget, stamp, day, max_per_round=max_per_round,
                                                          daily_max=daily_max)
             chosen = {p.id for p, _ in picks}

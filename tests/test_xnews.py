@@ -408,3 +408,14 @@ def test_every_pick_is_logged_for_the_morning_digest(tmp_path):
     log = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["day_log"]
     assert [r["id"] for r in log] == ["1", "2", "3", "4"] and sum(r["sent"] for r in log) == 2
     assert log[0]["summary_he"] == "ידיעה 1" and log[0]["importance"] == 4 and log[0]["url"].endswith("/1")
+
+
+def test_the_updates_rated_2_are_kept_for_the_digest_but_never_sent(tmp_path):
+    page = {"tweets": [row("1"), row("2", author="Desk2")], "has_next_page": False}
+    llm = picker({"post_id": "1", "importance": 4, "summary_he": "חשוב", "analysis_he": ""},
+                 {"post_id": "2", "importance": 2, "summary_he": "עדכון מעניין", "analysis_he": ""})
+    sent = []
+    summary, _ = run(tmp_path, FakeReader(page), llm, sent, min_importance=3)
+    assert summary["sent"] == 1 and "עדכון מעניין" not in sent[0]
+    log = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["day_log"]
+    assert [(r["id"], r["importance"], r["sent"]) for r in log] == [("1", 4, True), ("2", 2, False)]

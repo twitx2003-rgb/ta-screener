@@ -31,7 +31,7 @@ from .market_hours import is_trading_day, session_bounds
 
 ISRAEL = ZoneInfo("Asia/Jerusalem")
 SEND_FROM, SEND_UNTIL = time(10, 0), time(13, 0)   # a late run still sends until 13:00
-STORIES_SHOWN = 60
+STORIES_SHOWN = 90
 MAX_TRIES = 3                                      # a failing morning is tried at most this often
 MIN_ITEMS, MAX_ITEMS = 3, 8
 TITLE_MAX, DETAIL_MAX, HEADLINE_MAX, WATCH_MAX = 44, 170, 140, 130
