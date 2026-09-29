@@ -870,9 +870,14 @@ def _session_move(settings, client, bot, store, day, sent, history, summary) -> 
 PREMARKET_LEAD_MINUTES = 135      # live.yml starts at 07:25 New York; the open is 09:30
 
 
+PREMARKET_RETRY_MINUTES = 5
+
+
 def premarket_until_open(settings, opens, sleep=None, now=None) -> list[str]:
     """The pre-market slots until the open (tascreen/premarket.py SLOTS), each sent once;
-    returns each attempt's status. A failed report is logged and the watch goes on."""
+    returns each attempt's status. A failed report is logged and tried again every few
+    minutes while its slot lasts (2026-09-29: the 07:30 report was lost to one failure;
+    a slot already sent, or over, is a no-op)."""
     import time as clock
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
@@ -883,15 +888,20 @@ def premarket_until_open(settings, opens, sleep=None, now=None) -> list[str]:
     tz = ZoneInfo(settings.market.timezone)
     statuses = []
     while now() < opens - timedelta(minutes=1):
+        failed = False
         try:
             code = ci_premarket(settings)
             statuses.append("ok" if code == 0 else f"exit {code}")
+            failed = code != 0
         except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
             log.error("pre-market report failed: %s", exc)            # the private log only
             statuses.append(type(exc).__name__)
+            failed = True
         local = now().astimezone(tz)
         starts = [datetime.combine(local.date(), s, tz) for s in SLOTS]
         wake = min([t for t in starts if t > local] + [opens])
+        if failed:
+            wake = min(wake, local + timedelta(minutes=PREMARKET_RETRY_MINUTES))
         if wake >= opens:
             break
         sleep(max(1.0, (wake - now()).total_seconds() + 5))

@@ -74,6 +74,28 @@ def test_the_watch_sends_each_slot_then_hands_over_to_the_session(monkeypatch):
     assert [t.strftime("%H:%M") for t in calls[1:]] == ["12:30", "13:30", "14:15"]
 
 
+def test_a_failed_report_is_tried_again_within_its_slot(monkeypatch):
+    import run
+    from tascreen.errors import ProviderError
+
+    clock = {"t": datetime(2026, 1, 5, 12, 30, 5, tzinfo=timezone.utc)}        # 07:30 New York
+    opens = datetime(2026, 1, 5, 13, 0, tzinfo=timezone.utc)
+    calls = []
+
+    def report(settings):
+        calls.append(clock["t"].strftime("%H:%M"))
+        if len(calls) == 1:
+            raise ProviderError("TradingView: rate limited")
+        return 0
+
+    def sleep(seconds):
+        clock["t"] += timedelta(seconds=seconds)
+
+    monkeypatch.setattr(run, "ci_premarket", report)
+    statuses = run.premarket_until_open(run.load_settings(), opens, sleep=sleep, now=lambda: clock["t"])
+    assert statuses[:2] == ["ProviderError", "ok"] and calls[:2] == ["12:30", "12:35"]
+
+
 def test_the_settings_are_checked():
     with pytest.raises(ConfigError):
         AlertsSettings(premarket_min_pct=0)
