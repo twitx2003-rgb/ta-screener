@@ -71,7 +71,7 @@ def produce(symbol: str, bars: pd.DataFrame, folder: Path, *, llm: LLM | None = 
         bot.send_photo(png.read_bytes(), writer.photo_caption(analysis), f"{stem}.png")
         if message:
             bot.send(message, html=True)
-        bot.send_document(pine.read_bytes(), pine.name, writer.pine_caption(analysis))
+        # the Pine Script is kept with the analysis, not sent (owner, 2026-09-29: not needed)
     return {"symbol": symbol, "last_day": analysis.last_day, "stem": stem, "folder": folder,
             "analysis": analysis, "written": written}
 

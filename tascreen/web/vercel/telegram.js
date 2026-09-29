@@ -16,8 +16,7 @@ const crypto = require("crypto");
 
 const SYMBOL = /^\$?(?:[A-Za-z]{2,8}:)?[A-Za-z][A-Za-z0-9.\-]{0,9}$/;
 const WORKFLOW = "https://api.github.com/repos/twitx2003-rgb/ta-screener/actions/workflows/analyst.yml/dispatches";
-const HELP = "שלחו סימול של מניה, למשל NVDA, ותקבלו ניתוח טכני: גרף, הסבר קצר וסקריפט ל-TradingView. " +
-  "לא ייעוץ השקעות.";
+const HELP = "שלחו סימול של מניה, למשל NVDA, ותקבלו ניתוח טכני: גרף והסבר קצר. לא ייעוץ השקעות.";
 const GROUP_HELP = "כדי לקבל ניתוח טכני של מניה, כתבו את הסימול באותיות גדולות, למשל NVDA. " +
   "התשובה מגיעה לקבוצה תוך דקה. לא ייעוץ השקעות.";
 const COMMAND = /^\/(start|help)(@\w+)?$/i;

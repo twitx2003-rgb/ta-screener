@@ -79,7 +79,7 @@ def test_the_png_waits_for_the_tools_installed_in_the_background(tmp_path, monke
 def test_a_request_sends_chart_text_and_script_and_keeps_the_files(tmp_path):
     status, bot, llm = _request(tmp_path, "syn")
     assert status == "sent NYSE:SYN" and len(llm.calls) == 1
-    assert [m for m, _ in bot.sent] == ["sendPhoto", "sendMessage", "sendDocument"]
+    assert [m for m, _ in bot.sent] == ["sendPhoto", "sendMessage"]            # no Pine Script
     folder = tmp_path / "analyses" / "2026-03-20" / "210507-NYSE_SYN"
     kept = sorted(p.suffix for p in folder.iterdir())
     assert kept == [".html", ".json", ".json", ".pine", ".png", ".svg"]

@@ -43,11 +43,11 @@ WRITTEN = ("headline", "trend", "fibonacci", "volume", "momentum", "patterns")
 REQUIRED = ("headline",)
 SCENARIOS = ("up", "down")
 # Owner's choices after the first live texts (2026-09-24): short and simple, then shorter
-# still, with a light by each section. The required sections, plus at most two others
-# that matter now; one short sentence each.
+# still, with a light by each section. The required sections, plus at most one other that
+# matters now (owner, 2026-09-29: "shorter"; it was two); one short sentence each.
 MAX_CHARS = {"headline": 170}
 DEFAULT_MAX = 150
-MAX_OPTIONAL = 2
+MAX_OPTIONAL = 1
 # Lights: green / red / yellow judge a section's facts; the levels get a neutral pin and
 # the scenarios arrows, since a direction is not a judgement (review round 1).
 LIGHTS = {"green": "🟢", "red": "🔴", "yellow": "🟡", "pin": "📍", "up": "⬆️", "down": "⬇️"}
@@ -111,8 +111,8 @@ You write, ONE short sentence each, at most one of each:
   The lead is the trend in plain words and agrees with the light: "מגמת עלייה:", "מגמת
   ירידה:", "אין מגמה ברורה:", "מגמת עלייה, בתיקון:" (yellow), "מגמת עלייה, אחרי שבירה:"
   (yellow). Never repeat the close, the date or the day's change.
-- At most TWO of these optional sections, only when they add to the picture now, the more
-  important first (<= 150 characters each): patterns (a pat_* breakout or failure: what the
+- At most ONE of these optional sections, only when it adds to the picture now, the most
+  important one (<= 150 characters): patterns (a pat_* breakout or failure: what the
   headline did not say, such as the breakout day's volume in words, the target or the line's
   price today), trend (the averages and their direction, the stretch fact, a drawn trendline
   with its price, always saying whether it is above or below the price), momentum (see rule
@@ -392,29 +392,21 @@ def levels_part(facts: dict[str, dict]) -> list[dict[str, Any]]:
 
 def scenario_parts(facts: dict[str, dict]) -> list[dict[str, Any]]:
     """The two scenarios, written by the program from the up.* / down.* facts: always
-    conditional, three short lines each (review round 3: 45-word blocks, and "רמת הכניסה"
-    read as a trade entry): what starts it, the next level, what cancels it. Every
-    distance names its base: the close for the start, the trigger ("רמת ההפעלה") for the
-    next level and the cancel (round 2: the room and the risk were never visible). Right
-    after a breakout: the breakout holds while the close stays beyond its line."""
+    conditional, ONE short line each (owner, 2026-09-29: "shorter"; they were three lines
+    with distances and a cancel level): what starts it, and the next level. Right after a
+    breakout: the breakout holds while the close stays beyond its line. Never "רמת הכניסה"
+    (review round 3: it read as a trade entry)."""
     value = lambda key: (facts.get(key) or {}).get("value")          # noqa: E731
     out = []
     for side, up in (("up", True), ("down", False)):
         hold, trigger = value(f"{side}.hold"), value(f"{side}.trigger")
-        lines, cites = [], []
+        cites = []
         if isinstance(hold, (int, float)):
-            word, pct = ("הפריצה" if up else "השבירה"), value(f"{side}.hold_pct")
-            lines.append(f"{word} נשמרת כל עוד המחיר נסגר {_over(up, hold)}, קו {word} של תבנית "
-                         f"{value(f'{side}.hold_pattern')}"
-                         + (f" ({pct:.1f}% {'מתחת לסגירה' if up else 'מעל הסגירה'})." if isinstance(pct, (int, float)) else "."))
+            start = f"{'הפריצה' if up else 'השבירה'} נשמרת כל עוד המחיר נסגר {_over(up, hold)}"
             cites += [f"{side}.hold", f"{side}.hold_pattern"]
-            base = "הסגירה" if up else "לסגירה"
         elif isinstance(trigger, (int, float)):
-            what, pct = value(f"{side}.trigger_what"), value(f"{side}.trigger_pct")
-            lines.append(f"סגירה {_over(up, trigger)}" + (f", {what}" if what else "")
-                         + (f" ({pct:.1f}% {'מעל הסגירה' if up else 'מתחת לסגירה'})." if isinstance(pct, (int, float)) else "."))
+            start = f"סגירה {_over(up, trigger)}"
             cites += [f"{side}.trigger", f"{side}.trigger_what"]
-            base = "רמת ההפעלה" if up else "לרמת ההפעלה"
         elif value(f"{side}.no_next"):
             out.append({"part": side, "signal": side, "text": f"{value(f'{side}.no_next')}.",
                         "cites": [f"{side}.no_next"], "title": PARTS[side]})
@@ -425,33 +417,18 @@ def scenario_parts(facts: dict[str, dict]) -> list[dict[str, Any]]:
         if isinstance(nxt, (int, float)):
             ranged = isinstance(far, (int, float))
             place = f"בין {min(nxt, far):.2f} ל-{max(nxt, far):.2f}" if ranged else f"{nxt:.2f}"
-            room = value(f"{side}.room_pct") if isinstance(trigger, (int, float)) else value(f"{side}.next_pct")
             name = _band_name(str(value(f"{side}.next_what")), ranged)
             measured = name.startswith(("מחושבת", "יעד"))  # a measured level: the number first
-            line = (f"הרמה הבאה: {place}" if measured else
+            then = (f"הרמה הבאה {place}, {name}" if measured else
                     f"הרמה הבאה: {name}{' ' if name in ('התנגדות', 'תמיכה') else ', '}{place}")
-            if isinstance(room, (int, float)):
-                line += f" ({room:.1f}% {'מעל ' if up else 'מתחת '}{base})"
-            lines.append(line + (f", {name}." if measured else "."))
             cites += [f"{side}.next", f"{side}.next_what"]
         elif value(f"{side}.no_next"):
-            lines.append(f"{value(f'{side}.no_next')}.")
+            then = str(value(f"{side}.no_next"))
             cites.append(f"{side}.no_next")
-        cancel, risk = value(f"{side}.cancel"), value(f"{side}.risk_pct")
-        if isinstance(hold, (int, float)):
-            lines.append(f"סגירה {_over(not up, hold)} מחזירה את המחיר אל תוך התבנית.")
-        elif isinstance(cancel, (int, float)):
-            what = str(value(f"{side}.cancel_what") or "")
-            away = f" ({risk:.1f}% {'מתחת לרמת ההפעלה' if up else 'מעל רמת ההפעלה'})" if isinstance(risk, (int, float)) else ""
-            if what == "חזרה אל תוך האזור":
-                lines.append(f"ביטול: סגירה חוזרת אל תוך האזור, {_over(not up, cancel)}{away}.")
-            elif what == "חצי מהתנודה היומית הממוצעת":     # a one-price trigger: half a day's range back
-                lines.append(f"ביטול: סגירה חוזרת {_over(not up, cancel)}, חצי מהתנודה היומית הממוצעת "
-                             f"{'מתחת לרמת ההפעלה' if up else 'מעל רמת ההפעלה'}.")
-            else:
-                lines.append(f"ביטול: סגירה חוזרת {_over(not up, cancel)}" + (f", {what}" if what else "") + f"{away}.")
-            cites.append(f"{side}.cancel")
-        out.append({"part": side, "signal": side, "text": "\n".join(lines), "cites": cites, "title": PARTS[side]})
+        else:
+            then = ""
+        text = f"{start}; {then}." if then else f"{start}."
+        out.append({"part": side, "signal": side, "text": text, "cites": cites, "title": PARTS[side]})
     return out
 
 
@@ -493,7 +470,7 @@ def check_parts(raw: dict, facts: dict[str, dict], rules: dict[str, Any],
 def write(analysis: Analysis, llm: LLM, *, rules: dict[str, Any] | None = None, name: str | None = None,
           now=lambda: datetime.now(timezone.utc)) -> dict[str, Any]:
     """The written analysis: sections in display order, what was dropped, and the usage.
-    The model writes the headline and up to two optional sections; the program adds the
+    The model writes the headline and up to one optional section; the program adds the
     levels line and the two scenarios."""
     rules = rules or load_rules()
     started = time.monotonic()
@@ -531,7 +508,7 @@ def write(analysis: Analysis, llm: LLM, *, rules: dict[str, Any] | None = None, 
 
 
 # ------------------------------------------------------------------ the message
-DISCLAIMER = "אין באמור ייעוץ השקעות. כל הרמות מחושבות ממחירי עבר, והן אינן תחזית."
+DISCLAIMER = "לא ייעוץ השקעות. הרמות ממחירי עבר, לא תחזית."
 
 
 def _day(day: str) -> str:
@@ -546,11 +523,14 @@ def telegram_html(written: dict[str, Any]) -> str:
     """The message (Telegram HTML: every text escaped; only <b> and <i> are ours). Too long
     for one message: optional sections go, last first (never cut in the middle of a tag).
     Review round 3: the company's name in the header, a blank line between sections, and
-    only the headline's lead in bold (a whole bold headline was two or three bold lines)."""
+    only the headline's lead in bold (a whole bold headline was two or three bold lines).
+    Owner, 2026-09-29 ("shorter"): the levels line is not shown (the scenarios name the same
+    levels; it stays in `parts`, so the chart still draws it), nor the note on what was left
+    out (kept in the archived analysis)."""
     from .chart import _company
 
     ticker = written["symbol"].split(":")[-1]
-    parts = list(written["parts"])
+    parts = [p for p in written["parts"] if p["part"] != "levels"]
     close, change = written.get("close"), written.get("change_1d_pct")
     quote = ""
     if isinstance(close, (int, float)):
@@ -571,9 +551,6 @@ def telegram_html(written: dict[str, Any]) -> str:
             else:
                 lines.append(f"{light}\u200f <b>{html.escape(part['title'])}:</b> {text}".strip())
         lines.append("")
-        if written["omitted"]:
-            names = ", ".join(PARTS[n] for n in written["omitted"])
-            lines += [html.escape(f"(הושמט: {names}. הטקסט לא עבר את הבדיקה מול הנתונים.)"), ""]
         lines.append(f"<i>{html.escape(DISCLAIMER)}</i>")
         message = "\n".join(lines)
         optional = [p for p in parts if p["part"] not in REQUIRED and p["part"] not in SCENARIOS

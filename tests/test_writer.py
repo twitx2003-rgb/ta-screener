@@ -105,7 +105,7 @@ def test_a_rejected_or_missing_section_gets_one_retry_with_the_reasons():
                _parts(trend=GOOD["trend"], headline="שוב 555.", volume="הנפח יציב.")]
     llm = SyntheticLLM(lambda s, u, schema: answers.pop(0))
     written = write(_analysis(), llm, rules=RULES)
-    assert [p["part"] for p in written["parts"]] == ["headline", "trend", "volume"]
+    assert [p["part"] for p in written["parts"]] == ["headline", "trend"]       # one optional section
     assert written["parts"][0]["text"] == GOOD["headline"]          # the first good one stays
     assert not written["omitted"] and len(written["usage"]) == 2
     retry = llm.calls[1].split("ONLY these")[1]
@@ -118,7 +118,7 @@ def test_what_fails_twice_is_left_out_and_the_message_says_so():
     written = write(_analysis(), SyntheticLLM(lambda s, u, schema: bad), rules=RULES)
     assert written["omitted"] == ["headline"]
     message = telegram_html(written)
-    assert "הושמט: בקצרה" in message and "אין באמור ייעוץ השקעות" in message and "לקנות" not in message
+    assert "הושמט" not in message and "לא ייעוץ השקעות" in message and "לקנות" not in message
     good = write(_analysis(), SyntheticLLM(lambda s, u, schema: _parts(**GOOD)), rules=RULES, name="Test Corp.")
     lines = telegram_html(good).split("\n")
     assert lines[0] == "<b>📊 ניתוח טכני · TEST · Test</b>" and lines[1] == "סגירה 104.20 · 20/03/2026"
@@ -140,23 +140,17 @@ def test_the_scenarios_are_written_by_the_program_from_the_facts():
              "down.no_next": fact("מתחתיו אין רמות מהשנה האחרונה"), "down.cancel": fact(100.5),
              "down.cancel_what": fact("הקצה התחתון של ההתנגדות הקרובה"), "down.risk_pct": fact(1.5)}
     up, down = scenario_parts(facts)
-    # three short lines, each distance with its base (review round 3: "רמת הכניסה" read as
-    # a trade entry, and the bases were unnamed)
-    assert up["text"] == ("סגירה מעל 110.00, הקצה העליון של ההתנגדות הקרובה (5.6% מעל הסגירה).\n"
-                          "הרמה הבאה: התנגדות בין 118.00 ל-120.00 (7.3% מעל רמת ההפעלה).\n"
-                          "ביטול: סגירה חוזרת אל תוך האזור, מתחת ל-108.50 (1.4% מתחת לרמת ההפעלה).")
-    assert down["text"] == ("סגירה מתחת ל-99.00, השפל השנתי (5.0% מתחת לסגירה).\n"
-                            "מתחתיו אין רמות מהשנה האחרונה.\n"
-                            "ביטול: סגירה חוזרת מעל 100.50, הקצה התחתון של ההתנגדות הקרובה (1.5% מעל רמת ההפעלה).")
+    # one short line each (owner, 2026-09-29: shorter): what starts it, the next level
+    assert up["text"] == "סגירה מעל 110.00; הרמה הבאה: התנגדות בין 118.00 ל-120.00."
+    assert down["text"] == "סגירה מתחת ל-99.00; מתחתיו אין רמות מהשנה האחרונה."
+    assert "up.cancel" not in up["cites"]
     assert (up["signal"], down["signal"]) == ("up", "down") and "up.trigger" in up["cites"]
     assert "רמת הכניסה" not in up["text"] + down["text"]
     at_high = scenario_parts({"up.no_next": fact("המחיר בשיא השנתי; מעליו אין רמות מהשנה האחרונה")})
     assert [p["part"] for p in at_high] == ["up"] and at_high[0]["text"].endswith("האחרונה.")
     held = scenario_parts({"up.hold": fact(49.60), "up.hold_pattern": fact("משולש עולה"), "up.hold_pct": fact(1.2),
                            "up.next": fact(52.0), "up.next_what": fact("השיא השנתי"), "up.next_pct": fact(1.5)})
-    assert held[0]["text"] == ("הפריצה נשמרת כל עוד המחיר נסגר מעל 49.60, קו הפריצה של תבנית משולש עולה "
-                               "(1.2% מתחת לסגירה).\nהרמה הבאה: השיא השנתי, 52.00 (1.5% מעל הסגירה).\n"
-                               "סגירה מתחת ל-49.60 מחזירה את המחיר אל תוך התבנית.")
+    assert held[0]["text"] == "הפריצה נשמרת כל עוד המחיר נסגר מעל 49.60; הרמה הבאה: השיא השנתי, 52.00."
 
 
 def test_the_levels_line_is_written_by_the_program():
@@ -177,7 +171,7 @@ def test_the_levels_line_is_written_by_the_program():
     assert levels_part(facts)[0]["text"].startswith("מעל הסגירה אין התנגדות מהשנה האחרונה.")
 
 
-def test_at_most_two_optional_sections_and_the_ones_over_are_not_retried():
+def test_at_most_one_optional_section_and_the_ones_over_are_not_retried():
     answer = _parts(headline=GOOD["headline"], volume="הנפח יציב.")
     answer["parts"][1:1] = [
         {"part": "trend", "signal": "green", "text": "סדר הממוצעים שורי.", "cites": ["ma.stack"]},
@@ -186,7 +180,7 @@ def test_at_most_two_optional_sections_and_the_ones_over_are_not_retried():
     llm = SyntheticLLM(lambda s, u, schema: answer)
     written = write(_analysis(), llm, rules=RULES)
     optional = [p["part"] for p in written["parts"] if p["part"] not in ("headline", "levels", "up", "down")]
-    assert optional == ["trend", "fibonacci"] and not written["omitted"]
+    assert optional == ["trend"] and not written["omitted"]
     assert {d["reason"] for d in written["dropped"]} == {"more optional sections than allowed"}
     assert len(llm.calls) == 1                         # nothing failed a check: no retry
 
@@ -197,7 +191,8 @@ def test_the_message_is_escaped_and_fits_one_telegram_message():
     message = telegram_html(written)
     assert len(message) <= 4096 and "&lt;b&gt;" in message
     kept = [k for k in PARTS if f"<b>{PARTS[k]}:</b>" in message]
-    assert {"levels", "up", "down"} <= set(kept) and "momentum" not in kept    # the scenarios stay
+    assert {"up", "down"} <= set(kept) and "momentum" not in kept    # the scenarios stay
+    assert "levels" not in kept                          # the scenarios name the same levels
 
 
 def test_the_prompt_carries_the_knowledge_and_its_sources():
