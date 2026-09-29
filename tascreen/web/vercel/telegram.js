@@ -57,7 +57,8 @@ async function handle(req, env) {
   if (!same((req.headers || {})["x-telegram-bot-api-secret-token"], webhookSecret(token))) return "bad secret";
   const message = (req.body && req.body.message) || {};
   const chat = String((message.chat || {}).id), from = (message.from || {});
-  const text = String(message.text || "").trim();
+  // direction marks a Hebrew keyboard (or a copied line) puts around a command or symbol
+  const text = String(message.text || "").replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "").trim();
   if (group && chat === group) {
     if (from.is_bot) return "group: a bot";
     if (COMMAND.test(text)) {

@@ -37,7 +37,7 @@ async function run(name, req) { calls = []; return {name, outcome: await fn.hand
   out.push(await run("member asks", {method: "POST", headers: good, body: update(" $amd ", -555, 7)}));
   out.push(await run("members talk", {method: "POST", headers: good, body: update("OK", -555, 7)}));
   out.push(await run("group help", {method: "POST", headers: good,
-                                    body: update("/start@ta_screener_alert_bot", -555, 7)}));
+                                    body: update("\u200E/start@ta_screener_alert_bot\u200E", -555, 7)}));
   out.push(await run("a bot in the group", {method: "POST", headers: good,
     body: {message: {chat: {id: -555}, from: {id: 9, is_bot: true}, text: "$NVDA"}}}));
   out.push(await run("get", {method: "GET", headers: good, body: update("NVDA")}));
