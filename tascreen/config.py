@@ -357,8 +357,8 @@ class ResearchSettings:
     def __post_init__(self):
         for name in ("shortlist", "max_picks", "timeout_s"):
             object.__setattr__(self, name, int(getattr(self, name)))
-        if not 1 <= self.max_picks <= self.shortlist <= 15:
-            raise ConfigError("research: need 1 <= max_picks <= shortlist <= 15")
+        if not 1 <= self.max_picks <= self.shortlist <= 25:
+            raise ConfigError("research: need 1 <= max_picks <= shortlist <= 25")
         if self.effort not in ("low", "medium", "high", "xhigh", "max"):
             raise ConfigError("research.effort must be low, medium, high, xhigh or max")
         if self.timeout_s < 60:

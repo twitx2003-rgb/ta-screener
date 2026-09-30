@@ -762,7 +762,7 @@ def research_dry(settings) -> int:
     rates = alerts.hit_rates(store.read_ledger(), settings.outcomes.min_cases)
     breakouts = alerts.bullish_breakouts(view, store.read_bars, rates)
     verge = [{**v, "hit_rate": rates.get(v["pattern"])}
-             for v in alerts.on_the_verge(view, settings.alerts.verge_pct)]
+             for v in alerts.on_the_verge(view, settings.alerts.watch_pct)]
     result = _research_runner(settings, store, view)(breakouts, verge)
     bot = notify.from_environment()
     if bot is not None and result["status"] in ("picked", "none"):

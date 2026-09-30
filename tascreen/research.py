@@ -94,7 +94,8 @@ def score(c: dict[str, Any], stock: dict[str, Any], day: date, verge_pct: float)
     return round(s, 2)
 
 
-SHORTLIST_PER_PATTERN = 2    # variety (owner, 2026-09-28): one pattern never fills the shortlist
+SHORTLIST_PER_PATTERN = 4    # variety (owner, 2026-09-28): one pattern never fills the shortlist
+PICKS_PER_PATTERN = 2        # ...nor the picks (it was 1 of 3; owner, 2026-09-30: up to ten picks)
 
 
 def shortlist(cands: list[dict], stocks: dict[str, dict], day: date, verge_pct: float, n: int,
@@ -252,19 +253,20 @@ def run_team(dossiers: list[dict], llm, lessons: str = "", max_picks: int = 3) -
                              user=_dumps({**base, "verdicts": by_symbol}), schema=_chief_schema())
     picks, dropped = [], []
     dossier_of = {d["symbol"]: d for d in dossiers}
-    patterns: set[str] = set()
+    per_pattern: dict[str, int] = {}
     for p in answer.get("picks") or []:
         if not isinstance(p, dict) or p.get("symbol") not in shortlist_symbols:
             dropped.append("not in the shortlist")
             continue
-        if any(q["symbol"] == p["symbol"] for q in picks) or dossier_of[p["symbol"]]["pattern"] in patterns:
-            continue                            # variety: one pick per pattern, the chief's first
+        pattern = dossier_of[p["symbol"]]["pattern"]
+        if any(q["symbol"] == p["symbol"] for q in picks) or per_pattern.get(pattern, 0) >= PICKS_PER_PATTERN:
+            continue                            # variety: two picks per pattern, the chief's first
         allowed = _numbers(_dumps(dossier_of[p["symbol"]]) + _dumps(by_symbol[p["symbol"]]))
         problems = [text_problem(str(p.get(k, "")), allowed) for k in ("why_he", "cancels_he", "watch_he")]
         if any(problems):
             dropped.append(next(x for x in problems if x))
             continue
-        patterns.add(dossier_of[p["symbol"]]["pattern"])
+        per_pattern[pattern] = per_pattern.get(pattern, 0) + 1
         picks.append({"symbol": p["symbol"], "conviction": int(p.get("conviction") or 0),
                       "why_he": p["why_he"].strip(), "cancels_he": p["cancels_he"].strip(),
                       "watch_he": p["watch_he"].strip(),
@@ -358,7 +360,9 @@ def evening_report(store: Store, view: ScanView, cfg, *, bot: Any, min_cases: in
         return {"status": "already sent"}
     rates = alerts.hit_rates(store.read_ledger(), min_cases)
     breakouts = alerts.bullish_breakouts(view, store.read_bars, rates)
-    verge = [{**v, "hit_rate": rates.get(v["pattern"])} for v in alerts.on_the_verge(view, cfg.verge_pct)]
+    # the setups: forming patterns up to watch_pct below their line (owner, 2026-09-30: "a
+    # really good setup"; verge_pct alone gave one candidate)
+    verge = [{**v, "hit_rate": rates.get(v["pattern"])} for v in alerts.on_the_verge(view, cfg.watch_pct)]
     try:
         result = run(breakouts, verge)
     except Exception as exc:                        # UsageLimit, ProviderError, a bug: never a lost day

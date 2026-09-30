@@ -34,7 +34,8 @@ Talk to the owner in simple Hebrew. Code, comments and commits stay in English.
 3. **Three specialists, one call each over the whole shortlist:** `pattern-auditor`
    (is it the textbook pattern, breakout quality), `context-analyst` (market, sector,
    news, earnings), `statistician` (what similar setups did in our ledger).
-4. **`chief-strategist`:** at most 3 picks, or none, one per pattern; for each, why,
+4. **`chief-strategist`:** up to 10 picks (owner, 2026-09-30; it was 3), or none, at most
+   two per pattern; the candidates include setups up to `watch_pct` (5%) below the line; for each, why,
    what cancels it and what to watch next session.
 5. **Evening message:** only the picks (chart, reasons, the full analysis via
    `analyst.yml`), and "נבדקו N, נבחרו K". No pick: a short note. Research failed:

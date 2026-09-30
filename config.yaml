@@ -90,12 +90,13 @@ alerts:
                              # as TradingView allows; get-ohlcv, one call a stock)
   far_every: 3               # stocks beyond verge_pct from their line: every 3rd pass only
   live_max_symbols: 120      # stocks watched, at most, nearest to their line first
-  # Fewer, more meaningful and varied breakouts (owner, 2026-09-28: "mostly wedges"). Only
-  # patterns whose past bullish breakouts in our ledger reached the target at least this
-  # often (failed and expired count against; 2026-09 ledger: double, triple and head and
-  # shoulders bottoms, rectangles, ascending triangles pass; wedges, flags, cups do not).
-  # The live watch and the evening research team both use it.
-  min_success_pct: 35
+  # Meaningful and varied breakouts (owner, 2026-09-28: "mostly wedges"). Only patterns
+  # whose past bullish breakouts in our ledger reached the target at least this often
+  # (failed and expired count against). 35 left five patterns and, with the $5B floor, no
+  # alert at all (2026-09-29: one candidate); at 25 only flags, pennants and high tight
+  # flags stay out (owner, 2026-09-30: "no breakout messages at all"). The live watch and
+  # the evening research team both use it; at most live_per_pattern of one a session.
+  min_success_pct: 25
   live_min_above_pct: 0.5    # in the session: the price this far above the line, not a touch
   live_per_pattern: 2        # alerts of one pattern a session, at most
   # Big moves before the open (owner, 2026-09-28): at 07:30, 08:30 and 09:15 New York
@@ -169,8 +170,11 @@ research:
   # and send only the best, at most max_picks (or none). They learn weekly from how their
   # picks ended. If the research fails, the regular report goes out with a note.
   enabled: true
-  shortlist: 8               # candidates researched in depth (by a transparent score)
-  max_picks: 3
+  # owner, 2026-09-30: "up to ten stocks that broke out or have a really good setup" (it
+  # was 3 of 8); the candidates are the day's breakouts and the setups up to watch_pct
+  # below their line, at most 4 of one pattern in the shortlist and 2 in the picks
+  shortlist: 20              # candidates researched in depth (by a transparent score)
+  max_picks: 10
   model: "sonnet"
   effort: "high"
   timeout_s: 900

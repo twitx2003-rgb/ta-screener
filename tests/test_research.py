@@ -80,14 +80,17 @@ def test_variety_in_the_shortlist_and_the_picks_and_only_proven_patterns(tmp_pat
               "hit_rate": 60.0} for i in range(4)]
     cands.append({"symbol": "NYSE:DB", "pattern": "double_bottom", "kind": "verge", "gap_pct": 1.5,
                   "hit_rate": 50.0})
-    short = research.shortlist(cands, {}, date(2026, 1, 5), 2.0, 8)
+    short = research.shortlist(cands, {}, date(2026, 1, 5), 2.0, 8, per_pattern=2)
     assert [c["symbol"] for c in short] == ["NYSE:W0", "NYSE:W1", "NYSE:DB"]
+    assert len(research.shortlist(cands, {}, date(2026, 1, 5), 2.0, 8)) == 5          # four of one pattern
     dossiers = [{"symbol": s, "pattern": p} for s, p in
-                (("NYSE:A", "double_bottom"), ("NYSE:B", "double_bottom"), ("NYSE:C", "rectangle"))]
+                (("NYSE:A", "double_bottom"), ("NYSE:B", "double_bottom"), ("NYSE:D", "double_bottom"),
+                 ("NYSE:C", "rectangle"))]
     plain = {"conviction": 7, "why_he": "מגמה עולה ונפח גבוה.", "cancels_he": "אם הקו לא נפרץ.",
              "watch_he": "סגירה מעל הקו."}
-    out = research.run_team(dossiers, team(lambda ds: [{"symbol": d["symbol"], **plain} for d in ds]))
-    assert [p["symbol"] for p in out["picks"]] == ["NYSE:A", "NYSE:C"]     # one pick per pattern
+    out = research.run_team(dossiers, team(lambda ds: [{"symbol": d["symbol"], **plain} for d in ds]),
+                            max_picks=10)
+    assert [p["symbol"] for p in out["picks"]] == ["NYSE:A", "NYSE:B", "NYSE:C"]   # two picks per pattern
     settings, store, view, verge = _view(tmp_path)
     result = research.research(view, store, [], verge, llm=team(good_pick), verge_pct=10.0, shortlist_size=8,
                                max_picks=3, patterns={"rectangle"})
