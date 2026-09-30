@@ -13,6 +13,12 @@ Talk to the owner in simple Hebrew. Code, comments and commits stay in English.
   every breakout. Only what passes the research is sent.
 - Candidates: the day's confirmed bullish breakouts and the forming patterns on the verge
   (`alerts.bullish_breakouts`, `alerts.on_the_verge`).
+- **The owner's own watchlist (2026-09-30):** `watchlist.id` in config.yaml (an opaque TradingView
+  id; the symbols live only in the private state repo, `data/watchlist.json`, read once a
+  trading day by the live watch). Its stocks are priced every pass; any of their patterns
+  crossing a line (no record gate), and a move of `watchlist.move_pct` (4%) from the last
+  close, then each further 4%, go to the owner's PRIVATE chat (`notify.owner_from_environment`),
+  never to the group; X news about them that the group did not get goes there too.
 - **Live crossings during the session:** immediate, no research, but picked in code
   (owner, 2026-09-28): only proven patterns (the same `proven_patterns` gate), the price
   at least `live_min_above_pct` (0.5%) above the line, at most `live_per_pattern` (2)

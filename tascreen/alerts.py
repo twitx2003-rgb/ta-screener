@@ -349,6 +349,15 @@ def bar_age_minutes(payload: dict[str, Any], now: datetime) -> float | None:
     return round((now - opened).total_seconds() / 60, 1)
 
 
+def previous_close(payload: dict[str, Any]) -> float | None:
+    """The bar before the newest one's close (with a price of today, the last close)."""
+    bars = pick(payload, ["bars"], context=f"{OHLCV_TOOL} last close") or []
+    if len(bars) < 2:
+        return None
+    close = float(pick(bars[-2], ["c"], context=OHLCV_TOOL))
+    return close if math.isfinite(close) and close > 0 else None
+
+
 def live_price(payload: dict[str, Any], session_day: date, market_tz: str) -> float | None:
     """The price in a get-ohlcv answer: the newest bar's close, if that bar is today's
     session (before the open the newest bar is yesterday's: no price)."""
@@ -370,6 +379,7 @@ async def fetch_live_prices(session: Any, symbols: list[str], session_day: date,
     delayed TradingView's data is."""
     gate = asyncio.Semaphore(concurrency)
     prices: dict[str, float] = {}
+    closes: dict[str, float] = {}
     seconds: list[float] = []
     failed = 0
     delay = None
@@ -395,9 +405,12 @@ async def fetch_live_prices(session: Any, symbols: list[str], session_day: date,
             seconds.append(time.monotonic() - started)
             if price is not None:
                 prices[symbol] = price
+                close = previous_close(payload)
+                if close is not None:
+                    closes[symbol] = close
 
     await asyncio.gather(*(one(s) for s in symbols))
-    return {"prices": prices, "seconds": seconds, "failed": failed, "delay_min": delay}
+    return {"prices": prices, "closes": closes, "seconds": seconds, "failed": failed, "delay_min": delay}
 
 
 def live_crossings(view: ScanView, prices: dict[str, float], session_day: date,

@@ -626,6 +626,36 @@ def _market_snapshot(settings, store, day) -> str:
     return "saved"
 
 
+def _saved_holdings(settings) -> list[str]:
+    """The owner's watchlist tickers for the X news (tascreen/watchlist.py): the live
+    watch's file in the private state repo, or the local one; [] when off or unknown."""
+    import os
+
+    from tascreen import explain, watchlist
+
+    if not settings.watchlist.enabled or not settings.watchlist.id:
+        return []
+    kept = watchlist.read(settings.data_dir)
+    if not kept and os.environ.get("STATE_REPO_TOKEN", "").strip():
+        raw = explain._get(f"https://api.github.com/repos/{explain.STATE_REPO}/contents/data/watchlist.json?ref=main",
+                           {"Authorization": f"Bearer {os.environ['STATE_REPO_TOKEN'].strip()}",
+                            "Accept": "application/vnd.github.raw+json", "X-GitHub-Api-Version": "2022-11-28",
+                            "User-Agent": "ta-screener"})
+        try:
+            kept = json.loads(raw or b"{}")
+        except ValueError:
+            kept = {}
+    return watchlist.tickers(list(kept.get("symbols") or [])) if kept.get("id") == settings.watchlist.id else []
+
+
+def _private_sender():
+    """Sends HTML to the owner's private chat, or None without a bot."""
+    from tascreen import notify
+
+    owner = notify.owner_from_environment()
+    return (lambda text: owner.send(text, html=True)) if owner is not None else None
+
+
 def _saved_moves(settings, day) -> dict:
     """The morning digest's index moves: the nightly run's file, from the private state repo
     (the news loop has no bars or scans) or, on this computer, the local one; {} if none."""
@@ -837,8 +867,13 @@ def ci_live(settings, max_minutes: float) -> int:
         return finish("no scan")
     proven = alerts.proven_patterns(store.read_ledger(), settings.outcomes.min_cases, cfg.min_success_pct)
     near, far = alerts.watch_tiers(view, cfg.verge_pct, cfg.watch_pct, cfg.live_max_symbols, proven)
+    client = make_tradingview(settings)
+    holdings = _holdings(settings, store, client, day)      # priced every pass
+    near = near + [s for s in holdings if s not in near]
+    far = [s for s in far if s not in holdings]
+    owner = notify.owner_from_environment() or bot
     summary.update(watched=len(near) + len(far), watched_near=len(near), watched_far=len(far),
-                   data_delay_min=None)
+                   holdings=len(holdings), holding_alerts=0, data_delay_min=None)
     if not near and not far:
         return finish("nothing near a breakout line")
     delays: list[float] = []
@@ -851,7 +886,6 @@ def ci_live(settings, max_minutes: float) -> int:
         sent["watch_started"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         alerts.write_sent(store, day, sent)
         push_token_file(alerts.sent_path(store, day), "live watch started")
-    client = make_tradingview(settings)
     all_seconds: list[float] = []
     index_history: list = []                 # (time, {ticker: price}) for the hourly move
     while True:
@@ -909,12 +943,72 @@ def ci_live(settings, max_minutes: float) -> int:
             alerts.write_sent(store, day, sent)
             push_token_file(alerts.sent_path(store, day), "live alerts sent")
             summary["alerts"] += len(found)
+        if holdings:
+            _holding_alerts(settings, owner, client, store, view, got, holdings, day, sent, summary)
         # TradingView slows down after heavy use: a slow pass stretches the interval
         if got["seconds"] and statistics.median(got["seconds"]) > 5:
             interval = min(interval * 2, 60.0)
         wait = pass_started + interval * 60 - clock.monotonic()
         limit = min(ends, hand_over) - datetime.now(timezone.utc)
         clock.sleep(max(0.0, min(wait, limit.total_seconds())))
+
+
+def _holdings(settings, store, client, day) -> list[str]:
+    """The owner's watchlist symbols (tascreen/watchlist.py): read from TradingView once a
+    trading day and kept in data/watchlist.json; the kept list if TradingView fails."""
+    from tascreen import watchlist
+
+    cfg = settings.watchlist
+    if not cfg.enabled or not cfg.id:
+        return []
+    kept = watchlist.read(store.root)
+    if kept.get("day") == day.isoformat() and kept.get("id") == cfg.id:
+        return list(kept.get("symbols") or [])
+    try:
+        name, symbols = client.with_session(
+            lambda session: watchlist.fetch(session, cfg.id, settings.tradingview.rate_limit_delays))
+    except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("the watchlist was not read: %s", type(exc).__name__)
+        return list(kept.get("symbols") or [])
+    watchlist.write(store.root, {"id": cfg.id, "name": name, "symbols": symbols, "day": day.isoformat()})
+    return symbols
+
+
+def _holding_alerts(settings, owner, client, store, view, got, holdings, day, sent, summary) -> None:
+    """The watchlist's alerts of one pass, to the owner's private chat: any of its patterns
+    crossing a line (not already told to the group), and a move of another move_pct."""
+    from datetime import datetime, timezone
+
+    from tascreen import alerts, watchlist
+    from tascreen.tv.mcp_client import push_token_file
+
+    cfg, tz = settings.alerts, settings.market.timezone
+    mine = {s: p for s, p in got["prices"].items() if s in holdings}
+    if not mine:
+        return
+    told = {**sent.get("live", {}), **sent.get("holding_live", {})}
+    found = alerts.live_crossings(view, mine, day, told, min_above_pct=cfg.live_min_above_pct)
+    changed = False
+    if found:
+        at = datetime.now(timezone.utc)
+        news = _news(settings, [c["symbol"] for c in found], client)
+        owner.send(watchlist.CROSSING_HEAD + "\n" + alerts.live_message(found, at, tz, news), html=True)
+        for c in found:
+            sent.setdefault("holding_live", {})[c["key"]] = {"at": at.isoformat(timespec="seconds"),
+                                                             "price": c["price"], "line": c["line"]}
+        summary["holding_alerts"] += len(found)
+        changed = True
+    moved = sent.setdefault("holding_moves", {})
+    moves = watchlist.new_moves(mine, got.get("closes") or {}, moved, settings.watchlist.move_pct)
+    if moves:
+        owner.send(watchlist.move_message(moves), html=True)
+        for m in moves:
+            moved.setdefault(m["symbol"], {})[m["side"]] = m["level"]
+        summary["holding_alerts"] += len(moves)
+        changed = True
+    if changed:
+        alerts.write_sent(store, day, sent)
+        push_token_file(alerts.sent_path(store, day), "watchlist alerts sent")
 
 
 def _session_move(settings, client, bot, store, day, sent, history, summary) -> None:
@@ -1444,6 +1538,7 @@ def xnews_pass(settings) -> int:
         weekend_min_importance=cfg.weekend_min_importance,
         llm_daily_cap=cfg.claude_daily_cap, llm_min_interval_s=cfg.claude_every_minutes * 60,
         max_per_round=cfg.max_per_round, daily_max=cfg.daily_max, low_balance_usd=cfg.low_balance_usd,
+        holdings=_saved_holdings(settings), send_private=_private_sender(),
         with_replies=cfg.with_replies)
     print("xnews: " + " ".join(f"{k}={v}" for k, v in summary.items()))
     return 0

@@ -18,7 +18,8 @@ def _no_real_messages(monkeypatch, tmp_path_factory):
     import tascreen.notify
     import tascreen.xnews
 
-    for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GH_DISPATCH_TOKEN", "X_API_KEY"):
+    for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_GROUP_ID", "GH_DISPATCH_TOKEN", "X_API_KEY",
+                 "STATE_REPO_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(tascreen.notify, "CREDENTIALS",
                         tmp_path_factory.getbasetemp() / "no-telegram.json")

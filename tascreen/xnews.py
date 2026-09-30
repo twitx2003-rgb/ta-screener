@@ -34,6 +34,7 @@ from typing import Any, Callable
 from .errors import ProviderError
 from .agents import prompt as agent_prompt
 from .analyst.text_rules import banned
+from . import watchlist
 from .fields import pick
 from .llm import UsageLimit
 
@@ -270,10 +271,14 @@ def schema() -> dict:
     }
 
 
-def user_prompt(posts: list[Post], already_sent: list[dict] | None = None) -> str:
-    return json.dumps({"already_sent": already_sent or [],
-                       "posts": [{"post_id": p.id, "author": p.author, "time": p.created_at, "text": p.text}
-                                 for p in posts]}, ensure_ascii=False, indent=1)
+def user_prompt(posts: list[Post], already_sent: list[dict] | None = None,
+                holdings: list[str] | None = None) -> str:
+    data: dict[str, Any] = {"already_sent": already_sent or [],
+                            "posts": [{"post_id": p.id, "author": p.author, "time": p.created_at, "text": p.text}
+                                      for p in posts]}
+    if holdings:
+        data = {"investor_holdings": list(holdings), **data}
+    return json.dumps(data, ensure_ascii=False, indent=1)
 
 
 WEEKEND_NOTE = ("It is the weekend and US markets are closed: rate 4 or 5 only what is dramatic, "
@@ -288,7 +293,7 @@ def is_weekend(now: datetime) -> bool:
 
 
 def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
-           already_sent: list[dict] | None = None,
+           already_sent: list[dict] | None = None, holdings: list[str] | None = None,
            counts: dict[str, int] | None = None) -> tuple[list[tuple[Post, dict]], int]:
     """(the picks at or above `min_importance`, in post order; how many answers were rejected).
     A post marked as the same story as another is folded into it (its account becomes a
@@ -296,7 +301,7 @@ def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
     `counts` gets "merged" and "repeats"."""
     if not posts:
         return [], 0
-    user = (note + "\n\n" if note else "") + user_prompt(posts, already_sent)
+    user = (note + "\n\n" if note else "") + user_prompt(posts, already_sent, holdings)
     answer, _ = llm.complete(system=SYSTEM, user=user, schema=schema())
     by_id = {p.id: p for p in posts}
     picks: dict[str, dict] = {}
@@ -508,6 +513,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
              weekend_min_importance: int = 4,
              llm_daily_cap: int = 45, llm_min_interval_s: int = 1200,
              max_per_round: int = 2, daily_max: int = 12, low_balance_usd: float = 0.0,
+             holdings: list[str] | tuple = (), send_private: Callable[[str], None] | None = None,
              send_photo: Callable[[str, str], None] | None = None,
              fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
              first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
@@ -564,6 +570,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     else:
         summary["read_status"] = "daily cap"
     status = "ok"
+    mine: list[tuple[Post, dict]] = []
     due = (pending and model["calls"] < llm_daily_cap and stamp >= int(model.get("paused_until", 0))
            and stamp - int(model.get("last", 0)) >= llm_min_interval_s)
     if due:
@@ -576,7 +583,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             threshold = max(min_importance, weekend_min_importance) if weekend else min_importance
             picks, summary["rejected"] = triage(
                 [_row_post(r) for r in pending], llm, min(DIGEST_FROM, threshold),
-                WEEKEND_NOTE if weekend else "", already_sent=already, counts=counts)
+                WEEKEND_NOTE if weekend else "", already_sent=already, holdings=list(holdings), counts=counts)
             summary.update(counts)
         except UsageLimit:
             model["paused_until"] = stamp + LIMIT_PAUSE_S
@@ -591,6 +598,9 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             picks, budget, summary["held_back"] = ration(picks, budget, stamp, day, max_per_round=max_per_round,
                                                          daily_max=daily_max)
             chosen = {p.id for p, _ in picks}
+            # news about the owner's watchlist that the group did not get: to the private chat
+            mine = [(p, k) for p, k in every if k["importance"] >= 3 and p.id not in chosen
+                    and holdings and watchlist.mentions(f"{p.text} {k['summary_he']}", list(holdings))]
             day_log = (day_log + [{"at": stamp, "id": p.id, "author": p.author, "url": p.url, "time": p.created_at,
                                    "importance": k["importance"], "summary_he": k["summary_he"],
                                    "analysis_he": k["analysis_he"], "sources": [a for a, _ in k["sources"]],
@@ -603,6 +613,9 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
                 model["paused_until"] = stamp + LIMIT_PAUSE_S
             except ProviderError as exc:
                 summary["explain_error"] = type(exc).__name__
+        if mine and send_private is not None:
+            send_private(watchlist.NEWS_HEAD + "\n\n" + message(mine))
+            summary["holding_news"] = len(mine)
         if picks:
             summary["photos"] = deliver(picks, send, send_photo)
             sent_recent += [{"at": stamp, "author": p.author, "summary_he": k["summary_he"]}

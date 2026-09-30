@@ -91,6 +91,7 @@ save-alerts)
     ls -1t logs/live-*.log 2> /dev/null | tail -n +15 | xargs -r rm --
     git add -- tv_tokens.json logs .gitignore
     if [ -d data/alerts ]; then git add -- data/alerts; fi
+    if [ -f data/watchlist.json ]; then git add -- data/watchlist.json; fi   # the owner's list (private repo)
     git commit -qm "live watch $(date -u +%Y-%m-%dT%H:%MZ): token, alerts and log" || true
     git push -q origin HEAD:main
     echo "state: token, alerts and log saved"

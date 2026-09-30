@@ -14,7 +14,9 @@ downgrades), macro data, the economic calendar and Fed remarks, government actio
 movers), fund flows, positioning and sentiment data, and charts that show one of these.
 Skip jokes, promotions, ads, "good morning", engagement bait, personal opinions with no
 news or data in them, anything not about markets, and repeats of a post already in the
-list.
+list. If the input has `investor_holdings` (tickers the investor holds), always pick a
+post with real news about one of them (earnings, guidance, a deal, a rating change, a
+sharp move and its cause), and rate it at least 3.
 
 The investor wants few messages, picked with tweezers: at most two stories go out a
 round, and about a dozen a day. Most posts are not worth a message, and many rounds

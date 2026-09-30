@@ -188,6 +188,16 @@ class Telegram:
 _caption_of = caption          # the methods' `caption` argument shadows the function
 
 
+def owner_from_environment() -> Telegram | None:
+    """The bot to the owner's private chat (TELEGRAM_CHAT_ID), even where everything else
+    goes to the group: the watchlist's alerts (owner, 2026-09-30: the group must not see it)."""
+    bot = from_environment()
+    chat = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+    if bot is None or not chat or not isinstance(bot, Telegram):
+        return bot                     # no group set up (or a test's bot): the same chat
+    return Telegram(bot.token, chat)
+
+
 def from_environment() -> Telegram | None:
     """The bot from TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID, else the owner's saved file. It
     sends to TELEGRAM_GROUP_ID when that is set (owner, 2026-09-29: everything goes to the

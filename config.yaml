@@ -178,3 +178,13 @@ research:
   model: "sonnet"
   effort: "high"
   timeout_s: 900
+
+watchlist:
+  # The owner's own TradingView watchlist, followed closely (owner, 2026-09-30): priced every
+  # pass of the live watch, any of its stocks' patterns crossing a line, a move of move_pct
+  # from the last close (then each further move_pct), and X news about them; all to the
+  # owner's PRIVATE chat. Only the list's id is here; its symbols stay in the private state
+  # repo (data/watchlist.json), read from TradingView once a trading day.
+  enabled: true
+  id: "170201612"
+  move_pct: 4

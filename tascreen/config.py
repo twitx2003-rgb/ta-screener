@@ -365,6 +365,24 @@ class ResearchSettings:
             raise ConfigError("research.timeout_s must be at least 60")
 
 
+@dataclass(frozen=True)
+class WatchlistSettings:
+    # The owner's own TradingView watchlist, followed closely, alerts to the private chat
+    # (tascreen/watchlist.py; owner, 2026-09-30). Only its opaque id is here: the symbols
+    # stay in the private state repo.
+    enabled: bool = True
+    id: str = ""
+    move_pct: float = 4.0
+
+    def __post_init__(self):
+        object.__setattr__(self, "id", str(self.id or "").strip())
+        object.__setattr__(self, "move_pct", float(self.move_pct))
+        if self.id and not self.id.isdigit():
+            raise ConfigError("watchlist.id must be the watchlist's number")
+        if not 1 <= self.move_pct <= 20:
+            raise ConfigError("watchlist.move_pct must be 1..20")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
@@ -378,6 +396,7 @@ _SECTIONS = {
     "xnews": XNewsSettings,
     "explain": ExplainSettings,
     "research": ResearchSettings,
+    "watchlist": WatchlistSettings,
 }
 
 
@@ -396,6 +415,7 @@ class Settings:
     xnews: XNewsSettings = field(default_factory=XNewsSettings)
     explain: ExplainSettings = field(default_factory=ExplainSettings)
     research: ResearchSettings = field(default_factory=ResearchSettings)
+    watchlist: WatchlistSettings = field(default_factory=WatchlistSettings)
 
     @property
     def data_dir(self) -> Path:
