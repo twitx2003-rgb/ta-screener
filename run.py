@@ -606,7 +606,8 @@ def _evening_alerts(settings, store, target) -> dict:
 
         return research.evening_report(store, view, settings.alerts, bot=bot, min_cases=settings.outcomes.min_cases,
                                        run=_research_runner(settings, store, view), dispatch=github.dispatch,
-                                       can_dispatch=can_dispatch, fallback=regular, live_summary=live)
+                                       can_dispatch=can_dispatch, fallback=regular, live_summary=live,
+                                       recent_days=settings.research.recent_days)
     except ScreenerError as exc:
         log.error("breakout report failed: %s", exc)             # the private log only
         return {"status": "failed", "error": type(exc).__name__}
@@ -744,6 +745,7 @@ def _research_runner(settings, store, view):
                                         settings.alerts.min_success_pct)
         return research.research(view, store, breakouts, verge, llm=llm, verge_pct=settings.alerts.verge_pct,
                                  shortlist_size=cfg.shortlist, max_picks=cfg.max_picks, patterns=proven,
+                                 min_picks=cfg.min_picks,
                                  news_of=lambda symbols: _news(settings, symbols),
                                  market=_market_moves(settings), analyse=analyse)
     return run

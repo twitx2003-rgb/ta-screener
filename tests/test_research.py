@@ -168,3 +168,34 @@ def test_the_weekly_review_learns_from_outcomes(tmp_path):
     assert not research.weekly_due(store, now)
     text = research.weekly_message(review)
     assert text.startswith("📚 <b>סיכום שבועי של צוות המחקר</b>") and "הבחירות עדיין מעטות." in text
+
+
+def test_below_the_minimum_the_best_scored_rest_fills_in():
+    dossiers = [{"symbol": s, "pattern": p, "kind": "breakout",
+                 "pattern_detail": {"line": 20.0, "invalidation": 18.5}} for s, p in
+                (("NYSE:A", "double_bottom"), ("NYSE:B", "rectangle"), ("NYSE:C", "flag"))]
+    out = research.run_team(dossiers, team(lambda ds: []), max_picks=10, min_picks=2)
+    assert [p["symbol"] for p in out["picks"]] == ["NYSE:A", "NYSE:B"] and all(p["filled"] for p in out["picks"])
+    assert "18.50" in out["picks"][0]["cancels_he"] and "8/10" in out["picks"][0]["why_he"]
+    weak = research.run_team(dossiers, team(lambda ds: [], verdict_score=4), max_picks=10, min_picks=2)
+    assert weak["picks"] == []                                   # below FILL_MIN_SCORE: nothing filled
+    none = research.run_team(dossiers, team(lambda ds: []), max_picks=10)
+    assert none["picks"] == []                                   # no minimum: the chief's word stands
+
+
+def test_quality_measures_the_breakout_bar_and_its_follow_through():
+    days = pd.date_range("2026-01-01", periods=80, freq="B", tz="UTC")
+    close = [10.0] * 70 + [10.5, 11.0, 11.2, 11.1, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8]
+    bars = pd.DataFrame({"timestamp": days, "open": close, "high": [c + 0.2 for c in close],
+                         "low": [c - 0.6 for c in close], "close": close, "volume": [1000.0] * 70 + [3000.0] * 10})
+    brk = str(days[70].date())
+    c = {"kind": "breakout", "breakout": 10.2, "record": {"start": str(days[60].date()), "end": str(days[69].date()),
+                                                           "breakout_date": brk, "height": 1.0}}
+    q = research.quality(c, bars)
+    assert q["pattern_sessions"] == 10 and q["height_pct"] == 9.8
+    assert q["breakout_volume_vs_50d"] == 3.0 and q["breakout_close_in_range"] == 0.75
+    assert q["sessions_since_breakout"] == 9 and q["closes_above_line_since"] == "10/10"
+    assert research.quality(c, None) == {}
+    assert research.pick_caption(1, {"candidate": {"kind": "breakout", "symbol": "NYSE:A", "name": "A",
+                                                   "breakout": 10.2, "close": 11.8, "sessions_ago": 3},
+                                     "why_he": "x", "cancels_he": "y", "watch_he": "z"}).count("לפני 3 ימי מסחר") == 1

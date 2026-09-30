@@ -350,15 +350,21 @@ class ResearchSettings:
     enabled: bool = True
     shortlist: int = 8
     max_picks: int = 3
+    min_picks: int = 0                 # fewer from the chief: the best-scored rest fills in
+    recent_days: int = 1               # breakouts of this many sessions that still hold
     model: str = "sonnet"
     effort: str = "high"
     timeout_s: int = 900
 
     def __post_init__(self):
-        for name in ("shortlist", "max_picks", "timeout_s"):
+        for name in ("shortlist", "max_picks", "min_picks", "recent_days", "timeout_s"):
             object.__setattr__(self, name, int(getattr(self, name)))
         if not 1 <= self.max_picks <= self.shortlist <= 25:
             raise ConfigError("research: need 1 <= max_picks <= shortlist <= 25")
+        if not 0 <= self.min_picks <= self.max_picks:
+            raise ConfigError("research.min_picks must be 0..max_picks")
+        if not 1 <= self.recent_days <= 5:
+            raise ConfigError("research.recent_days must be 1..5")
         if self.effort not in ("low", "medium", "high", "xhigh", "max"):
             raise ConfigError("research.effort must be low, medium, high, xhigh or max")
         if self.timeout_s < 60:

@@ -105,23 +105,30 @@ def _finite(x: Any) -> bool:
 
 
 def bullish_breakouts(view: ScanView, bars_of: Callable[[str], pd.DataFrame | None],
-                      rates: dict[str, float]) -> list[dict[str, Any]]:
-    """The session's confirmed bullish chart-pattern breakouts, strongest first."""
+                      rates: dict[str, float], days: int = 1) -> list[dict[str, Any]]:
+    """The confirmed bullish chart-pattern breakouts of the last `days` sessions (1 = the
+    scan's session only), strongest first. An older one counts only while the session's
+    close is still above its breakout price (owner, 2026-09-30: a weak week left one
+    breakout a day); `sessions_ago` says how old it is."""
     d = view.detections
-    rows = d.loc[(d["family"] == "chart") & (d["status"] == "breakout")
-                 & (d["direction"] == "bullish") & (d["event_day"] == view.day)]
+    rows = d.loc[(d["family"] == "chart") & (d["status"] == "breakout") & (d["direction"] == "bullish")]
+    rows = rows.loc[(rows["event_day"] == view.day) if days <= 1 else (rows["age"] < days)]
     stocks = _stocks(view)
     out = []
     for row in rows.to_dict("records"):
         stock = stocks.get(row["symbol"], {})
+        ago = 0 if row["event_day"] == view.day else int(row.get("age") or 0)
+        if ago and not (_finite(stock.get("close")) and _finite(row["breakout_price"])
+                        and float(stock["close"]) > float(row["breakout_price"])):
+            continue                            # an older breakout that fell back below its line
         record = detection_record(row)
         out.append({"symbol": row["symbol"], "pattern": row["pattern"], "name": row["name_he"],
                     "breakout": row["breakout_price"], "target": row["target"],
                     "invalidation": invalidation(record, bars_of(row["symbol"])),
                     "close": stock.get("close", math.nan),
                     "rel_volume": stock.get("rel_volume", math.nan),
-                    "hit_rate": rates.get(row["pattern"]), "record": record})
-    out.sort(key=lambda b: (-(b["rel_volume"] if _finite(b["rel_volume"]) else -1.0),
+                    "hit_rate": rates.get(row["pattern"]), "record": record, "sessions_ago": ago})
+    out.sort(key=lambda b: (b["sessions_ago"], -(b["rel_volume"] if _finite(b["rel_volume"]) else -1.0),
                             -(b["hit_rate"] if b["hit_rate"] is not None else -1.0), b["symbol"]))
     return out
 

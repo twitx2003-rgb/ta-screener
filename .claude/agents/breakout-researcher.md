@@ -17,14 +17,19 @@ candidate is weak.
 2. **The pattern, re-measured from the bars:** do what the `pattern-verifier` agent
    does. Thresholds come from `tascreen/patterns/rules.yaml`, never from memory.
 3. **Breakout quality:** the close beyond the line, volume against its 50-day average,
-   the distance already travelled toward the target.
+   the distance already travelled toward the target. Measure what the evening team's
+   `quality()` in `tascreen/research.py` measures: the trend into the pattern (60
+   sessions), where the breakout bar closed in its range and its body, a gap over the
+   line, sessions since the breakout and whether every close since held above the line,
+   the pattern's height, and the room to the 52-week high against the target.
 4. **The analyst's facts:** `run.py --analyze <SYMBOL> --no-llm` writes the zones, trend,
    indicators and levels to `logs/analyses/`.
 5. **Context:** SPY and the sector today, headlines (`mcp-tv-get-news`), days to earnings.
 6. **History:** the pattern's hit rate and the failures in `data/outcomes/ledger.parquet`
    (read with pandas). The rate is our ledger's, not Bulkowski's.
 
-For "the best of today", list the newest scan's breakouts and verge candidates first,
+For "the best of today", list the newest scan's breakouts (also those of the last three
+sessions that still close above their line) and verge candidates first,
 rank them by the steps above, and research the top few in depth.
 
 ## The answer (Hebrew, every line right-aligned)

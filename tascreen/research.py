@@ -139,6 +139,61 @@ def history(ledger: pd.DataFrame | None, pattern: str, reward_pct: float | None)
     return out
 
 
+PRIOR_TREND_SESSIONS = 60   # the move into the pattern, measured over this many sessions
+
+
+def quality(c: dict[str, Any], bars: pd.DataFrame | None) -> dict[str, Any]:
+    """Plain measurements of the pattern and its breakout day from the daily bars, for the
+    pattern auditor (owner, 2026-09-30: a sharper eye on patterns and breakouts). Bulkowski's
+    points: the trend into the pattern, the breakout bar's strength (close near the high, a
+    gap, volume against its 50-session average), follow-through since, and the pattern's
+    size. Only numbers, never a verdict; {} without bars."""
+    if bars is None or bars.empty or not {"high", "low", "close", "volume"} <= set(bars.columns):
+        return {}
+    b = bars.sort_values("timestamp").reset_index(drop=True)
+    days = b["timestamp"].dt.strftime("%Y-%m-%d")
+    rec = c.get("record") or {}
+    out: dict[str, Any] = {}
+    start, end = str(rec.get("start", ""))[:10], str(rec.get("end", ""))[:10]
+    if start and end:
+        inside = b.loc[(days >= start) & (days <= end)]
+        out["pattern_sessions"] = len(inside)
+        first = int(inside.index[0]) if len(inside) else None
+        if first is not None and first >= PRIOR_TREND_SESSIONS:
+            out["prior_trend_pct"] = _num((b["close"].iloc[first] / b["close"].iloc[first - PRIOR_TREND_SESSIONS] - 1)
+                                          * 100, 1)
+    line = c.get("breakout") if c.get("kind") == "breakout" else c.get("line")
+    if _finite(rec.get("height")) and _finite(line) and float(line) > 0:
+        out["height_pct"] = _num(float(rec["height"]) / float(line) * 100, 1)
+    close = float(b["close"].iloc[-1])
+    year = b.tail(252)
+    out["room_to_52w_high_pct"] = _num((float(year["high"].max()) / close - 1) * 100, 1)
+    if c.get("kind") != "breakout":
+        return out
+    when = str(rec.get("breakout_date", ""))[:10]
+    at = b.index[days == when]
+    if not len(at):
+        return out
+    i = int(at[0])
+    bar = b.iloc[i]
+    span = float(bar["high"]) - float(bar["low"])
+    if span > 0:
+        out["breakout_close_in_range"] = _num((float(bar["close"]) - float(bar["low"])) / span, 2)
+        out["breakout_body_pct_of_range"] = _num(abs(float(bar["close"]) - float(bar["open"])) / span * 100, 0)             if "open" in b.columns else None
+    if i >= 1:
+        out["breakout_gap_pct"] = _num((float(bar.get("open", math.nan)) / float(b["close"].iloc[i - 1]) - 1) * 100, 1)             if "open" in b.columns else None
+    if i >= 50:
+        avg = float(b["volume"].iloc[i - 50:i].mean())
+        out["breakout_volume_vs_50d"] = _num(float(bar["volume"]) / avg, 2) if avg > 0 else None
+    since = b.iloc[i:]
+    out["sessions_since_breakout"] = len(since) - 1
+    if len(since) > 1 and _finite(line):
+        out["closes_above_line_since"] = f"{int((since['close'] > float(line)).sum())}/{len(since)}"
+        out["follow_through_pct"] = _num((close / float(bar["close"]) - 1) * 100, 1)
+        out["max_gain_since_pct"] = _num((float(since["high"].max()) / float(line) - 1) * 100, 1)
+    return out
+
+
 def _compact_facts(analysis) -> dict[str, Any]:
     return {k: v.get("value") for k, v in (analysis.facts or {}).items() if isinstance(v, dict)}
 
@@ -172,7 +227,9 @@ def dossier(c: dict[str, Any], view: ScanView, stocks: dict[str, dict], ledger: 
                            if c["kind"] == "breakout" and _finite(line) and close else None,
                            "gap_below_line_pct": _num(c.get("gap_pct"), 1),
                            "start": str(rec.get("start", ""))[:10], "end": str(rec.get("end", ""))[:10],
-                           "volume_trend": rec.get("volume_trend"), "checks": checks},
+                           "volume_trend": rec.get("volume_trend"), "checks": checks,
+                           "sessions_ago": c.get("sessions_ago", 0)},
+        "quality": quality(c, bars),
         "stock": {k: (_num(stock.get(k)) if k not in ("above_sma50", "above_sma150", "sector", "industry")
                       else stock.get(k))
                   for k in ("change_1d_pct", "change_5d_pct", "change_20d_pct", "above_sma50", "above_sma150",
@@ -240,8 +297,10 @@ def text_problem(text: str, allowed: list[float]) -> str | None:
     return None
 
 
-def run_team(dossiers: list[dict], llm, lessons: str = "", max_picks: int = 3) -> dict[str, Any]:
-    """The specialists' verdicts and the chief's checked picks."""
+def run_team(dossiers: list[dict], llm, lessons: str = "", max_picks: int = 3,
+             min_picks: int = 0) -> dict[str, Any]:
+    """The specialists' verdicts and the chief's checked picks; below `min_picks`, the
+    best-scored rest of the shortlist fills in (see fill_picks)."""
     shortlist_symbols = {d["symbol"] for d in dossiers}
     base = {"lessons": lessons or "none yet", "dossiers": dossiers}
     verdicts: dict[str, dict[str, dict]] = {}
@@ -251,7 +310,8 @@ def run_team(dossiers: list[dict], llm, lessons: str = "", max_picks: int = 3) -
                           if isinstance(v, dict) and v.get("symbol") in shortlist_symbols}
     by_symbol = {s: {role: verdicts[role].get(s) for role in SPECIALISTS} for s in shortlist_symbols}
     answer, _ = llm.complete(system=agent_prompt("chief-strategist"),
-                             user=_dumps({**base, "verdicts": by_symbol}), schema=_chief_schema())
+                             user=_dumps({**base, "verdicts": by_symbol, "min_picks": min(min_picks, len(dossiers))}),
+                             schema=_chief_schema())
     picks, dropped = [], []
     dossier_of = {d["symbol"]: d for d in dossiers}
     per_pattern: dict[str, int] = {}
@@ -274,14 +334,55 @@ def run_team(dossiers: list[dict], llm, lessons: str = "", max_picks: int = 3) -
                       "scores": {role: (by_symbol[p["symbol"]][role] or {}).get("score") for role in SPECIALISTS}})
         if len(picks) >= max_picks:
             break
-    return {"picks": picks, "dropped": dropped, "verdicts": by_symbol,
-            "chief_picked": len(answer.get("picks") or [])}
+    chief_picked = len(answer.get("picks") or [])
+    picks += fill_picks(dossiers, by_symbol, picks, per_pattern, min(min_picks, max_picks) - len(picks))
+    return {"picks": picks, "dropped": dropped, "verdicts": by_symbol, "chief_picked": chief_picked}
+
+
+FILL_MIN_SCORE = 5.0         # a filled-in pick needs at least this average specialist score
+
+
+def fill_picks(dossiers: list[dict], by_symbol: dict[str, dict], picks: list[dict],
+               per_pattern: dict[str, int], need: int) -> list[dict]:
+    """Up to `need` more picks when the chief chose fewer than the minimum (owner,
+    2026-09-30: "I barely get stocks"): the shortlist's best by the specialists' average
+    score, at least FILL_MIN_SCORE, the same variety rule. Their text is fixed, from the
+    scores and the dossier only, and marked `filled`."""
+    if need <= 0:
+        return []
+    chosen = {p["symbol"] for p in picks}
+    ranked = []
+    for d in dossiers:
+        scores = [(by_symbol.get(d["symbol"], {}).get(role) or {}).get("score") for role in SPECIALISTS]
+        scores = [float(x) for x in scores if isinstance(x, (int, float))]
+        if d["symbol"] not in chosen and len(scores) == len(SPECIALISTS):
+            ranked.append((sum(scores) / len(scores), d, scores))
+    ranked.sort(key=lambda r: (-r[0], r[1]["symbol"]))
+    out = []
+    for avg, d, scores in ranked:
+        if len(out) >= need or avg < FILL_MIN_SCORE:
+            break
+        if per_pattern.get(d["pattern"], 0) >= PICKS_PER_PATTERN:
+            continue
+        per_pattern[d["pattern"]] = per_pattern.get(d["pattern"], 0) + 1
+        detail = d.get("pattern_detail") or {}
+        inval, line = detail.get("invalidation"), detail.get("line")
+        cancels = (f"סגירה מתחת ל-{alerts._price(inval)} מבטלת את התבנית." if _finite(inval)
+                   else f"סגירה מתחת לקו ב-{alerts._price(line)} מחלישה את התבנית.")
+        watch = ("האם המחיר נשאר מעל קו הפריצה, ובאיזה מחזור מסחר." if d["kind"] == "breakout"
+                 else "האם המחיר חוצה את הקו בסגירה, ובמחזור מסחר גבוה מהממוצע.")
+        out.append({"symbol": d["symbol"], "conviction": round(avg), "filled": True,
+                    "why_he": (f"בחירה משלימה לפי ציוני הצוות: תבנית {scores[0]:g}/10, "
+                               f"הקשר {scores[1]:g}/10, סטטיסטיקה {scores[2]:g}/10."),
+                    "cancels_he": cancels, "watch_he": watch,
+                    "scores": dict(zip(SPECIALISTS, scores))})
+    return out
 
 
 def research(view: ScanView, store: Store, breakouts: list[dict], verge: list[dict], *, llm, verge_pct: float,
              shortlist_size: int, max_picks: int, news_of: Callable[[list[str]], dict[str, dict]] | None = None,
              market: dict[str, float] | None = None, analyse: Callable | None = None,
-             patterns: set[str] | None = None) -> dict[str, Any]:
+             patterns: set[str] | None = None, min_picks: int = 0) -> dict[str, Any]:
     """The whole evening: candidates -> shortlist -> dossiers -> team. Only `patterns` (the
     proven ones, alerts.proven_patterns; None: all). status: "picked", "none" (the team
     found nothing good enough) or "failed" (every pick broke a rule)."""
@@ -298,7 +399,7 @@ def research(view: ScanView, store: Store, breakouts: list[dict], verge: list[di
     news = news_of(sorted({c["symbol"] for c in short})) if news_of else {}
     dossiers = [dossier(c, view, stocks, ledger, backtest, store.read_bars(c["symbol"]), market or {},
                         news.get(c["symbol"]), analyse) for c in short]
-    team = run_team(dossiers, llm, read_lessons(store), max_picks)
+    team = run_team(dossiers, llm, read_lessons(store), max_picks, min_picks)
     by = {c["symbol"]: c for c in short}
     picks = [{**p, "candidate": by[p["symbol"]]} for p in team["picks"]]
     status = "picked" if picks else ("failed" if team["chief_picked"] and team["dropped"] else "none")
@@ -309,7 +410,13 @@ def research(view: ScanView, store: Store, breakouts: list[dict], verge: list[di
 # ------------------------------------------------------------------ the message
 def pick_caption(n: int, p: dict[str, Any]) -> str:
     c = p["candidate"]
-    if c["kind"] == "breakout":
+    ago = int(c.get("sessions_ago") or 0)
+    if c["kind"] == "breakout" and ago:
+        when = count_he(ago, "לפני יום מסחר", "ימי מסחר", "לפני יומיים")
+        when = when if when.startswith("לפני") else f"לפני {when}"
+        where = (f"פריצה {when} ב-{alerts._price(c.get('breakout'))}, עדיין מעל הקו · "
+                 f"סגירה {alerts._price(c.get('close'))}")
+    elif c["kind"] == "breakout":
         where = f"פריצה ב-{alerts._price(c.get('breakout'))} · סגירה {alerts._price(c.get('close'))}"
     else:
         where = (f"על סף פריצה: קו {alerts._price(c.get('line'))} · סגירה {alerts._price(c.get('close'))} "
@@ -355,7 +462,7 @@ def evening_report(store: Store, view: ScanView, cfg, *, bot: Any, min_cases: in
                    fallback: Callable[[str], dict[str, Any]],
                    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                    live_summary: dict[str, Any] | None = None,
-                   to_png: Callable[[str], bytes] | None = None) -> dict[str, Any]:
+                   to_png: Callable[[str], bytes] | None = None, recent_days: int = 1) -> dict[str, Any]:
     """The research team's evening report, once per session: only the picks (each as its
     pattern chart with the team's reasons), the full analyses of the picks, and one line
     on the day's crossings. If the research fails, `fallback(note)` sends the regular
@@ -364,7 +471,7 @@ def evening_report(store: Store, view: ScanView, cfg, *, bot: Any, min_cases: in
     if sent.get("evening"):
         return {"status": "already sent"}
     rates = alerts.hit_rates(store.read_ledger(), min_cases)
-    breakouts = alerts.bullish_breakouts(view, store.read_bars, rates)
+    breakouts = alerts.bullish_breakouts(view, store.read_bars, rates, days=recent_days)
     # the setups: forming patterns up to watch_pct below their line (owner, 2026-09-30: "a
     # really good setup"; verge_pct alone gave one candidate)
     verge = [{**v, "hit_rate": rates.get(v["pattern"])} for v in alerts.on_the_verge(view, cfg.watch_pct)]

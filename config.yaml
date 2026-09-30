@@ -175,6 +175,11 @@ research:
   # below their line, at most 4 of one pattern in the shortlist and 2 in the picks
   shortlist: 20              # candidates researched in depth (by a transparent score)
   max_picks: 10
+  # owner, 2026-09-30 ("I barely get stocks"; a weak week left one breakout a day): the
+  # breakouts of the last recent_days sessions that still close above their line, and at
+  # least min_picks a day when the shortlist has them (the chief's, then the best-scored rest)
+  min_picks: 3
+  recent_days: 3
   model: "sonnet"
   effort: "high"
   timeout_s: 900

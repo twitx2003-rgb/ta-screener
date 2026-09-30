@@ -315,3 +315,14 @@ def test_the_news_goes_under_each_breakout_and_live_crossing():
               "key": "k"}] * 60
     message = live_message(found, now, "America/New_York", news)
     assert len(message) <= 4096 and "BBB beats estimates" in message and "באתר." in message
+
+
+def test_breakouts_of_the_last_sessions_count_while_they_hold():
+    view = _view()
+    view.detections["age"] = [0 if d == DAY else 1 for d in view.detections["event_day"]]
+    assert [b["symbol"] for b in bullish_breakouts(view, lambda s: None, {})] == ["NYSE:BBB", "NYSE:AAA"]
+    found = bullish_breakouts(view, lambda s: None, {}, days=3)
+    assert [(b["symbol"], b["pattern"], b["sessions_ago"]) for b in found] == [
+        ("NYSE:BBB", "ascending_triangle", 0), ("NYSE:AAA", "double_bottom", 0), ("NYSE:AAA", "rectangle", 1)]
+    view.stocks.loc[view.stocks["symbol"] == "NYSE:AAA", "close"] = 99.0    # fell back below its line
+    assert all(b["sessions_ago"] == 0 for b in bullish_breakouts(view, lambda s: None, {}, days=3))

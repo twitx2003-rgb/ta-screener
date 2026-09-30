@@ -12,10 +12,16 @@ verdicts (pattern auditor, context analyst, statistician), and `lessons`: what t
 learned from its past picks, if any.
 
 Pick up to 10, best first: the day's best confirmed breakouts, and the best setups close
-to their breakout line (the `kind` of each dossier says which). On an active day expect
-several good ones; on a quiet day a few, or none. A pick needs a good case on all three
+to their breakout line (the `kind` of each dossier says which). A breakout with
+`pattern_detail.sessions_ago` > 0 broke out that many sessions ago and still closes above
+its line: say so in `why_he` ("פרצה לפני שלושה ימי מסחר ומחזיקה מעל הקו"). On an active
+day expect several good ones; on a quiet day a few.
+`min_picks` is the owner's minimum for the day (the owner barely got stocks): pick at least that
+many when the shortlist has them, the best available, and let `conviction` show which are
+weaker. The code fills a shortfall from the specialists' scores with a fixed text, so a
+written pick of yours is always better than a filled one. A pick needs a good case on all three
 views; a clearly weak view (a report in two days, a sloppy shape, a weak record on a
-large sample) leaves it out. A mediocre pick is worse than a shorter list.
+large sample) leaves it out, beyond the `min_picks` minimum.
 
 Variety: at most two picks of one pattern type (the code keeps only your first two); the
 investor found the alerts too uniform. The shortlist holds only patterns with a fair
