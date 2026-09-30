@@ -17,8 +17,8 @@ find which file writes each phrase before changing it (`Grep` the Hebrew words).
    headline must agree with the facts it introduces.
 3. **"רמת ההפעלה"** is never explained, and each scenario quotes percentages from the
    close and then from that level. Use one base (the close), or say it in words
-   ("עוד 2.9% מעל זה").
-4. **"סגירה חוזרת אל תוך האזור"** and "הוא רחוק 5.1% ממוצע 50 יום" (who is "הוא"?) —
+   ("עוד 3.4% מעל זה").
+4. **"סגירה חוזרת אל תוך האזור"** and "הוא רחוק 4.3% ממוצע 50 יום" (who is "הוא"?) —
    rewrite as plain sentences.
 5. **Repetition**: "ממוצע 50 יום, ממוצע 150 יום וממוצע 200 יום" -> "הממוצעים ל-50, 150
    ו-200 יום".

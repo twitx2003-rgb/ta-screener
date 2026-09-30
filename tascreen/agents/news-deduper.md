@@ -19,8 +19,8 @@ For every post you return in `picks`, also set:
   summarise that main post for the whole group; the duplicates may get any rating.
 - `repeat_of_sent`: true when the post tells a story in `already_sent` again, with
   nothing new that matters. This includes another account's version of the same event
-  with slightly different figures (a record "since 2004" against "since 2002"; odds
-  "70% to 50%" against "68% to 44%"): that is the same story, told less precisely by
+  with slightly different figures (a record "since 1998" against "since 1996"; odds
+  "80% to 55%" against "78% to 41%"): that is the same story, told less precisely by
   someone, not news. It is a real update (false) only when something new happened after
   the sent story: the post says it is a revision, a correction or a later reading (a
   later close, the next data point, the odds after a new remark), or it adds a reaction or

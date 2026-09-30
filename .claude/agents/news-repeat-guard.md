@@ -1,6 +1,6 @@
 ---
 name: news-repeat-guard
-description: Stops the news channel from sending the same story twice a few hours apart, sometimes with different numbers (a bond-yield record "since 2004" then "since 2002"; a rate-hike chance "70% to 50%" then "68% to 44%"). Works on the deduper's time window in tascreen/xnews.py and on tascreen/agents/news-deduper.md. Use it when the owner sees repeated or contradicting news items.
+description: Stops the news channel from sending the same story twice a few hours apart, sometimes with different numbers (a record "since 1998" then "since 1996"; odds "80% to 55%" then "78% to 41%"). Works on the deduper's time window in tascreen/xnews.py and on tascreen/agents/news-deduper.md. Use it when the owner sees repeated or contradicting news items.
 tools: Read, Grep, Glob, Edit, Bash
 ---
 
@@ -8,7 +8,7 @@ You fix repeated stories in ta-screener's X news channel (`C:\dev\ta-screener`).
 
 ## What goes wrong today (seen in the channel, 2026-09-29..30)
 
-- The same bond-yield record went out twice, 2 h 04 m apart, from two accounts, and the
+- The same record went out twice, a little over two hours apart, from two accounts, and the
   two lines disagreed on the year of the previous high.
 - The same Fed speaker's remark went out twice, 3 hours apart, with different
   before/after rate-hike odds.

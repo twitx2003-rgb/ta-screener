@@ -434,8 +434,8 @@ def _deduper(seen):
 
 def test_a_story_sent_three_hours_ago_is_still_shown_and_its_repeat_dropped(tmp_path):
     # invented: a yield record sent by one account, repeated 3 h later by another with another year
-    first = row("161", author="DeskOne", text="Bond yield at highest since 2004")
-    again = row("162", author="DeskTwo", text="Bond yield at highest since 2002")
+    first = row("161", author="DeskOne", text="Bond yield at highest since 1998")
+    again = row("162", author="DeskTwo", text="Bond yield at highest since 1996")
     shown = []
     sent = []
     run(tmp_path, FakeReader({"tweets": [first], "has_next_page": False}), _deduper(shown), sent,
@@ -472,15 +472,15 @@ def test_the_sent_list_is_capped_in_the_prompt_and_in_the_state(tmp_path):
 
 def test_two_accounts_with_different_figures_are_one_story(tmp_path):
     # invented: the same remark, reported with different before/after odds
-    page = {"tweets": [row("191", author="DeskOne", text="Hike odds fall to 50% from 70%"),
-                       row("192", author="DeskTwo", text="Hike odds fall to 44% from 68%")], "has_next_page": False}
-    llm = picker({"post_id": "191", "importance": 5, "summary_he": "הסיכוי להעלאה ירד מ-70% ל-50%",
+    page = {"tweets": [row("191", author="DeskOne", text="Hike odds fall to 55% from 80%"),
+                       row("192", author="DeskTwo", text="Hike odds fall to 41% from 78%")], "has_next_page": False}
+    llm = picker({"post_id": "191", "importance": 5, "summary_he": "הסיכוי להעלאה ירד מ-80% ל-55%",
                   "analysis_he": "", "same_story_as": "", "repeat_of_sent": False},
-                 {"post_id": "192", "importance": 5, "summary_he": "הסיכוי ירד מ-68% ל-44%",
+                 {"post_id": "192", "importance": 5, "summary_he": "הסיכוי ירד מ-78% ל-41%",
                   "analysis_he": "", "same_story_as": "191", "repeat_of_sent": False})
     sent = []
     summary, _ = run(tmp_path, FakeReader(page), llm, sent, accounts=("DeskOne", "DeskTwo"))
-    assert summary["sent"] == 1 and "44%" not in sent[0] and "50%" in sent[0]
+    assert summary["sent"] == 1 and "41%" not in sent[0] and "55%" in sent[0]
 
 
 def test_the_deduper_is_told_a_different_figure_is_a_repeat_and_an_update_says_so():

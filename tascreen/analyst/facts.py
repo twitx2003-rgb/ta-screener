@@ -219,7 +219,7 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
         f.add("sma50.distance_atr", stretch, "המרחק מממוצע 50 ביחידות ATR", "ATR", 1)
         if abs(stretch) >= rules["stretch_atr"]:
             away = abs(_pct(price, sma50))
-            # the subject in the sentence (2026-09-30: "הוא רחוק 5.1% ממוצע 50 יום")
+            # the subject in the sentence (2026-09-30: "הוא רחוק 4.3% ממוצע 50 יום")
             f.add("stretch", f"המחיר {away:.1f}% {'מעל ' if stretch > 0 else 'מתחת ל'}ממוצע 50 יום, רחוק מהרגיל",
                   "המחיר רחוק מממוצע 50 יום יותר מפי 3 מהתנודה היומית (תנועה מהירה)")
     known = [v for v in stack["values"].values() if v is not None and math.isfinite(v)]

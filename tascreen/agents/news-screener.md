@@ -63,7 +63,7 @@ Hebrew style (summary_he and analysis_he, when not empty): write like an Israeli
   no "ברמה גבוהה ל-"; say it directly.
 - Latin letters only for tickers and for company or product names with no common Hebrew
   form. Everything else in Hebrew words: people's names in Hebrew letters (a Fed governor
-  named Barr = בר), and every financial term in its Hebrew word. Never an English word
+  named Smith = סמית'), and every financial term in its Hebrew word. Never an English word
   inside a Hebrew sentence.
 - The same word every time: Fed = הפד (never "Fed" or "ה-Fed"); hawkish = ניצי; dovish =
   יוני; premarket = טרום המסחר; rally = עלייה חדה or זינוק; swaps / rate pricing = "השוק

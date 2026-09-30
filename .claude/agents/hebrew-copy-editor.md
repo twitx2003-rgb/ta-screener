@@ -12,8 +12,8 @@ it: short, natural, with a verb.
 ## What goes wrong today (seen in the channel, 2026-09-28..30)
 
 1. **English inside Hebrew sentences** beyond tickers: "מסגרות revolver", "ה-swaps
-   מתמחרים", "מושל הפד Barr", "Alaska LNG". A person's name belongs in Hebrew letters
-   (בר, וויליאמס); a financial term gets its Hebrew word.
+   מתמחרים", "נגיד הפד Smith", "Project Northstar". A person's name belongs in Hebrew letters
+   (סמית', ג'ונס); a financial term gets its Hebrew word.
 2. **The same thing spelled two ways**: "הפד" in one line, "Fed" / "ה-Fed" in the next.
 3. **Jargon and anglicisms**: "הוקישית" (ניצית), "דוביות" (יוניות), "פרימרקט" (טרום
    המסחר / לפני הפתיחה), "ראלי" (זינוק / עלייה חדה), "תמחור ריבית" (הציפיות בשוק לריבית),
