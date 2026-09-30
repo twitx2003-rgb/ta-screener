@@ -135,14 +135,14 @@ def test_the_scenarios_are_written_by_the_program_from_the_facts():
     facts = {"up.trigger": fact(110.0), "up.trigger_what": fact("הקצה העליון של ההתנגדות הקרובה"),
              "up.trigger_pct": fact(5.6), "up.next": fact(118.0), "up.next_far": fact(120.0),
              "up.next_what": fact("ההתנגדות הבאה"), "up.room_pct": fact(7.3), "up.cancel": fact(108.5),
-             "up.cancel_what": fact("חזרה אל תוך האזור"), "up.risk_pct": fact(1.4),
+             "up.cancel_what": fact("המחיר נסגר שוב מתחת לאזור כולו"), "up.risk_pct": fact(1.4),
              "down.trigger": fact(99.0), "down.trigger_what": fact("השפל השנתי"), "down.trigger_pct": fact(5.0),
-             "down.no_next": fact("מתחתיו אין רמות מהשנה האחרונה"), "down.cancel": fact(100.5),
+             "down.no_next": fact("מתחת לשפל השנתי אין רמות מהשנה האחרונה"), "down.cancel": fact(100.5),
              "down.cancel_what": fact("הקצה התחתון של ההתנגדות הקרובה"), "down.risk_pct": fact(1.5)}
     up, down = scenario_parts(facts)
     # one short line each (owner, 2026-09-29: shorter): what starts it, the next level
     assert up["text"] == "סגירה מעל 110.00; הרמה הבאה: התנגדות בין 118.00 ל-120.00."
-    assert down["text"] == "סגירה מתחת ל-99.00; מתחתיו אין רמות מהשנה האחרונה."
+    assert down["text"] == "סגירה מתחת ל-99.00; מתחת לשפל השנתי אין רמות מהשנה האחרונה."
     assert "up.cancel" not in up["cites"]
     assert (up["signal"], down["signal"]) == ("up", "down") and "up.trigger" in up["cites"]
     assert "רמת הכניסה" not in up["text"] + down["text"]
@@ -264,3 +264,40 @@ def test_an_undrawn_trendline_cannot_be_cited():
     problem = part_problem({"part": "trend", "signal": "yellow", "text": "קו מגמה ב-120.", "cites": ["tl_2.value"]},
                            facts, allowed_numbers(facts, RULES), fact_dates(facts), drawn={"tl_1"})
     assert "not on the chart" in problem
+
+
+def test_the_headline_lead_agrees_with_the_key_event():
+    from tascreen.analyst.writer import lead_problem
+
+    def facts(event, kind):
+        return {"event": {"value": event, "label": "", "unit": ""},
+                "event.kind": {"value": kind, "label": "", "unit": ""}}
+
+    down = facts("שבירה כלפי מטה מתבנית דגל ב-10/03, בנפח גבוה פי 2.0 מהממוצע", "fresh_breakout")
+    assert "disagrees" in lead_problem("אין מגמה ברורה: שבירה כלפי מטה מתבנית דגל.", down)
+    assert "disagrees" in lead_problem("מגמת עלייה: שבירה כלפי מטה מתבנית דגל.", down)
+    assert lead_problem("שבירה בתוך מגמת עלייה: שבירה כלפי מטה מתבנית דגל.", down) is None
+    assert lead_problem("שבירה: המחיר נסגר מתחת לקו.", down) is None
+    assert "אחרי שבירה" in lead_problem("מגמת עלייה, אחרי שבירה: המחיר ירד.", down)
+    up = facts("המחיר פרץ מעל אזור ההתנגדות שבין 50.00 ל-51.00 ב-10/03", "zone_break")
+    assert lead_problem("מגמת עלייה: המחיר פרץ מעל אזור ההתנגדות.", up) is None
+    assert "disagrees" in lead_problem("מגמת ירידה: המחיר פרץ מעל אזור ההתנגדות.", up)
+    # no direction in the event: any trend lead, including "no clear trend"
+    near = facts("המחיר 2.0% מתחת לשיא השנתי (60.00)", "near_high")
+    assert lead_problem("אין מגמה ברורה: המחיר ליד השיא השנתי.", near) is None
+
+
+def test_averages_are_named_once_and_far_levels_stay_out_of_the_brief():
+    from tascreen.analyst.writer import DISCLAIMER, _finish, user_prompt
+
+    assert _finish("המחיר מעל ממוצע 50 יום, ממוצע 150 יום וממוצע 200 יום.") == \
+        "המחיר מעל הממוצעים של 50, 150 ו-200 יום."
+    assert _finish("מעל ממוצע 50 יום וממוצע 200 יום.") == "מעל הממוצעים של 50 ו-200 יום."
+    assert _finish("רחוק מממוצע 50 יום.") == "רחוק מממוצע 50 יום."
+    a = _analysis()
+    a.facts["up.room_pct"] = {"value": 7.3, "label": "", "unit": "%"}
+    a.facts["up.trigger_pct"] = {"value": 5.6, "label": "", "unit": "%"}
+    brief = user_prompt(a)
+    assert "up.room_pct" not in brief and "up.trigger_pct" in brief     # one base: the close
+    assert PARTS["trend"] != "מגמה" and "מגמה" not in PARTS["trend"]     # not a second "trend" heading
+    assert DISCLAIMER == "לא ייעוץ השקעות. רמות ויעדים מחושבים ממחירי עבר, לא תחזית."

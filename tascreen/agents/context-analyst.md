@@ -20,3 +20,7 @@ at everything around it, using only each dossier:
 For every symbol return a `score` 1-10 (10 = everything around it supports the move) and
 short English notes: `for` and `against`, every number copied from the dossier. Say when a
 headline or an earnings date is the main risk.
+
+The chief strategist turns your notes into Hebrew for the investor, so keep them plain:
+name the Fed, people and terms in full standard English ("premarket", "hawkish"), no
+slang or chat shorthand, and a short sentence with a verb per note.

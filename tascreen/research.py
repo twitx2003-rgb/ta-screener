@@ -32,6 +32,7 @@ from . import alerts
 from .agents import prompt as agent_prompt
 from .analyst.text_rules import NUMBER, STRUCTURAL, banned
 from .errors import ProviderError
+from .hebrew import count_he
 from .outcomes import FINAL
 from .patterns.levels import detection_key
 from .store import Store, _write_json
@@ -324,8 +325,10 @@ def report_messages(day: date, result: dict[str, Any], *, intraday: list[dict] |
     caption instead (evening_report)."""
     n, k = result["candidates"], len(result["picks"])
     head = (f"<b>🏆 המובחרות של {alerts._day(day)}</b>\n"
-            f"צוות המחקר בדק {n} מועמדות ({result['breakouts']} פריצות, {result['verge']} על סף פריצה) "
-            + (f"ובחר {k}." if k else "ולא מצא היום אף אחת שעומדת ברף."))
+            f"צוות המחקר בדק {count_he(n, 'מועמדת אחת', 'מועמדות')} "
+            f"({count_he(result['breakouts'], 'פריצה אחת', 'פריצות')}, "
+            f"{'אחת' if result['verge'] == 1 else result['verge']} על סף פריצה) "
+            + (f"ובחר {'אחת' if k == 1 else k}." if k else "ולא מצא היום אף אחת שעומדת ברף."))
     blocks = [head]
     blocks += [pick_caption(i, p) for i, p in enumerate(result["picks"], 1) if i not in (with_photo or ())]
     if analyses:
@@ -333,9 +336,11 @@ def report_messages(day: date, result: dict[str, Any], *, intraday: list[dict] |
                       + ", ".join(html.escape(s.split(":")[-1]) for s in analyses))
     if intraday:
         held = sum(f["held"] for f in intraday)
-        blocks.append(f"⚡ חציות מהמסחר היום: {held} החזיקו מעל הקו בסגירה, {len(intraday) - held} חזרו מתחתיו.")
+        blocks.append(f"⚡ חציות מהמסחר היום: {count_he(held, 'אחת החזיקה', 'החזיקו')} מעל הקו בסגירה, "
+                      f"{count_he(len(intraday) - held, 'אחת חזרה', 'חזרו')} מתחתיו.")
     if live_summary and live_summary.get("passes"):
-        blocks.append(f"🔎 מעקב המסחר היום: {live_summary.get('alerts', 0)} התראות חצייה.")
+        blocks.append("🔎 מעקב המסחר היום: "
+                      f"{count_he(live_summary.get('alerts', 0), 'התראת חצייה אחת', 'התראות חצייה')}.")
     blocks.append(f"<i>{html.escape(alerts.DISCLAIMER)}</i>")
     return alerts._pack(blocks)
 
@@ -497,12 +502,13 @@ def weekly_review(store: Store, llm, now: datetime, *, weeks: int = 12) -> dict[
 def weekly_message(review: dict[str, Any]) -> str:
     c, b = review["counts"], review["baseline"]
     lines = ["📚 <b>סיכום שבועי של צוות המחקר</b>",
-             f"בחירות ב-12 השבועות האחרונים: {c['picks']} · הוכרעו {c['decided']}: "
-             f"{c['target']} הגיעו ליעד, {c['failed']} נכשלו."]
+             f"בחירות ב-12 השבועות האחרונים: {c['picks']} · מהן הוכרעו {c['decided']}: "
+             f"{count_he(c['target'], 'אחת הגיעה', 'הגיעו')} ליעד, "
+             f"{count_he(c['failed'], 'אחת נכשלה', 'נכשלו')}."]
     if c["decided"]:
         lines.append(f"שיעור הצלחה של הבחירות: {c['target'] / c['decided'] * 100:.0f}%"
                      + (f" · לעומת {b['target_pct']:g}% בכל הפריצות השוריות" if b.get("target_pct") is not None else ""))
     if review.get("summary_he"):
         lines.append(html.escape(review["summary_he"]))
-    lines.append(f"הצוות מחזיק עכשיו {review['lessons']} לקחים.")
+    lines.append(f"הצוות מחזיק עכשיו {count_he(review['lessons'], 'לקח אחד', 'לקחים')}.")
     return "\n".join(lines)

@@ -31,6 +31,7 @@ import pandas as pd
 from .config import AlertsSettings
 from .errors import ProviderError
 from .fields import pick
+from .hebrew import NY_TIME, count_he
 from .outcomes import FINAL
 from .patterns.levels import invalidation
 from .quotes import crossings
@@ -40,8 +41,8 @@ from .web.data import ScanView, detection_record
 
 MESSAGE_LIMIT = 4000                   # Telegram allows 4096; room for the escaping
 VERGE_SHOWN = 30
-DISCLAIMER = ("לא ייעוץ השקעות. יעד = כלל המדידה של התבנית, לא תחזית. "
-              "ביטול = סגירה מתחת לרמה הזו מבטלת את התבנית.")
+DISCLAIMER = ("לא ייעוץ השקעות. היעד מחושב לפי כלל המדידה של התבנית (בדרך כלל גובה התבנית "
+              "מעל קו הפריצה), והוא לא תחזית. סגירה מתחת לרמת הביטול מבטלת את התבנית.")
 
 
 # ------------------------------------------------------------------ what was sent
@@ -205,7 +206,7 @@ def breakout_block(n: int, b: dict[str, Any], headline: dict | None = None,
                    limit: int | None = None) -> str:
     """One confirmed breakout's lines (the report's list and each chart's caption). With
     `limit`, the news and then the levels line go before a character is cut."""
-    volume = f" · נפח x{float(b['rel_volume']):.1f}" if _finite(b["rel_volume"]) else ""
+    volume = f" · נפח פי {float(b['rel_volume']):.1f} מהממוצע" if _finite(b["rel_volume"]) else ""
     levels = []
     if _finite(b["target"]):
         levels.append(f"יעד {_price(b['target'])} (כלל המדידה)")
@@ -229,7 +230,7 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *,
                      news: dict[str, dict] | None = None) -> list[str]:
     head = f"<b>🚀 פריצות שוריות · {_day(day)}</b>\nאחרי הסגירה, מהחזקה לחלשה (לפי הנפח ביום הפריצה)."
     if coverage and coverage[0] < coverage[1]:
-        head += f"\n(נסרקו {coverage[0]:,} מתוך {coverage[1]:,} מניות)"
+        head += f"\n(נסרקו {coverage[0]:,} מתוך {count_he(coverage[1], 'מניה אחת', 'מניות', sep=True)})"
     blocks = [head]
     if not breakouts:
         blocks.append("אין היום פריצות שוריות מאושרות של תבניות גרף.")
@@ -256,8 +257,9 @@ def evening_messages(day: date, breakouts: list[dict], verge: list[dict], *,
     blocks.append("\n".join(lines))
     if live_summary and live_summary.get("passes"):
         delay = live_summary.get("data_delay_min")
-        blocks.append(f"🔎 מעקב המסחר היום: {live_summary['passes']} סבבים · "
-                      f"{live_summary.get('watched', 0)} מניות במעקב · {live_summary.get('alerts', 0)} התראות"
+        blocks.append(f"🔎 מעקב המסחר היום: {count_he(live_summary['passes'], 'סבב אחד', 'סבבים')} · "
+                      f"{count_he(live_summary.get('watched', 0), 'מניה אחת', 'מניות')} במעקב · "
+                      f"{count_he(live_summary.get('alerts', 0), 'התראה אחת', 'התראות')}"
                       + (f" · עיכוב הנתונים כ-{float(delay):g} דק'" if _finite(delay) else ""))
     blocks.append(f"<i>{html.escape(DISCLAIMER)}</i>")
     return _pack(blocks)
@@ -451,15 +453,17 @@ def live_crossings(view: ScanView, prices: dict[str, float], session_day: date,
 def watch_started_message(near: int, far: int, cfg: AlertsSettings) -> str:
     """Sent once a session when the live watch starts, so a quiet day is not a doubt."""
     return (f"🔎 <b>המעקב במהלך המסחר התחיל</b>\n"
-            f"{near + far} מניות במעקב: {near} עד {cfg.verge_pct:g}% מקו הפריצה (כל "
-            f"{cfg.live_interval_minutes:g} דקות), {far} רחוקות יותר (כל "
-            f"{cfg.live_interval_minutes * cfg.far_every:g} דקות).\n"
+            f"{count_he(near + far, 'מניה אחת', 'מניות')} במעקב: "
+            f"{count_he(near, 'אחת', 'מניות')} עד {cfg.verge_pct:g}% מקו הפריצה "
+            f"(כל {count_he(cfg.live_interval_minutes, 'דקה', 'דקות')}), "
+            f"{count_he(far, 'אחת רחוקה', 'רחוקות')} יותר "
+            f"(כל {count_he(cfg.live_interval_minutes * cfg.far_every, 'דקה', 'דקות')}).\n"
             "תגיע הודעה רק כשמניה חוצה את קו הפריצה.")
 
 
 def live_message(found: list[dict[str, Any]], at: datetime, market_tz: str,
                  news: dict[str, dict] | None = None) -> str:
-    head = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} שעון ניו יורק</b>",
+    head = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} {NY_TIME}</b>",
             "לא סופי עד הסגירה. מחירי TradingView עשויים להיות מעוכבים.", ""]
     tail = ["", f"<i>{html.escape('לא ייעוץ השקעות. פריצה מאושרת רק בסגירה.')}</i>"]
     items: list[str] = []
@@ -527,7 +531,7 @@ def news_line(headline: dict[str, Any] | None) -> str:
         return ""
     title = headline["title"] if len(headline["title"]) <= 140 else headline["title"][:137] + "..."
     hours = headline["hours"]
-    age = "לפני פחות משעה" if hours < 1 else f"לפני {hours:.0f} שעות"
+    age = "לפני פחות משעה" if hours < 1 else f"לפני {count_he(round(hours), 'שעה', 'שעות', 'שעתיים')}"
     source = f"{headline['provider']}, " if headline["provider"] else ""
     text = html.escape(title)
     if headline["link"].startswith("https://www.tradingview.com/"):
@@ -595,7 +599,7 @@ def crossing_caption(c: dict[str, Any], at: datetime, market_tz: str,
                      headline: dict | None = None) -> str:
     above = (c["price"] / c["line"] - 1) * 100
     target = f" · יעד {_price(c['target'])} (כלל המדידה)" if _finite(c["target"]) else ""
-    lines = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} ניו יורק</b>",
+    lines = [f"<b>⚡ פריצה תוך כדי מסחר · {at.astimezone(ZoneInfo(market_tz)):%H:%M} {NY_TIME}</b>",
              f"{_link(c['symbol'])} · {html.escape(str(c['name']))} · קו {_price(c['line'])} · "
              f"מחיר {_price(c['price'])} (+{above:.1f}% מעל){target}"]
     news = news_line(headline)

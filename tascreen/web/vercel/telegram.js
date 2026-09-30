@@ -127,8 +127,9 @@ async function handle(req, env) {
     await react(token, chat, message.message_id);
     return "started";
   }
-  await say(token, chat, `לא הצלחתי להפעיל את הניתוח (GitHub ${started.status}). נסו שוב מאוחר יותר.`);
-  return "dispatch failed";
+  // members get a plain sorry; the status goes to the function's log (the returned outcome)
+  await say(token, chat, "סליחה, לא הצלחתי להפעיל את הניתוח כרגע. נסו שוב מאוחר יותר.");
+  return `dispatch failed (GitHub ${started.status})`;
 }
 
 module.exports = async function telegram(req, res) {

@@ -419,3 +419,104 @@ def test_the_updates_rated_2_are_kept_for_the_digest_but_never_sent(tmp_path):
     assert summary["sent"] == 1 and "עדכון מעניין" not in sent[0]
     log = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["day_log"]
     assert [(r["id"], r["importance"], r["sent"]) for r in log] == [("1", 4, True), ("2", 2, False)]
+
+
+def _deduper(seen):
+    """A fake deduper: a post is a repeat when any story was shown as already sent."""
+    def answer(system, user, schema):
+        data = json.loads(user)
+        seen.append(data["already_sent"])
+        return {"picks": [{"post_id": p["post_id"], "importance": 5, "summary_he": f"סיפור {p['post_id']}",
+                           "analysis_he": "", "same_story_as": "",
+                           "repeat_of_sent": bool(data["already_sent"])} for p in data["posts"]]}
+    return SyntheticLLM(answer)
+
+
+def test_a_story_sent_three_hours_ago_is_still_shown_and_its_repeat_dropped(tmp_path):
+    # invented: a yield record sent by one account, repeated 3 h later by another with another year
+    first = row("161", author="DeskOne", text="Bond yield at highest since 2004")
+    again = row("162", author="DeskTwo", text="Bond yield at highest since 2002")
+    shown = []
+    sent = []
+    run(tmp_path, FakeReader({"tweets": [first], "has_next_page": False}), _deduper(shown), sent,
+        accounts=("DeskOne", "DeskTwo"))
+    assert len(sent) == 1
+    later = datetime(2026, 1, 5, 18, 0, tzinfo=timezone.utc)                       # three hours on
+    summary, _ = run(tmp_path, FakeReader({"tweets": [again], "has_next_page": False}), _deduper(shown), sent,
+                     accounts=("DeskOne", "DeskTwo"), now=later)
+    assert shown[-1] == [{"author": "DeskOne", "summary_he": "סיפור 161", "minutes_ago": 180}]
+    assert summary["repeats"] == 1 and summary["sent"] == 0 and len(sent) == 1
+
+
+def test_a_story_older_than_the_window_is_forgotten(tmp_path):
+    stamp = int(NOW.timestamp())
+    (tmp_path / "state.json").write_text(json.dumps({"sent_recent": [
+        {"at": stamp - xnews.SENT_WINDOW_S - 60, "author": "Old", "summary_he": "ישן"},
+        {"at": stamp - xnews.SENT_WINDOW_S + 60, "author": "Kept", "summary_he": "עדיין"}]}), encoding="utf-8")
+    shown = []
+    run(tmp_path, FakeReader({"tweets": [row("171")], "has_next_page": False}), _deduper(shown), [])
+    assert [r["author"] for r in shown[-1]] == ["Kept"]
+    assert xnews.SENT_WINDOW_S >= 8 * 3600                     # a whole session, not two hours
+
+
+def test_the_sent_list_is_capped_in_the_prompt_and_in_the_state(tmp_path):
+    stamp = int(NOW.timestamp())
+    rows = [{"at": stamp - 3600 + i, "author": f"Desk{i}", "summary_he": f"סיפור {i}"} for i in range(100)]
+    (tmp_path / "state.json").write_text(json.dumps({"sent_recent": rows}), encoding="utf-8")
+    shown = []
+    run(tmp_path, FakeReader({"tweets": [row("181")], "has_next_page": False}), _deduper(shown), [])
+    assert len(shown[-1]) == xnews.SENT_SHOWN_MAX and shown[-1][-1]["author"] == "Desk99"   # the newest
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert len(state["sent_recent"]) == xnews.SENT_RECENT_KEPT
+
+
+def test_two_accounts_with_different_figures_are_one_story(tmp_path):
+    # invented: the same remark, reported with different before/after odds
+    page = {"tweets": [row("191", author="DeskOne", text="Hike odds fall to 50% from 70%"),
+                       row("192", author="DeskTwo", text="Hike odds fall to 44% from 68%")], "has_next_page": False}
+    llm = picker({"post_id": "191", "importance": 5, "summary_he": "הסיכוי להעלאה ירד מ-70% ל-50%",
+                  "analysis_he": "", "same_story_as": "", "repeat_of_sent": False},
+                 {"post_id": "192", "importance": 5, "summary_he": "הסיכוי ירד מ-68% ל-44%",
+                  "analysis_he": "", "same_story_as": "191", "repeat_of_sent": False})
+    sent = []
+    summary, _ = run(tmp_path, FakeReader(page), llm, sent, accounts=("DeskOne", "DeskTwo"))
+    assert summary["sent"] == 1 and "44%" not in sent[0] and "50%" in sent[0]
+
+
+def test_the_deduper_is_told_a_different_figure_is_a_repeat_and_an_update_says_so():
+    assert "different figures" in xnews.SYSTEM and "revision" in xnews.SYSTEM
+    assert '"עדכון:"' in xnews.SYSTEM and "twelve hours" in xnews.SYSTEM
+
+
+def test_an_empty_analysis_sends_the_news_without_a_line(tmp_path):
+    llm = picker({"post_id": "201", "importance": 5, "summary_he": "חברה C הודיעה על רכישה",
+                  "analysis_he": "  "})
+    sent = []
+    run(tmp_path, FakeReader({"tweets": [row("201")], "has_next_page": False}), llm, sent)
+    assert "חברה C הודיעה על רכישה" in sent[0] and "💡" not in sent[0]
+
+
+def test_the_screener_asks_for_new_context_or_nothing():
+    from tascreen import agents
+    text = agents.card("news-screener")["prompt"]
+    assert "must not restate" in text and 'empty string ""' in text
+    assert "משפיע על המגזר" in text and "ומניות רגישות לריבית" in text
+
+
+def test_the_strategist_writes_with_the_same_hebrew_glossary():
+    from tascreen import agents
+
+    def glossary(name):
+        text = agents.card(name)["prompt"]
+        return " ".join(text[text.index("- Every sentence has a verb"):text.index("X = ציוץ.")].split())
+
+    assert glossary("chief-strategist") == glossary("news-screener")
+
+
+def test_style_slips_are_counted_but_the_news_still_goes_out():
+    posts = [xnews.to_post(row("161"))]
+    llm = picker({"post_id": "161", "importance": 5, "summary_he": "ה-Fed השאיר את הריבית",
+                  "analysis_he": "ה-swaps מתמחרים הורדה", "same_story_as": "", "repeat_of_sent": False})
+    counts: dict[str, int] = {}
+    picks, _ = xnews.triage(posts, llm, 3, counts=counts)
+    assert len(picks) == 1 and counts["style_slips"] == 2

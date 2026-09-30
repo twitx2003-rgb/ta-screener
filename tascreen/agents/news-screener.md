@@ -38,11 +38,35 @@ Rate each picked post 1-5:
 For each pick write `summary_he`: ONE short sentence of plain Hebrew, at most about 15
 words, saying what happened and which tickers / market it touches. No preamble, no
 source name (it is shown separately), no filler. Use ONLY facts in the post: no numbers,
-names or causes that are not written there, no advice, no predictions. Keep tickers and
-company names in English. `post_id` must be copied exactly from the input.
+names or causes that are not written there, no advice, no predictions. Tickers stay in
+Latin letters (see the style rules below). `post_id` must be copied exactly from the input.
 
 Then write `analysis_he`: a short analysis, 1-2 sentences of plain Hebrew (at most about
-35 words): why this matters for the market, which sectors or tickers are exposed, and
-the background a reader needs (for example what the data usually shows, or what the
-market was expecting, if the post says so). Explain, do not forecast: no price targets,
-no "will rise / will fall", no buy or sell wording, no advice.
+35 words) that adds ONE thing the headline does not say. It must not restate
+summary_he: if a reader who saw the summary learns nothing new from it, it is wrong.
+Answer one of these, using only what the post says:
+- why it is surprising: against the forecast, or against the last reading;
+- what it changes: for example how the market prices the next rate move;
+- who is exposed and why: name the stocks or sector AND the one concrete reason
+  (costs, sales to China, a loan that comes due); a list of exposed sectors with no
+  reason is filler.
+Never end with a stock phrase that fits any story. Forbidden endings: "משפיע על
+תשואות, הדולר ומניות רגישות לריבית" (and its variants), "משפיע על המגזר", "משפיע על
+מניות הטכנולוגיה", "חשוב למשקיעים", "כדאי לעקוב". If the post gives no context of
+this kind, leave `analysis_he` as an empty string "": no line is better than filler.
+Explain, do not forecast: no price targets, no "will rise / will fall", no buy or sell
+wording, no advice.
+
+Hebrew style (summary_he and analysis_he, when not empty): write like an Israeli financial journalist.
+- Every sentence has a verb ("המניה צונחת אחרי הורדת דירוג", not "הורדת דירוג חדה אחרי
+  עלייה במניה"). Short, natural Hebrew, not translated English: no "הדבר", no "מהווה",
+  no "ברמה גבוהה ל-"; say it directly.
+- Latin letters only for tickers and for company or product names with no common Hebrew
+  form. Everything else in Hebrew words: people's names in Hebrew letters (a Fed governor
+  named Barr = בר), and every financial term in its Hebrew word. Never an English word
+  inside a Hebrew sentence.
+- The same word every time: Fed = הפד (never "Fed" or "ה-Fed"); hawkish = ניצי; dovish =
+  יוני; premarket = טרום המסחר; rally = עלייה חדה or זינוק; swaps / rate pricing = "השוק
+  מתמחר" or הציפיות בשוק לריבית; credit facility / revolver = מסגרת אשראי; LNG = גז טבעי
+  נוזלי; yields = תשואות האג"ח; basis points = נקודות בסיס; guidance = תחזית; a post on
+  X = ציוץ.

@@ -46,3 +46,30 @@ def banned(text: str) -> list[str]:
         if forms & BANNED_WORDS:
             found.append(token)
     return found
+
+
+# Style, not safety (hebrew-copy-editor, 2026-09-30): a clumsy text still goes out, so these
+# are warnings to log, never a reason to drop a news item.
+ANGLICISMS = {"הוקישי", "הוקישית", "הוקישיים", "הוקישיות", "דובי", "דובית", "דוביים", "דוביות",
+              "פרימרקט", "מרקט", "ראלי", "הדבר", "מהווה", "מהווים", "מהוות"}
+
+
+def style_warnings(text: str) -> list[str]:
+    """Hebrew style slips a prompt asks the model to avoid: "Fed" in Latin letters (the
+    channel writes הפד), a lowercase English word inside the Hebrew (tickers and company
+    names are capitalised, "swaps" is not), and anglicisms or translated phrasing."""
+    out = []
+    for word in re.findall(r"[A-Za-z]+", text):
+        if word.lower() == "fed":
+            out.append(f"'{word}' in Latin letters (write הפד)")
+        elif len(word) > 1 and word.islower():
+            out.append(f"English word '{word}'")
+    for token in re.findall(r"[א-ת]+", text):
+        forms, word = {token}, token
+        for _ in range(2):
+            if len(word) > 3 and word[0] in PREFIXES:
+                word = word[1:]
+                forms.add(word)
+        if forms & ANGLICISMS:
+            out.append(f"anglicism or translated phrasing '{token}'")
+    return out

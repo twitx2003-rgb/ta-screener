@@ -33,7 +33,7 @@ from typing import Any, Callable
 
 from .errors import ProviderError
 from .agents import prompt as agent_prompt
-from .analyst.text_rules import banned
+from .analyst.text_rules import banned, style_warnings
 from . import watchlist
 from .fields import pick
 from .llm import UsageLimit
@@ -213,7 +213,13 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 
 # tascreen/agents/news-screener.md, with news-deduper.md: one call does both jobs
 SYSTEM = agent_prompt("news-screener", "news-deduper")
-SENT_WINDOW_S = 2 * 3600     # stories sent this recently are shown to the deduper
+# Stories sent this recently are shown to the deduper. It was two hours, and the channel got
+# the same story twice 2-3 hours apart from two accounts, with different figures (2026-09-29).
+# Twelve hours covers a whole US session plus its evening, so a story sent at the open is
+# still known when a second account repeats it late at night.
+SENT_WINDOW_S = 12 * 3600
+SENT_SHOWN_MAX = 30          # the newest this many go into the prompt (about 30 x 250 chars)
+SENT_RECENT_KEPT = 60        # rows kept in the state file (the explainer reads them too)
 RECENT_WINDOW_S = 3 * 3600   # posts kept this long for the market explainer (tascreen/explain.py)
 RECENT_MAX = 300
 SOURCES_SHOWN = 3
@@ -297,8 +303,8 @@ def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
            counts: dict[str, int] | None = None) -> tuple[list[tuple[Post, dict]], int]:
     """(the picks at or above `min_importance`, in post order; how many answers were rejected).
     A post marked as the same story as another is folded into it (its account becomes a
-    source of the main one); a repeat of a story sent in the last two hours is dropped.
-    `counts` gets "merged" and "repeats"."""
+    source of the main one); a repeat of a story sent within SENT_WINDOW_S is dropped.
+    `counts` gets "merged", "repeats" and "style_slips" (Hebrew style warnings)."""
     if not posts:
         return [], 0
     user = (note + "\n\n" if note else "") + user_prompt(posts, already_sent, holdings)
@@ -333,6 +339,9 @@ def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
                 analysis = ""
             picks[post_id] = {"importance": importance, "summary_he": summary[:SUMMARY_MAX],
                               "analysis_he": analysis[:ANALYSIS_MAX], "sources": []}
+            if counts is not None:           # style slips are counted, never a reason to drop
+                slips = len(style_warnings(f"{summary} {analysis}"))
+                counts["style_slips"] = counts.get("style_slips", 0) + slips
     merged = 0
     for dup, main in same.items():          # a chain (a -> b -> c) ends at its last main post
         seen = {dup}
@@ -579,7 +588,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             weekend = is_weekend(now)
             counts: dict[str, int] = {}
             already = [{"author": r["author"], "summary_he": r["summary_he"],
-                        "minutes_ago": (stamp - int(r["at"])) // 60} for r in sent_recent]
+                        "minutes_ago": (stamp - int(r["at"])) // 60} for r in sent_recent[-SENT_SHOWN_MAX:]]
             threshold = max(min_importance, weekend_min_importance) if weekend else min_importance
             picks, summary["rejected"] = triage(
                 [_row_post(r) for r in pending], llm, min(DIGEST_FROM, threshold),
@@ -626,7 +635,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     summary["waiting"] = len(pending)
     summary["claude_today"] = model["calls"]
     save_state(state_path, {"since": since, "seen": seen, "pending": pending, "reads": reads, "llm": model,
-                            "budget": budget, "balance": balance, "sent_recent": sent_recent[-40:],
+                            "budget": budget, "balance": balance, "sent_recent": sent_recent[-SENT_RECENT_KEPT:],
                             "recent": recent, "day_log": day_log})
     summary["status"] = status
     return summary

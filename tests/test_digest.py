@@ -73,7 +73,7 @@ def test_a_digest_is_built_and_a_thin_answer_is_asked_again():
     llm = SyntheticLLM(lambda s, u, sc: answers.pop(0))
     d = digest.build(TUESDAY_10, log, {"SPY": -0.42, "QQQ": 0.3}, llm, NY)
     assert len(llm.calls) == 2 and len(d["items"]) == 6 and d["headline_he"] == "יום של דוחות חזקים."
-    assert d["window_he"] == "מפתיחת המסחר אתמול, 16:30, עד 10:00" and d["date_he"] == "שלישי · 29/09/2026"
+    assert d["window_he"] == "מפתיחת המסחר אתמול, 16:30, עד 10:00 (שעון ישראל)" and d["date_he"] == "שלישי · 29/09/2026"
     assert d["indexes"] == [{"name": "S&P 500", "change": -0.42}, {"name": "נאסד\"ק 100", "change": 0.3}]
     assert digest.build(TUESDAY_10, log[:2], {}, llm, NY) is None                   # too few stories
 

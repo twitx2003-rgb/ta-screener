@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 
 from .agents import prompt as agent_prompt
 from .digest_render import CATEGORIES
+from .hebrew import count_he
 from .market_hours import is_trading_day, session_bounds
 
 ISRAEL = ZoneInfo("Asia/Jerusalem")
@@ -171,11 +172,12 @@ def build(now: datetime, day_log: list[dict], moves: dict[str, float], llm, mark
         "kicker": "וול סטריט · סיכום בוקר",
         "title_he": "מה קרה מאז הפתיחה" if when == "אתמול" else f"מה קרה מאז יום {WEEKDAYS[opened.weekday()]}",
         "date_he": f"{WEEKDAYS[local.weekday()]} · {local:%d/%m/%Y}",
-        "window_he": f"מפתיחת המסחר {when}, {opened:%H:%M}, עד {local:%H:%M}",
+        "window_he": f"מפתיחת המסחר {when}, {opened:%H:%M}, עד {local:%H:%M} (שעון ישראל)",
         "indexes": [{"name": INDEX_NAMES.get(k, k), "change": v} for k, v in moves.items() if k in INDEX_NAMES],
         "headline_he": written["headline_he"] or written["items"][0]["title_he"],
         "items": written["items"], "watch_he": written["watch_he"],
-        "footer_he": f"{len(written['items'])} ידיעות מתוך {len(picked)} שנבחרו מ-X · {len(used)} מקורות",
+        "footer_he": (f"{count_he(len(written['items']), 'ידיעה אחת', 'ידיעות')} מתוך {len(picked)} "
+                      f"שנבחרו מ-X · {count_he(len(used), 'מקור אחד', 'מקורות')}"),
         "session": session.isoformat(), "dropped": dropped,
     }
 

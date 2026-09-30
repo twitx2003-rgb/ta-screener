@@ -18,8 +18,8 @@ What the engine computes:
   the last 10 sessions. Say an average rises only when its direction fact says so.
 - ma.price_vs: the price above all three averages, below all three, or between them.
 - sma50.distance_atr and stretch: from 3 ATRs away from the 50-day average the price is
-  stretched; the stretch fact says it in percent ("רחוק מהרגיל מממוצע 50 יום: 10.4%
-  מעליו"). Never write "ATR" in the text.
+  stretched; the stretch fact says it in percent ("המחיר 10.4% מעל ממוצע 50 יום, רחוק
+  מהרגיל"). Never write "ATR" in the text.
 - ma.stack: all three averages in order, or, looser, the price above (below) all three
   with the 50-day above (below) the 200-day: both are "מגמת עלייה" ("מגמת ירידה").
 - ma.spread_pct and range.*: the three averages bunched within 2% of each other mean no

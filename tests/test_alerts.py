@@ -254,7 +254,7 @@ def test_ci_live_prices_the_watch_list_and_alerts_once(tmp_path, monkeypatch):
     assert summary["ended"] == "the session is over" and summary["watched"] == 1
     assert summary["alerts"] == 1 and summary["calls"] >= 1 and "NASDAQ" not in json.dumps(summary)
     assert calls[0] == ("mcp-tv-get-ohlcv", "NASDAQ:DB") and len(sent) == 2
-    assert "המעקב במהלך המסחר התחיל" in sent[0] and "1 מניות במעקב" in sent[0]   # once a session
+    assert "המעקב במהלך המסחר התחיל" in sent[0] and "מניה אחת במעקב" in sent[0]   # once a session
     assert "פריצה תוך כדי מסחר" in sent[1]
     assert "NASDAQ:DB|double_bottom" in read_sent(store, session)["live"]
     assert run.ci_live(settings, 345) == 0 and len(sent) == 2               # neither told twice

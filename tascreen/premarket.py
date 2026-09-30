@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from .alerts import _link
 from .config import UniverseSettings
 from .fields import pick
+from .hebrew import NY_TIME
 from .market_hours import next_open
 from .tv.data import SCREENER_TOOL, fetch_in_session
 from .universe import parse_screener
@@ -117,7 +118,7 @@ def message(slot: str, movers: dict[str, Any], crossings: list[dict[str, Any]], 
             index_line: str = "", why: str | None = None) -> str:
     """The report in Telegram HTML; with the index funds' line and the market explainer's
     sentences (tascreen/explain.py) when they are there."""
-    lines = [f"🌅 <b>לפני הפתיחה</b> ({slot} בניו יורק) · מחירי טרום מסחר, לא סופיים"]
+    lines = [f"🌅 <b>לפני הפתיחה</b> ({slot} {NY_TIME}) · מחירי טרום מסחר, לא סופיים"]
     if index_line:
         lines.append(index_line)
     if why:

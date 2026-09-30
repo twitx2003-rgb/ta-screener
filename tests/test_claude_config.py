@@ -55,7 +55,10 @@ def test_agents_get_only_read_only_tradingview_tools():
         for tool in tools:
             if tool.startswith(PREFIX):
                 assert is_read_only(tool.removeprefix(PREFIX)), f"{path.name}: {tool}"
-        assert "Edit" not in tools and "Write" not in tools, f"{path.name} must not edit files"
+        # the copy editors (hebrew-copy-editor, ...) edit prompts and templates, approved by
+        # the owner 2026-09-30; an agent that can reach TradingView must not also edit files
+        if any(tool.startswith(PREFIX) for tool in tools):
+            assert "Edit" not in tools and "Write" not in tools, f"{path.name} must not edit files"
 
 
 def test_skills_have_names_and_descriptions():

@@ -38,6 +38,19 @@ stories say is due today or later this week (data, a Fed speaker, earnings), at 
 characters, or "" if they say nothing.
 
 Use ONLY facts in the stories and the index moves: no number, name, date or cause that
-is not written there; copy numbers as written. Keep tickers and company names in
-English. Explain, do not forecast: no "will rise / will fall", no targets, no buy or sell
+is not written there; copy numbers as written. Explain, do not forecast: no "will rise / will fall", no targets, no buy or sell
 wording, no advice.
+
+Hebrew style (title_he, detail_he, headline_he and watch_he): write like an Israeli financial journalist.
+- Every sentence has a verb ("המניה צונחת אחרי הורדת דירוג", not "הורדת דירוג חדה אחרי
+  עלייה במניה"). Short, natural Hebrew, not translated English: no "הדבר", no "מהווה",
+  no "ברמה גבוהה ל-"; say it directly.
+- Latin letters only for tickers and for company or product names with no common Hebrew
+  form. Everything else in Hebrew words: people's names in Hebrew letters (a Fed governor
+  named Barr = בר), and every financial term in its Hebrew word. Never an English word
+  inside a Hebrew sentence.
+- The same word every time: Fed = הפד (never "Fed" or "ה-Fed"); hawkish = ניצי; dovish =
+  יוני; premarket = טרום המסחר; rally = עלייה חדה or זינוק; swaps / rate pricing = "השוק
+  מתמחר" or הציפיות בשוק לריבית; credit facility / revolver = מסגרת אשראי; LNG = גז טבעי
+  נוזלי; yields = תשואות האג"ח; basis points = נקודות בסיס; guidance = תחזית; a post on
+  X = ציוץ.

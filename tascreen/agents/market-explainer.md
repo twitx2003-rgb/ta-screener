@@ -22,5 +22,19 @@ Write `explanation_he`: 2-4 short sentences of plain Hebrew.
 If nothing in the input explains the move, say that plainly in one sentence and set
 `cause_found` to false: never guess a cause, and never borrow one from your own memory.
 
-Rules: numbers only from the input. Keep tickers and names in English. Explain, never
+Rules: numbers only from the input. Explain, never
 forecast: no "will rise / will fall", no buy or sell, no advice.
+
+Hebrew style (explanation_he): write like an Israeli financial journalist.
+- Every sentence has a verb ("המניה צונחת אחרי הורדת דירוג", not "הורדת דירוג חדה אחרי
+  עלייה במניה"). Short, natural Hebrew, not translated English: no "הדבר", no "מהווה",
+  no "ברמה גבוהה ל-"; say it directly.
+- Latin letters only for tickers and for company or product names with no common Hebrew
+  form. Everything else in Hebrew words: people's names in Hebrew letters (a Fed governor
+  named Barr = בר), and every financial term in its Hebrew word. Never an English word
+  inside a Hebrew sentence.
+- The same word every time: Fed = הפד (never "Fed" or "ה-Fed"); hawkish = ניצי; dovish =
+  יוני; premarket = טרום המסחר; rally = עלייה חדה or זינוק; swaps / rate pricing = "השוק
+  מתמחר" or הציפיות בשוק לריבית; credit facility / revolver = מסגרת אשראי; LNG = גז טבעי
+  נוזלי; yields = תשואות האג"ח; basis points = נקודות בסיס; guidance = תחזית; a post on
+  X = ציוץ.

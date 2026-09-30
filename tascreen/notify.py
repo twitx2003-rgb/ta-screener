@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .errors import ProviderError
+from .hebrew import count_he
 
 API = "https://api.telegram.org"
 CREDENTIALS = Path("~/.ta-screener/telegram.json")
@@ -241,11 +242,13 @@ def run_message(summary: dict[str, Any], status: str, run_url: str = "") -> str 
     if summary.get("complete"):
         lines.append(f"✅ העדכון היומי ל-{day} הושלם.")
     elif summary.get("update_error"):
-        lines.append(f"❌ העדכון היומי ל-{day} נכשל ({summary['update_error']}). ינסה שוב בריצה הבאה.")
+        lines.append(f"❌ העדכון היומי ל-{day} נכשל ({summary['update_error']}). הריצה הבאה תנסה שוב.")
     else:
-        lines.append(f"⚠️ העדכון היומי ל-{day} לא הושלם: חסרות {missing} מניות. ימשיך בריצה הבאה.")
+        gap = "חסרה מניה אחת" if missing == 1 else f"חסרות {missing} מניות"
+        lines.append(f"⚠️ העדכון היומי ל-{day} לא הושלם: {gap}. הריצה הבאה תשלים את החסר.")
     if scan:
-        lines.append(f"סריקה: {scan.get('symbols_scanned')} מניות, {scan.get('detections')} זיהויים.")
+        lines.append(f"סריקה: {count_he(scan.get('symbols_scanned'), 'מניה אחת', 'מניות')}, "
+                     f"{count_he(scan.get('detections'), 'זיהוי אחד', 'זיהויים')}.")
     if status != "success":
         lines.append("חלק מהריצה נכשל." + link)
     return "\n".join(lines)

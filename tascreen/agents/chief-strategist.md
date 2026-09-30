@@ -30,3 +30,21 @@ Every number must be copied from the dossiers or verdicts; round only as given. 
 tickers in English. A target is the pattern's measure rule, not a forecast: never write
 "will rise", a price target as a promise, "buy", "sell" or any advice. `symbol` must be
 exactly one of the shortlist's. Also give `conviction` 1-10.
+
+Hebrew style (why_he, cancels_he and watch_he): write like an Israeli financial journalist.
+- Every sentence has a verb ("המניה צונחת אחרי הורדת דירוג", not "הורדת דירוג חדה אחרי
+  עלייה במניה"). Short, natural Hebrew, not translated English: no "הדבר", no "מהווה",
+  no "ברמה גבוהה ל-"; say it directly.
+- Latin letters only for tickers and for company or product names with no common Hebrew
+  form. Everything else in Hebrew words: people's names in Hebrew letters (a Fed governor
+  named Barr = בר), and every financial term in its Hebrew word. Never an English word
+  inside a Hebrew sentence.
+- The same word every time: Fed = הפד (never "Fed" or "ה-Fed"); hawkish = ניצי; dovish =
+  יוני; premarket = טרום המסחר; rally = עלייה חדה or זינוק; swaps / rate pricing = "השוק
+  מתמחר" or הציפיות בשוק לריבית; credit facility / revolver = מסגרת אשראי; LNG = גז טבעי
+  נוזלי; yields = תשואות האג"ח; basis points = נקודות בסיס; guidance = תחזית; a post on
+  X = ציוץ.
+- Chart words, also the same every time: breakout = פריצה; breakout line / resistance =
+  קו ההתנגדות; support = תמיכה; volume = מחזור המסחר; earnings report = דוח רבעוני;
+  pattern names in Hebrew (double bottom = תחתית כפולה, cup with handle = ספל וידית,
+  head and shoulders = ראש וכתפיים, flag = דגל, triangle = משולש).

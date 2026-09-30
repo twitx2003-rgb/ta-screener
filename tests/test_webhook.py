@@ -125,8 +125,9 @@ def test_the_webhook_answers_only_the_owner_and_only_symbols(tmp_path):
     assert by["unclear"]["outcome"] == "group help" and by["unclear"]["calls"][0]["body"]["chat_id"] == "-555"
     assert by["group help"]["outcome"] == "group help" and len(by["group help"]["calls"]) == 1
     assert by["group help"]["calls"][0]["body"]["chat_id"] == "-555" and "NVDA" in by["group help"]["calls"][0]["body"]["text"]
-    assert by["refused"]["outcome"] == "dispatch failed"
-    assert "GitHub 401" in by["refused"]["calls"][1]["body"]["text"]
+    assert by["refused"]["outcome"] == "dispatch failed (GitHub 401)"          # the log keeps the status
+    refused = by["refused"]["calls"][1]["body"]["text"]
+    assert "סליחה" in refused and "GitHub" not in refused and "401" not in refused
     assert by["thrown"]["status"] == 200                         # Telegram never retries
 
 

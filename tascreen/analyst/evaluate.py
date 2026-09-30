@@ -52,7 +52,8 @@ def run_eval(store: Store, llm: LLM, folder: Path, *, to_png: Callable[[Path, Pa
         else:
             out = folder / symbol.replace(":", "_")
             try:
-                done = produce(symbol, bars, out, llm=llm, name=company_name(store.scans_dir, symbol))
+                done = produce(symbol, bars, out, llm=llm, name=company_name(store.scans_dir, symbol,
+                                                                      getattr(store, "universe_dir", None)))
                 entry.update(folder=out.name, stem=done["stem"],
                              omitted=done["written"]["omitted"] if done["written"] else None)
                 if to_png is not None:

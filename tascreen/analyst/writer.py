@@ -33,7 +33,9 @@ from .facts import Analysis
 from .view import FIB, HIGH52, LOW52, note_parts, simple_view
 
 KNOWLEDGE_DIR = Path(__file__).with_name("knowledge")
-PARTS = {"headline": "בקצרה", "levels": "רמות", "trend": "מגמה",
+# The trend section is titled by what it describes (2026-09-30: "מגמת עלייה:" in the headline
+# and a later "מגמה:" read as two sections on the same thing).
+PARTS = {"headline": "בקצרה", "levels": "רמות", "trend": "ממוצעים נעים",
          "fibonacci": FIB, "volume": "נפח", "momentum": "מומנטום", "patterns": "תבניות",
          "up": "תרחיש עלייה", "down": "תרחיש ירידה"}
 # The model writes these; the program writes the levels line and the two scenarios from the
@@ -67,6 +69,17 @@ BULL, BEAR = ("שורי", "שורית", "שוריים", "שוריות"), ("דו�
 UP_TREND = ("מגמה עולה", "מגמת עלייה", "מגמה חיובית")
 DOWN_TREND = ("מגמה יורדת", "מגמת ירידה", "מגמה שלילית")
 UP_WORDS, DOWN_WORDS = ("עולה", "עלייה", "שורי"), ("יורד", "ירידה", "דובי")
+# The headline's lead against the key event's direction (2026-09-30: "אין מגמה ברורה:" over a
+# breakdown on high volume; "מגמת עלייה, אחרי שבירה:" said neither).
+LEAD_UP, LEAD_DOWN = ("פריצה", "עלייה", "שיא", "קפץ", "קפיצה"), ("שבירה", "ירידה", "שפל", "תיקון", "נבלם")
+EVENT_UP = {"bounced": True, "rejected": False, "new_high": True, "new_low": False}
+MUDDLED_LEAD = re.compile(r"אחרי (?:ה)?(?:שבירה|פריצה)")
+# Percentages measured from a scenario's own level, not from the close: kept in the analysis,
+# left out of the model's brief (2026-09-30: one scenario quoted two bases).
+NOT_IN_BRIEF = (".room_pct", ".risk_pct")
+# "ממוצע 50 יום, ממוצע 150 יום וממוצע 200 יום" said once (2026-09-30).
+MA_LIST3 = re.compile(r"(?<![א-ת])ממוצע (\d+) יום, ממוצע (\d+) יום ו?ממוצע (\d+) יום")
+MA_LIST2 = re.compile(r"(?<![א-ת])ממוצע (\d+) יום וממוצע (\d+) יום")
 
 RULES = """You are the chart analyst of a Hebrew technical-analysis website. You explain one stock's
 daily chart to an ordinary reader. A program computed every level and signal; you only explain
@@ -108,9 +121,15 @@ them) and, at the end, the two scenarios (up.* and down.*): never repeat their n
 You write, ONE short sentence each, at most one of each:
 - headline (required, <= 170 characters, at most two numbers): a lead of two to four words
   and a colon, then the key event, quoting the `event` fact as given (it must cite `event`).
-  The lead is the trend in plain words and agrees with the light: "מגמת עלייה:", "מגמת
-  ירידה:", "אין מגמה ברורה:", "מגמת עלייה, בתיקון:" (yellow), "מגמת עלייה, אחרי שבירה:"
-  (yellow). Never repeat the close, the date or the day's change.
+  The lead must agree with the event it introduces and with the light:
+  - the event goes with the averages' trend, or has no direction: the trend in plain words,
+    "מגמת עלייה:", "מגמת ירידה:", "מגמת עלייה, בתיקון:" (yellow), "אין מגמה ברורה:";
+  - the event has a direction (a breakout or breakdown, a zone crossed, a new yearly high or
+    low, a bounce or a rejection, a big move) against the trend or with no trend: name the
+    event first, "שבירה בתוך מגמת עלייה:" (yellow), "פריצה בתוך מגמת ירידה:" (yellow),
+    "שבירה:" (red), "פריצה:" (green). Never "אין מגמה ברורה:" before a breakout or a
+    breakdown, never "אחרי שבירה" / "אחרי פריצה" in the lead.
+  Never repeat the close, the date or the day's change.
 - At most ONE of these optional sections, only when it adds to the picture now, the most
   important one (<= 150 characters): patterns (a pat_* breakout or failure: what the
   headline did not say, such as the breakout day's volume in words, the target or the line's
@@ -122,7 +141,10 @@ You write, ONE short sentence each, at most one of each:
 
 Never repeat between sections: a number or date the headline gave is not given again; the
 averages' direction only under trend. A section that would only repeat the headline is left
-out. Averages are "ממוצע 50 יום", "ממוצע 150 יום", "ממוצע 200 יום", never "הממוצע הבינוני".
+out. One average is "ממוצע 50 יום", never "הממוצע הבינוני"; several are said once:
+"הממוצעים של 50, 150 ו-200 יום", never "ממוצע 50 יום, ממוצע 150 יום וממוצע 200 יום".
+A distance in percent is always from the close ("3.1% מעל הסגירה"), never from another level.
+Every sentence names its subject: "המחיר 5.1% מעל ממוצע 50 יום", never "הוא רחוק 5.1%".
 
 Plain words for an ordinary reader, the term at most once in brackets: "ה-RSI (מדד
 המומנטום)"; the MACD as macd.momentum says it ("המומנטום שלילי ומתחזק כלפי מטה"); "סטייה
@@ -181,8 +203,9 @@ def chart_lines(analysis: Analysis) -> list[str]:
 
 
 def user_prompt(analysis: Analysis) -> str:
+    facts = {k: v for k, v in analysis.facts.items() if not k.endswith(NOT_IN_BRIEF)}
     brief = {"symbol": analysis.symbol, "last_day": analysis.last_day,
-             "chart": chart_lines(analysis), "facts": analysis.facts}
+             "chart": chart_lines(analysis), "facts": facts}
     return "Write the analysis.\n\nBRIEF (JSON):\n" + json.dumps(brief, ensure_ascii=False, indent=1)
 
 
@@ -256,6 +279,39 @@ def direction_problem(text: str, cited: list[dict]) -> str | None:
     return None
 
 
+def event_direction(facts: dict[str, dict]) -> bool | None:
+    """True for an upward key event, False for a downward one, None when it has no direction
+    (a failed breakout, the price near an extreme, a range, a pullback, where it stands)."""
+    kind = str((facts.get("event.kind") or {}).get("value") or "")
+    text = str((facts.get("event") or {}).get("value") or "")
+    if kind in EVENT_UP:
+        return EVENT_UP[kind]
+    if kind in ("fresh_breakout", "retest"):
+        return True if "פריצה" in text else False if "שבירה" in text else None
+    if kind == "zone_break":
+        return True if "פרץ מעל" in text else False if "מתחת ל" in text else None
+    if kind == "big_move":
+        return text.startswith("עלייה") if text.startswith(("עלייה", "ירידה")) else None
+    return None
+
+
+def lead_problem(text: str, facts: dict[str, dict]) -> str | None:
+    """The headline's lead (the words before the colon) must agree with the key event."""
+    lead, colon, _ = text.partition(":")
+    if not colon:
+        return None
+    if MUDDLED_LEAD.search(lead):
+        return 'a lead "אחרי שבירה/פריצה" says neither the trend nor the event: name the event, e.g. "שבירה בתוך מגמת עלייה:"'
+    up = event_direction(facts)
+    if up is None:
+        return None
+    if not _has_word(lead, LEAD_UP if up else LEAD_DOWN):
+        word, trend = ("פריצה", "ירידה") if up else ("שבירה", "עלייה")
+        return (f"the lead \"{lead.strip()}\" disagrees with the key event, which is {'upward' if up else 'downward'}: "
+                f"lead with it, \"{word}:\" or \"{word} בתוך מגמת {trend}:\"")
+    return None
+
+
 def part_problem(part: dict, facts: dict[str, dict], numbers: list[float],
                  dates: set[tuple[int, int, int]], drawn: set[str] | None = None) -> str | None:
     name = part.get("part")
@@ -293,6 +349,10 @@ def part_problem(part: dict, facts: dict[str, dict], numbers: list[float],
     # the story and the levels come from the facts the chart was drawn from
     if name == "headline" and "event" in facts and "event" not in cites:
         return "must cite event (the key event now)"
+    if name == "headline":
+        lead = lead_problem(text, facts)
+        if lead:
+            return lead
     lines = {c.split(".")[0] for c in cites if c.startswith("tl_")}
     if drawn is not None and lines - drawn:
         return f"the trendline {sorted(lines - drawn)[0]} is not on the chart: leave it out"
@@ -325,6 +385,7 @@ def part_problem(part: dict, facts: dict[str, dict], numbers: list[float],
 
 def _finish(text: str) -> str:
     text = YEAR.sub(r"\1", DOLLAR.sub("", " ".join(text.split())))
+    text = MA_LIST2.sub(r"הממוצעים של \1 ו-\2 יום", MA_LIST3.sub(r"הממוצעים של \1, \2 ו-\3 יום", text))
     text = text.replace("פיבונאצ'י", FIB).replace(" - ", ", ").replace(" (לא תחזית)", "")
     if "יעד" in text and "גובה התבנית" not in text and "כלל המדידה" not in text and FIB not in text:
         text += " (לפי גובה התבנית)"
@@ -508,7 +569,9 @@ def write(analysis: Analysis, llm: LLM, *, rules: dict[str, Any] | None = None, 
 
 
 # ------------------------------------------------------------------ the message
-DISCLAIMER = "לא ייעוץ השקעות. הרמות ממחירי עבר, לא תחזית."
+# One footer wherever an analysis or an alert appears (2026-09-30: three wordings in three
+# messages); tascreen/alerts.py is to use the same words.
+DISCLAIMER = "לא ייעוץ השקעות. רמות ויעדים מחושבים ממחירי עבר, לא תחזית."
 
 
 def _day(day: str) -> str:

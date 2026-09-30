@@ -119,7 +119,7 @@ def test_the_evening_report_sends_only_the_picks_and_records_them(tmp_path):
                                   can_dispatch=True, fallback=lambda note: pytest.fail("no fallback"),
                                   to_png=lambda svg: b"png")
     assert out["status"] == "sent" and out["research"] == "picked" and out["picks"] == 1
-    assert bot.sent[0].startswith("<b>🏆 המובחרות של") and "ובחר 1." in bot.sent[0]
+    assert bot.sent[0].startswith("<b>🏆 המובחרות של") and "ובחר אחת." in bot.sent[0]
     assert len(bot.albums) == 1 and bot.albums[0][0][1].startswith("🏆 <b>1.</b>")
     assert started and research.read_picks(store)[0]["kind"] == "verge"
     again = research.evening_report(store, view, cfg, bot=bot, min_cases=1, run=run, dispatch=lambda *a: 204,

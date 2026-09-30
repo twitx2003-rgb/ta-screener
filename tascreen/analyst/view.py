@@ -228,7 +228,9 @@ def _plan(analysis: Analysis, rules: dict[str, Any]) -> dict[str, Any]:
             if measured is not None:
                 s.update(next=measured[0], next_what=measured[1], next_label=measured[2])
             elif s.get("trigger_what") in (HIGH52, LOW52):
-                s["no_next"] = "מעליו אין רמות מהשנה האחרונה" if upward else "מתחתיו אין רמות מהשנה האחרונה"
+                # named, not "מעליו" (2026-09-30: the scenario line never said what "it" was)
+                s["no_next"] = ("מעל השיא השנתי אין רמות מהשנה האחרונה" if upward else
+                                "מתחת לשפל השנתי אין רמות מהשנה האחרונה")
             else:
                 s["no_next"] = "מעל רמה זו אין רמות מהשנה האחרונה" if upward else "מתחת לרמה זו אין רמות מהשנה האחרונה"
         scenarios[side] = s
@@ -454,8 +456,10 @@ def key_level_facts(analysis: Analysis, rules: dict[str, Any] | None = None) -> 
             what = s["trigger_what"]
             named = what[1:] if not upward and what.startswith("ה") else what
             f.add(f"{side}.trigger", trigger, f"{title}: סגירה {'מעל ' if upward else 'מתחת ל'}{named}", "$")
-            f.add(f"{side}.trigger_pct", pct(trigger), f"המרחק מהסגירה לרמת ההפעלה ({where})", "%", 1)
-            f.add(f"{side}.trigger_what", what, "מה רמת ההפעלה")
+            # plain words, no "רמת ההפעלה" (2026-09-30: the model quoted it unexplained)
+            f.add(f"{side}.trigger_pct", pct(trigger),
+                  f"המרחק מהסגירה לרמה שסגירה {'מעליה' if upward else 'מתחתיה'} פותחת את תרחיש ה{title[6:]} ({where})", "%", 1)
+            f.add(f"{side}.trigger_what", what, f"{title}: מה הרמה שסגירה {'מעליה' if upward else 'מתחתיה'} פותחת אותו")
         if isinstance(s.get("next"), (int, float)):
             f.add(f"{side}.next", s["next"], f"הרמה הבאה ({s['next_what']}), הקצה הקרוב", "$")
             if isinstance(s.get("next_far"), (int, float)):
@@ -463,14 +467,20 @@ def key_level_facts(analysis: Analysis, rules: dict[str, Any] | None = None) -> 
             f.add(f"{side}.next_pct", pct(s["next"]), f"המרחק מהסגירה לרמה הבאה ({where})", "%", 1)
             f.add(f"{side}.next_what", s["next_what"], "מה הרמה הבאה")
             if s["mode"] == "cross":
-                f.add(f"{side}.room_pct", abs(s["next"] / trigger - 1) * 100, "המרחק מרמת ההפעלה לרמה הבאה", "%", 1)
+                f.add(f"{side}.room_pct", abs(s["next"] / trigger - 1) * 100,
+                      f"{title}: המרחק מהרמה שפותחת אותו לרמה הבאה (לא מהסגירה)", "%", 1)
         elif s.get("no_next"):
             f.add(f"{side}.no_next", s["no_next"], f"{title}: אין רמה הבאה")
         if isinstance(s.get("cancel"), (int, float)):
-            f.add(f"{side}.cancel", s["cancel"], f"סגירה חוזרת {'מתחת ל' if upward else 'מעל '}רמה זו מבטלת את התרחיש", "$")
-            f.add(f"{side}.cancel_what", {"inside": "חזרה אל תוך האזור", "offset": "חצי מהתנודה היומית הממוצעת"}.get(
-                s["cancel_what"], s["cancel_what"]), "מה רמת הביטול")
-            f.add(f"{side}.risk_pct", abs(s["cancel"] / trigger - 1) * 100, "המרחק מרמת ההפעלה לרמת הביטול", "%", 1)
+            # plain sentences (2026-09-30: "סגירה חוזרת אל תוך האזור"; the cancel of a crossed
+            # band is its far edge, so the close is back beyond the whole band)
+            f.add(f"{side}.cancel", s["cancel"],
+                  f"{title} מתבטל אם המחיר נסגר שוב {'מתחת' if upward else 'מעל'} לרמה זו", "$")
+            f.add(f"{side}.cancel_what", {"inside": f"המחיר נסגר שוב {'מתחת' if upward else 'מעל'} לאזור כולו",
+                                          "offset": "חצי מהתנודה היומית הממוצעת"}.get(
+                s["cancel_what"], s["cancel_what"]), f"{title}: מה מבטל אותו")
+            f.add(f"{side}.risk_pct", abs(s["cancel"] / trigger - 1) * 100,
+                  f"{title}: המרחק מהרמה שפותחת אותו לרמת הביטול (לא מהסגירה)", "%", 1)
     event = key_event(facts, position, rules, analysis.drawings)
     if event:
         f.add("event", event[0], "האירוע המרכזי עכשיו")

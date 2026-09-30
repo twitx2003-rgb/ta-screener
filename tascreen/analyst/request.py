@@ -30,19 +30,26 @@ from .pine import pine_script
 DAILY_LIMIT = 10
 
 
-def company_name(scans_dir: Path, symbol: str) -> str | None:
-    """The company's name from the newest scan's indicators (None when there is none)."""
-    days = sorted(p.name for p in scans_dir.glob("????-??-??") if (p / "indicators.parquet").exists()) \
-        if scans_dir.exists() else []
-    if not days:
-        return None
+def _name_in(path: Path, symbol: str) -> str | None:
     try:
-        frame = pd.read_parquet(scans_dir / days[-1] / "indicators.parquet", columns=["symbol", "description"])
+        frame = pd.read_parquet(path, columns=["symbol", "description"])
     except (OSError, ValueError, KeyError):
         return None
     names = frame.loc[frame["symbol"] == symbol, "description"]
     value = names.iloc[0] if len(names) else None
     return value if isinstance(value, str) and value.strip() else None
+
+
+def company_name(scans_dir: Path, symbol: str, universe_dir: Path | None = None) -> str | None:
+    """The company's name from the newest scan's indicators, else from the newest universe
+    (the scan covers only the larger stocks, the bot analyses down to $1B). None when
+    neither has it."""
+    days = sorted(p.name for p in scans_dir.glob("????-??-??") if (p / "indicators.parquet").exists())         if scans_dir.exists() else []
+    name = _name_in(scans_dir / days[-1] / "indicators.parquet", symbol) if days else None
+    if name is None and universe_dir is not None and universe_dir.exists():
+        files = sorted(universe_dir.glob("????-??-??.parquet"))
+        name = _name_in(files[-1], symbol) if files else None
+    return name
 
 
 def produce(symbol: str, bars: pd.DataFrame, folder: Path, *, llm: LLM | None = None,
@@ -93,7 +100,7 @@ def handle_request(text: str, *, bars_dir: Path, read_bars: Callable[[str], pd.D
     today = archive / stamp.strftime("%Y-%m-%d")
     done = [p for p in today.iterdir() if p.is_dir()] if today.exists() else []
     if len(done) >= daily_limit:
-        bot.send(f"הגעת למכסה היומית: {daily_limit} ניתוחים ביום. אפשר לבקש שוב מחר.")
+        bot.send(f"הבוט הגיע למכסה היומית: {daily_limit} ניתוחים ביום. אפשר לבקש שוב מחר.")
         return "daily limit"
     try:
         symbol = find_symbol(bars_dir, text)
@@ -109,9 +116,10 @@ def handle_request(text: str, *, bars_dir: Path, read_bars: Callable[[str], pd.D
     folder = today / f"{stamp:%H%M%S}-{symbol_file_stem(symbol)}"
     try:
         produce(symbol, bars, folder, llm=make_llm(), bot=bot, to_png=to_png, name=name_of(symbol))
-    except Exception as exc:
+    except Exception:
+        # members see a plain sorry; the exception itself reaches the run's log (re-raised)
         try:
-            bot.send(f"הניתוח של {symbol} נכשל ({type(exc).__name__}). הפרטים נשמרו ביומן.")
+            bot.send(f"סליחה, הניתוח של {symbol} לא הצליח הפעם. נסו שוב מאוחר יותר.")
         except Exception:
             pass
         raise

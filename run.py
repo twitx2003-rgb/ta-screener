@@ -1307,7 +1307,7 @@ def analyze(settings, text: str, out: str | None, with_llm: bool, to_telegram: b
         print(f"writing the analysis with {llm.name} (a minute or two)...")
     folder = Path(out) if out else settings.log_dir / "analyses"
     done = produce(symbol, store.read_bars(symbol), folder, llm=llm, bot=bot,
-                   name=company_name(store.scans_dir, symbol))
+                   name=company_name(store.scans_dir, symbol, store.universe_dir))
     analysis, written = done["analysis"], done["written"]
     print(f"\n{symbol}, {analysis.last_day}: {len(analysis.facts)} facts -> {folder / done['stem']}.*")
     if written is None:
@@ -1367,7 +1367,7 @@ def ci_analyze(settings, text: str, archive: str, daily_limit: int, reply_to: st
         status = handle_request(text, bars_dir=store.bars_dir, read_bars=store.read_bars,
                                 archive=Path(archive), bot=bot, make_llm=lambda: _analyst_llm(settings),
                                 daily_limit=daily_limit, quiet_unknown=quiet_unknown,
-                                name_of=lambda s: company_name(store.scans_dir, s))
+                                name_of=lambda s: company_name(store.scans_dir, s, store.universe_dir))
     except Exception as exc:
         log.exception("the analysis failed")
         print(f"analysis: failed ({type(exc).__name__})")

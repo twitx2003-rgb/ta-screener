@@ -203,7 +203,7 @@ def test_the_scenarios_are_built_from_the_zones_the_chart_shows():
     # cancel 1 ATR back sat on the far side of the close)
     assert (facts["up.trigger"], facts["up.next"], facts["up.cancel"]) == (113, 119, 112)
     assert (facts["down.trigger"], facts["down.next"], facts["down.cancel"]) == (104.5, 100, 105.5)
-    assert facts["up.cancel_what"] == "חזרה אל תוך האזור"
+    assert facts["up.cancel_what"] == "המחיר נסגר שוב מתחת לאזור כולו"
     assert (facts["up.trigger_pct"], facts["up.next_pct"], facts["down.trigger_pct"]) == (4.6, 10.2, 3.2)
     assert (facts["up.risk_pct"], facts["up.room_pct"], facts["up.next_far"]) == (0.9, 5.3, 120)
     assert facts["up.trigger_what"] == "הקצה העליון של ההתנגדות הקרובה"
@@ -310,7 +310,7 @@ def test_with_nothing_past_the_trigger_a_fresh_pattern_target_is_the_next_level(
     assert "up.no_next" not in f
     a.facts.pop("pat_1.target")
     f = {k: v["value"] for k, v in key_level_facts(a, RULES).items()}
-    assert f["up.no_next"] == "מעליו אין רמות מהשנה האחרונה"
+    assert f["up.no_next"] == "מעל השיא השנתי אין רמות מהשנה האחרונה"
 
 
 def _map_case(close, zones, **facts):

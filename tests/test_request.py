@@ -134,3 +134,36 @@ def test_the_evaluation_set_writes_every_stock_and_an_index(tmp_path, monkeypatc
                               progress=lambda m: None, until="1990-01-01")
     assert early["until"] == "1990-01-01"
     assert {s["symbol"]: s.get("error") for s in early["stocks"]}["NYSE:SYN"] == "no stored bars up to 1990-01-01"
+
+
+def test_a_failed_analysis_says_sorry_without_the_exception(tmp_path):
+    def broken(system, user, schema):
+        raise KeyError("made-up")
+
+    bars_dir = tmp_path / "bars"
+    bars_dir.mkdir()
+    (bars_dir / "NYSE_SYN.parquet").write_bytes(b"")
+    bot = _Bot()
+    with pytest.raises(KeyError):
+        handle_request("syn", bars_dir=bars_dir, read_bars=lambda s: from_knots(KNOTS),
+                       archive=tmp_path / "analyses", bot=bot, make_llm=lambda: SyntheticLLM(broken),
+                       to_png=_png, now=lambda: NOW)
+    told = bot.sent[-1][1]
+    assert "סליחה" in told and "NYSE:SYN" in told and "KeyError" not in told and "made-up" not in told
+
+
+def test_company_name_falls_back_to_the_universe(tmp_path):
+    import pandas as pd
+    from tascreen.analyst.request import company_name
+
+    scans, universe = tmp_path / "scans", tmp_path / "universe"
+    (scans / "2026-01-05").mkdir(parents=True)
+    universe.mkdir()
+    pd.DataFrame({"symbol": ["NASDAQ:BIGA"], "description": ["Big A Corp"]}).to_parquet(
+        scans / "2026-01-05" / "indicators.parquet")
+    pd.DataFrame({"symbol": ["NASDAQ:SMLB"], "description": ["Small B Inc"]}).to_parquet(
+        universe / "2026-01-05.parquet")
+    assert company_name(scans, "NASDAQ:BIGA", universe) == "Big A Corp"
+    assert company_name(scans, "NASDAQ:SMLB", universe) == "Small B Inc"
+    assert company_name(scans, "NASDAQ:SMLB") is None
+    assert company_name(scans, "NASDAQ:NONE", universe) is None

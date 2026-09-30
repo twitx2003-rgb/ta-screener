@@ -18,7 +18,12 @@ someone who knows only the words "support" and "resistance" understands.
 - Neutral tone: no hype, no emojis, no exclamation marks.
 - Never "(לא תחזית)": the footer says once that no level is a forecast.
 - "ממוצע 50 יום", never "הממוצע הבינוני"; "חזר אל", not "ירד חזרה אל"; a zone broken
-  down: "המחיר נסגר מתחת ל-X", never "נפרץ" or "פרוצה".
+  down: "המחיר נסגר מתחת ל-X", never "נפרץ" or "פרוצה". Several averages once: "הממוצעים
+  של 50, 150 ו-200 יום".
+- Every sentence has its subject ("המחיר 5.1% מעל ממוצע 50 יום", never "הוא רחוק");
+  percentages only from the close.
+- The headline's lead agrees with the key event: "שבירה בתוך מגמת עלייה:", never "אין מגמה
+  ברורה:" before a breakdown.
 - Ratios with one decimal ("פי 1.6"); percentages exactly as in the facts.
 - Each number once in the message: what the headline said, a section does not repeat.
 - Always above or below: every level and line is "מעל הסגירה" or "מתחת לסגירה".

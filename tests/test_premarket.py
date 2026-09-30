@@ -51,7 +51,7 @@ def test_the_message():
         premarket.mover(row("NYSE:CCC", 50.0, -4.0, 46.0, -8.0, description="<C>"), "t", [])], "stale": 0}
     crossings = [{"symbol": "NASDAQ:AAA", "name": "משולש עולה", "line": 104.0, "price": 105.0}]
     text = premarket.message("08:30", movers, crossings, 4)
-    assert text.startswith("🌅 <b>לפני הפתיחה</b> (08:30 בניו יורק)")
+    assert text.startswith("🌅 <b>לפני הפתיחה</b> (08:30 שעון ניו יורק)")
     assert "קו 104.00 · עכשיו 105.00" in text and "+5.0% · 105.00" in text and "-8.0%" in text
     assert "&lt;C&gt;" in text
     quiet = premarket.message("07:30", {"up": [], "down": [], "stale": 3}, [], 4)

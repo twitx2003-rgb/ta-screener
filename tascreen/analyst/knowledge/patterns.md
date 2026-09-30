@@ -16,7 +16,8 @@ What the engine gives:
 - A symmetrical triangle can break either way: its direction is the breakout's, so say
   "פרץ כלפי מעלה", not "תבנית עלייה".
 - pat_N.target: the book's measure rule (the pattern's height added at the breakout).
-  It is a rule of thumb, not a forecast: write "יעד לפי גובה התבנית (לא תחזית)".
+  It is a rule of thumb, not a forecast: write "יעד לפי גובה התבנית" (the footer says once
+  that no level or target is a forecast).
 - pat_N.state, pat_N.sessions_since_breakout, pat_N.close_vs_breakout_pct: where the price
   is today against the breakout. A price back inside the pattern makes the breakout
   doubtful: say so, never present that breakout as live.
