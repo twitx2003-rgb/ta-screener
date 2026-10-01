@@ -110,6 +110,14 @@ def _line(s: Series, i1: int, y1: float, i2: int, y2: float, label: str) -> dict
             "label": label}
 
 
+def _too_late(s: Series, first_i: int, last_i: int, brk: int | None) -> bool:
+    """The breakout (or the wait for one, up to the last bar) came later after the last
+    turning point than the pattern itself lasted: a line drawn months ago confirms
+    nothing now (audit 2026-10-01: a breakout 100 sessions after a 28-session pattern)."""
+    wait = (brk if brk is not None else s.last) - last_i
+    return wait > s.rules.g("max_breakout_wait_share") * (last_i - first_i)
+
+
 # --------------------------------------------------------------- double tops/bottoms
 def _double(s: Series, bottom: bool) -> list[tuple[Detection, frozenset]]:
     key = "double_bottom" if bottom else "double_top"
@@ -145,6 +153,8 @@ def _double(s: Series, bottom: bool) -> list[tuple[Detection, frozenset]]:
         confirm = (lambda i: s.c[i] > m.price) if bottom else (lambda i: s.c[i] < m.price)
         failed = (lambda i: s.c[i] < extreme) if bottom else (lambda i: s.c[i] > extreme)
         brk = s.first_close(b.i + 1, s.last, confirm)
+        if _too_late(s, a.i, b.i, brk):
+            continue
         early_fail = s.first_close(b.i + 1, (brk - 1) if brk is not None else s.last, failed)
         if early_fail is not None:
             continue                            # broke the pattern's extreme before confirming
@@ -200,6 +210,8 @@ def _triple(s: Series, bottom: bool) -> list[tuple[Detection, frozenset]]:
         confirm = (lambda i: s.c[i] > level) if bottom else (lambda i: s.c[i] < level)
         failed = (lambda i: s.c[i] < extreme) if bottom else (lambda i: s.c[i] > extreme)
         brk = s.first_close(seq[4].i + 1, s.last, confirm)
+        if _too_late(s, seq[0].i, seq[4].i, brk):
+            continue
         if s.first_close(seq[4].i + 1, (brk - 1) if brk is not None else s.last, failed) is not None:
             continue
         busted = s.first_close(brk + 1, s.last, failed) if brk is not None else None
@@ -278,6 +290,8 @@ def _head_shoulders(s: Series, top: bool) -> list[tuple[Detection, frozenset]]:
             confirm = lambda i: level(i) > head.price and s.c[i] > level(i)     # noqa: E731
             failed = lambda i: s.c[i] < head.price                 # noqa: E731
         brk = s.first_close(rs.i + 1, s.last, confirm)
+        if _too_late(s, ls.i, rs.i, brk):
+            continue
         if s.first_close(rs.i + 1, (brk - 1) if brk is not None else s.last, failed) is not None:
             continue
         busted = s.first_close(brk + 1, s.last, failed) if brk is not None else None
@@ -291,9 +305,14 @@ def _head_shoulders(s: Series, top: bool) -> list[tuple[Detection, frozenset]]:
                 brk is not None)
         stop = brk if brk is not None else s.last
         labels = ["כתף שמאל", "בית שחי", "ראש", "בית שחי", "כתף ימין"]
+        lines = [_line(s, a1.i, a1.price, stop, neck(stop), "קו צוואר")]
+        if level is not neck:
+            # confirmed through the right armpit: that level is the line drawn as the trigger
+            # (the sloped neckline stays as the pattern's structure)
+            lines.append(_line(s, a2.i, a2.price, stop, a2.price, "קו אישור"))
         det = _new(s, spec, spec.direction, status, ls.i, rs.i, ck, [ls, a1, head, a2, rs], labels,
                    brk, brk_price, height, brk_price - height if top else brk_price + height,
-                   [_line(s, a1.i, a1.price, stop, neck(stop), "קו צוואר")],
+                   lines,
                    (math.nan, level(s.last + 1)) if top else (level(s.last + 1), math.nan))
         out.append((det, frozenset(p.i for p in (ls, a1, head, a2, rs))))
     return out
@@ -437,9 +456,15 @@ def _trendline_patterns(s: Series) -> list[tuple[Detection, frozenset]]:
 
 # ------------------------------------------------------------ flags, pennants
 def _consolidation_lines(s: Series, a: int, b: int):
+    """Lines along the flag's edges: the fitted slopes, moved out to the outermost high
+    and low so each line touches a bar and no bar of the flag pokes through it. A fit
+    through the middle of the highs let closes cross it days before the "breakout"
+    (audit 2026-10-01: 65 of 75 flags)."""
     x = np.arange(a, b + 1, dtype=float)
     bt, at = np.polyfit(x, s.h[a:b + 1], 1)
     bb, ab = np.polyfit(x, s.l[a:b + 1], 1)
+    at += float(np.max(s.h[a:b + 1] - (at + bt * x)))
+    ab += float(np.min(s.l[a:b + 1] - (ab + bb * x)))
     return (lambda i: at + bt * i), (lambda i: ab + bb * i), bt, bb
 
 
@@ -505,11 +530,15 @@ def _flags(s: Series) -> list[tuple[Detection, frozenset]]:
                             brk = nxt
                         else:
                             continue          # the next close is inside: not the end
+                    # a flag continues its pole: a break the other way is not this
+                    # pattern, and the pole's height says nothing about it (owner, 2026-10-01)
+                    if brk is not None and (s.c[brk] > upper(brk)) != bull:
+                        continue
                     status = _status(s, e, brk, None)
                     if status is None or (key, bull, ps) in seen:
                         continue
                     seen.add((key, bull, ps))
-                    direction = "either" if brk is None else ("bullish" if s.c[brk] > upper(brk) else "bearish")
+                    direction = "bullish" if bull else "bearish"
                     ck = Checks(spec)
                     ck.need("pole_min_move_pct", "תורן: תנועה (%)", move, f">= {spec.p('pole_min_move_pct')}",
                             True, "pole_min_move_pct")
@@ -536,7 +565,7 @@ def _flags(s: Series) -> list[tuple[Detection, frozenset]]:
                                brk, bp, pole_height, target,
                                [_line(s, p + 1, upper(p + 1), end_x, upper(end_x), "קו עליון"),
                                 _line(s, p + 1, lower(p + 1), end_x, lower(end_x), "קו תחתון")],
-                               (upper(s.last + 1), lower(s.last + 1)))
+                               (upper(s.last + 1), math.nan) if bull else (math.nan, lower(s.last + 1)))
                     out.append((det, frozenset({ps, p})))
                     break
     return out
@@ -550,7 +579,12 @@ def _high_tight_flag(s: Series) -> list[tuple[Detection, frozenset]]:
     recent = int(r.g("recent_breakout_sessions"))
     out, seen = [], set()
     for p in range(max(s.last - max_cons - recent, max_rise), s.last):
-        lo_i = p - max_rise + int(np.argmin(s.l[p - max_rise:p]))
+        # the rise starts at the last low near the window's lowest (within half an ATR):
+        # on a flat base the very lowest bar can be weeks before the rise
+        lows = s.l[p - max_rise:p]
+        floor = float(lows.min())
+        near = float(s.atr[p]) * 0.5 if s.atr[p] == s.atr[p] else 0.0
+        lo_i = p - max_rise + int(np.flatnonzero(lows <= floor + near)[-1])
         rise = (s.h[p] / s.l[lo_i] - 1) * 100
         if rise < spec.p("min_rise_pct") or s.h[lo_i:p].max() > s.h[p]:
             continue
@@ -580,9 +614,10 @@ def _high_tight_flag(s: Series) -> list[tuple[Detection, frozenset]]:
         ck.need("confirmation", "אישור: סגירה מעל השיא", s.c[brk] if brk is not None else None,
                 f"> {s.h[p]:.4g}", brk is not None)
         height = s.h[p] - s.l[lo_i]
+        # target: the pole's height above the high, as for a flag (owner, 2026-10-01)
         det = _new(s, spec, "bullish", status, lo_i, cons_end, ck,
                    [Pivot(lo_i, float(s.l[lo_i]), "L"), Pivot(p, float(s.h[p]), "H")],
-                   ["תחילת העלייה", "שיא"], brk, float(s.h[p]), height, math.nan,
+                   ["תחילת העלייה", "שיא"], brk, float(s.h[p]), height, float(s.h[p]) + height,
                    [_line(s, p, s.h[p], brk if brk is not None else s.last, s.h[p], "קו אישור")],
                    (float(s.h[p]), math.nan))
         out.append((det, frozenset({lo_i, p})))

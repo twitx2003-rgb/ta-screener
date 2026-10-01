@@ -154,6 +154,12 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   stocks), round 2 5.92, round 3 6.35; target 8.5. Next: B2, a reviewer inside writer.py.
   The exact reviewer prompts, the steps and each round's scores are local, in
   `logs/eval/REVIEW.md` and `logs/eval/roundN/scores.md` (gitignored: they quote prices).
+- Breakout pictures (2026-10-01): `chart_svg.py` draws each pattern per
+  `.claude/skills/pattern-drawing/SKILL.md` (agents: breakout-drawing-auditor,
+  pattern-chart-designer, analysis-visual-editor). Flags: lines on the extremes, only
+  pole-direction breaks; high-tight flag gets a pole-height target; doubles, triples and
+  H&S must break out within their own length (`max_breakout_wait_share`). Next: the same
+  drawing and a shorter text in the `$SYMBOL` analysis.
 - Open: pattern quality in the scanner (triangle touches, cup depth: discuss first, it
   changes every alert), earnings dates, relative strength, gaps; the hosting keepalive
   before about 2026-11-23.

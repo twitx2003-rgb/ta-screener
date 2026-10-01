@@ -81,6 +81,20 @@ def test_head_and_shoulders_top_breaks_its_neckline():
     assert json.loads(det.row()["lines_json"])[0]["label"] == "קו צוואר"
 
 
+def test_a_neckline_sloping_the_unhelpful_way_confirms_through_the_right_armpit():
+    # a top whose neckline falls: the close must go under the right armpit, and that level
+    # is the record's second line (what the chart draws as the trigger)
+    knots = [(0, 55), (90, 100), (105, 92.5), (120, 110), (135, 91.5), (150, 100.5), (165, 86), (168, 85)]
+    det = one(from_knots(knots), "head_shoulders_top")
+    neck, confirm = json.loads(det.row()["lines_json"])
+    armpit = det.points[3]
+    assert neck["label"] == "קו צוואר" and neck["y2"] < neck["y1"]
+    assert confirm["label"] == "קו אישור"
+    assert confirm["y1"] == confirm["y2"] == pytest.approx(armpit["price"], abs=1e-4)
+    assert confirm["x1"] == armpit["date"] and confirm["x2"] == det.breakout_date.date().isoformat()
+    assert det.breakout_price == pytest.approx(armpit["price"])
+
+
 def test_lopsided_shoulders_are_not_head_and_shoulders():
     bars = from_knots([(0, 55), (90, 100), (105, 92), (120, 110), (135, 92.5), (150, 106),
                        (165, 86), (168, 85)])
@@ -179,3 +193,53 @@ def test_a_neckline_that_passed_a_shoulder_confirms_nothing():
     steep = from_knots([(0, 145), (90, 100), (105, 118), (120, 90), (135, 101), (150, 99.5),
                         (165, 112), (168, 113)])
     assert not [d for d in detect_chart(steep, "TEST:SYN", RULES) if d.pattern == "head_shoulders_bottom"]
+
+
+def _closes_beyond_lines_before_the_breakout(bars, det):
+    days = bars["timestamp"].dt.strftime("%Y-%m-%d").tolist()
+    brk = days.index(str(det.breakout_date)[:10])
+    for ln in json.loads(det.row()["lines_json"]):
+        i1, i2 = days.index(ln["x1"][:10]), days.index(ln["x2"][:10])
+        slope = (ln["y2"] - ln["y1"]) / (i2 - i1)
+        for i in range(i1, brk):
+            value = ln["y1"] + slope * (i - i1)
+            if (ln["label"] == "קו עליון" and bars["close"].iloc[i] > value + 1e-9) or \
+                    (ln["label"] == "קו תחתון" and bars["close"].iloc[i] < value - 1e-9):
+                return True
+    return False
+
+
+def test_a_flags_breakout_is_the_first_close_beyond_its_drawn_lines():
+    knots = [(0, 50), (60, 50), (66, 60), (68, 58.2), (70, 59.4), (72, 57.6), (74, 58.8),
+             (76, 57.2), (78, 62), (79, 62.5)]
+    bars = from_knots(knots, noise=0.02, wiggle=0.15)
+    flags = [d for d in detect(bars) if d.pattern in ("flag", "pennant") and d.breakout_date is not None]
+    assert flags
+    assert not [d for d in flags if _closes_beyond_lines_before_the_breakout(bars, d)]
+
+
+def test_a_flag_that_breaks_against_its_pole_is_not_a_flag():
+    # a steep rise, a pause, then a fall out of the bottom of the pause
+    knots = [(0, 50), (60, 50), (66, 60), (68, 58.2), (70, 59.4), (72, 57.6), (74, 58.8),
+             (76, 57.2), (78, 52), (79, 51)]
+    for d in detect(from_knots(knots, noise=0.02, wiggle=0.15)):
+        if d.pattern in ("flag", "pennant"):
+            assert d.direction == "bullish" and d.status != "breakout"
+
+
+def test_a_high_tight_flag_aims_one_pole_above_its_high():
+    knots = [(0, 40), (80, 40), (110, 85), (115, 83), (120, 84.5), (125, 82.5), (128, 88), (129, 89)]
+    det = one(from_knots(knots, noise=0.02, wiggle=0.15), "high_tight_flag")
+    assert det.target == pytest.approx(det.breakout_price + det.height)
+
+
+def test_a_breakout_later_than_the_pattern_is_long_confirms_nothing():
+    # bottoms 30 sessions apart, then 40 sessions of drifting under the line before it breaks
+    late = from_knots([(0, 130), (80, 100), (95, 112), (110, 100.5), (125, 108), (140, 106),
+                       (150, 108), (160, 114), (162, 115)])
+    dates = late["timestamp"].dt.strftime("%Y-%m-%d").tolist()
+    for d in detect(late):
+        if d.pattern == "double_bottom" and d.breakout_date is not None:
+            pts = [dates.index(p["date"][:10]) for p in json.loads(d.row()["points_json"])]
+            wait = dates.index(str(d.breakout_date)[:10]) - max(pts)
+            assert wait <= max(pts) - min(pts)

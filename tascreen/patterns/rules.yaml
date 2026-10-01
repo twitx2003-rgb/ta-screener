@@ -25,6 +25,7 @@ general:
   lookback_sessions: {value: 400, origin: ours, note: "patterns must start within this many sessions (cups can last 65 weeks)"}
   recent_breakout_sessions: {value: 20, origin: ours, note: "a pattern that broke out is reported for this many sessions after the breakout"}
   forming_max_age_sessions: {value: 30, origin: ours, note: "a pattern still forming is reported only if its last turning point is this recent"}
+  max_breakout_wait_share: {value: 1.0, origin: ours, note: "double/triple tops and bottoms, head-and-shoulders: the breakout must come within this share of the pattern's own length after its last turning point (owner, 2026-10-01)"}
   touch_tolerance_atr: {value: 1.0, origin: ours, note: "a turning point within this many ATRs of a trendline touches it"}
   touch_tolerance_height: {value: 0.1, origin: ours, note: "...and within this share of the pattern's height (whichever is tighter); first live scan: 1 ATR alone let 43% of symbols show a triangle/wedge/rectangle"}
   inside_tolerance_atr: {value: 0.5, origin: ours, note: "inside a pattern, closes may poke this many ATRs past a trendline"}
@@ -223,7 +224,9 @@ chart:
       - "תורן: תנועה תלולה במיוחד שנמשכת כמה ימים"
       - "מלבן קטן בין שני קווים מקבילים, לרוב נוטה נגד כיוון התורן"
       - "קצר משלושה שבועות"
-      - "פריצה: סגירה מחוץ לדגל"
+      - "פריצה: סגירה ראשונה מחוץ לדגל"
+      - "הקווים נוגעים בשיא ובשפל הקיצוניים של ההתכנסות, כך ששום נר לא חוצה אותם לפני הפריצה"
+      - "הפריצה בכיוון התורן בלבד; פריצה לכיוון השני אינה התבנית הזו"
     params:
       min_duration_sessions: {value: 5, origin: ours}
       max_duration_sessions: {value: 14, origin: site, note: "site: flags are less than 3 weeks long"}
@@ -242,7 +245,9 @@ chart:
       - "תורן: תנועה תלולה במיוחד שנמשכת כמה ימים"
       - "משולש סימטרי קטן: שני קווים מתכנסים"
       - "שלושה שבועות או פחות"
-      - "פריצה: סגירה מחוץ לדגלון"
+      - "פריצה: סגירה ראשונה מחוץ לדגלון"
+      - "הקווים נוגעים בשיא ובשפל הקיצוניים של ההתכנסות, כך ששום נר לא חוצה אותם לפני הפריצה"
+      - "הפריצה בכיוון התורן בלבד; פריצה לכיוון השני אינה התבנית הזו"
     params:
       min_duration_sessions: {value: 5, origin: ours}
       max_duration_sessions: {value: 15, origin: site, note: "site: 3 weeks long or less"}
@@ -261,6 +266,7 @@ chart:
       - "המחיר כמעט מוכפל (עלייה של 90% לפחות) בחודשיים או פחות"
       - "אחר כך התכנסות קצרה"
       - "אישור: סגירה מעל השיא הגבוה בתבנית"
+      - "יעד: גובה העלייה, מעל השיא (כמו בדגל; בחירה שלנו)"
     params:
       min_rise_pct: {value: 90.0, origin: site}
       max_rise_sessions: {value: 42, origin: site, note: "site: 2 months or less"}
