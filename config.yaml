@@ -143,8 +143,10 @@ xnews:
   # over the news hours. A 5 (market-moving now) always goes.
   # owner, 2026-10-01: "more sensitive to market news": 3 a round, 18 a day (was 2 / 12);
   # the same reads and Claude calls, only more of the judged stories go out
-  max_per_round: 3
-  daily_max: 18
+  # owner, 2026-10-01 (later): "more updates on companies, a bit more often": 4 a round,
+  # 30 a day, and within one importance a story that names a company goes first
+  max_per_round: 4
+  daily_max: 30
   # Once a week the reader's balance is looked at; below this (USD) the bot warns with a
   # top-up link (owner, 2026-09-28). 0 turns it off.
   low_balance_usd: 2

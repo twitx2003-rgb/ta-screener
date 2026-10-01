@@ -531,3 +531,14 @@ def test_style_slips_are_counted_but_the_news_still_goes_out():
     counts: dict[str, int] = {}
     picks, _ = xnews.triage(posts, llm, 3, counts=counts)
     assert len(picks) == 1 and counts["style_slips"] == 2
+
+
+def test_within_one_importance_a_company_story_goes_first():
+    posts = [xnews.to_post(row(str(i), author=f"Desk{i}")) for i in range(3)]
+    macro = (posts[0], {"importance": 4, "summary_he": "מדד ה-CPI עלה", "analysis_he": "", "sources": []})
+    company = (posts[1], {"importance": 4, "summary_he": "מניית ZQX זינקה", "analysis_he": "", "sources": []})
+    big = (posts[2], {"importance": 5, "summary_he": "הפד הוריד ריבית", "analysis_he": "", "sources": []})
+    sent, _, held = xnews.ration([macro, company, big], {"tokens": 2.0, "at": 0}, 0, "2026-01-05",
+                                 max_per_round=4, daily_max=30)
+    assert [k["summary_he"] for _, k in sent] == ["הפד הוריד ריבית", "מניית ZQX זינקה"] and held == 1
+    assert xnews.names_company({"summary_he": "ISM ו-PCE"}) is False

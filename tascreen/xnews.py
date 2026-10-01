@@ -237,6 +237,17 @@ NEWS_HOURS = 20              # 07:00-03:00 Israel time (.github/xnews.sh)
 URGENT = 5
 
 
+TICKER = re.compile(r"(?<![A-Za-z])[A-Z]{1,5}(?![A-Za-z])")
+NOT_COMPANIES = {"AI", "CPI", "PCE", "GDP", "ISM", "PMI", "ADP", "ETF", "IPO", "SEC", "FDA", "FOMC", "ECB",
+                 "BOJ", "US", "USA", "UK", "EU", "IMF", "OPEC", "LNG", "S", "P", "Q", "CEO", "CFO", "EPS"}
+
+
+def names_company(pick_: dict) -> bool:
+    """The story names a company by its ticker (owner, 2026-10-01: more company updates):
+    a capitalised 1-5 letter word that is not an economic or agency abbreviation."""
+    return any(t not in NOT_COMPANIES for t in TICKER.findall(str(pick_.get("summary_he", ""))))
+
+
 def ration(picks: list[tuple["Post", dict]], budget: dict, stamp: int, day: str, *,
            max_per_round: int, daily_max: int) -> tuple[list[tuple["Post", dict]], dict, int]:
     """(the picks to send, most important first; the budget after them; how many were held
@@ -247,7 +258,8 @@ def ration(picks: list[tuple["Post", dict]], budget: dict, stamp: int, day: str,
     tokens = float(budget.get("tokens", max_per_round))
     tokens = min(float(max_per_round), tokens + max(0, stamp - int(budget.get("at", stamp))) * rate)
     sent_today = int(budget.get("sent", 0)) if budget.get("day") == day else 0
-    order = sorted(range(len(picks)), key=lambda i: (-picks[i][1]["importance"], -len(picks[i][1]["sources"]), i))
+    order = sorted(range(len(picks)), key=lambda i: (-picks[i][1]["importance"], not names_company(picks[i][1]),
+                                                     -len(picks[i][1]["sources"]), i))
     ranked = [picks[i] for i in order]
     urgent = [pk for pk in ranked if pk[1]["importance"] >= URGENT][:max_per_round]
     tokens = max(0.0, tokens - len(urgent))
