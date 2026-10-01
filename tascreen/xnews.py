@@ -458,9 +458,15 @@ def message(picks: list[tuple[Post, dict]]) -> str:
 
 def deliver(picks: list[tuple[Post, dict]], send: Callable[[str], None],
             send_photo: Callable[[str, str], None] | None) -> int:
-    """The picks without a photo in one message, then each photo with its line as the
-    caption (under Telegram's 1024). A photo Telegram cannot fetch goes as text instead.
-    Returns how many went with a photo."""
+    """A round's picks in one message (owner, 2026-10-01: "two stories in a round go in one
+    message, not two"): with two or more, every pick is text, a photo's place taken by the
+    line that says what it shows (the link opens the post with it). A lone pick with a photo
+    goes as the photo, its line as the caption (under Telegram's 1024); a photo Telegram
+    cannot fetch goes as text instead. Returns how many went with a photo."""
+    if len(picks) > 1:
+        text = "\n\n".join(item(post, pick_, with_image=True) for post, pick_ in picks)
+        send(text if len(text) <= 4000 else message(picks))
+        return 0
     with_photo = [(p, k) for p, k in picks
                   if p.photo and send_photo is not None and len(item(p, k, with_image=True)) <= 1024]
     plain = [(p, k) for p, k in picks if (p, k) not in with_photo]

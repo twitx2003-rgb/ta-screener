@@ -217,16 +217,26 @@ def test_only_a_real_photo_is_taken():
     assert xnews.to_post(row("84")).photo == "" and xnews.to_post({**row("85"), "extendedEntities": None}).photo == ""
 
 
-def test_a_pick_with_a_photo_goes_as_a_photo_and_the_rest_as_one_short_message(tmp_path):
+def test_two_stories_in_a_round_go_in_one_message(tmp_path):
+    # owner, 2026-10-01: one message a round, a photo's place taken by its link
     page = {"tweets": [photo_row("91"), row("92")], "has_next_page": False}
     llm = picker({"post_id": "91", "importance": 5, "summary_he": "חדשה עם גרף"},
                  {"post_id": "92", "importance": 4, "summary_he": "חדשה בלי תמונה"})
     sent, photos = [], []
     summary, _ = run(tmp_path, FakeReader(page), llm, sent, send_photo=lambda u, c: photos.append((u, c)))
-    assert summary["sent"] == 2 and summary["photos"] == 1
-    assert sent == ['🟠 <b>NewsDesk</b>: חדשה בלי תמונה <a href="https://x.com/NewsDesk/status/92">↗</a>']
+    assert summary["sent"] == 2 and summary["photos"] == 0 and photos == []
+    assert sent == ['🔴 <b>NewsDesk</b>: חדשה עם גרף <a href="https://x.com/NewsDesk/status/91">↗</a>\n\n'
+                    '🟠 <b>NewsDesk</b>: חדשה בלי תמונה <a href="https://x.com/NewsDesk/status/92">↗</a>']
+
+
+def test_a_lone_story_with_a_photo_goes_as_the_photo(tmp_path):
+    sent, photos = [], []
+    summary, _ = run(tmp_path, FakeReader({"tweets": [photo_row("93")], "has_next_page": False}),
+                     picker({"post_id": "93", "importance": 5, "summary_he": "חדשה עם גרף"}), sent,
+                     send_photo=lambda u, c: photos.append((u, c)))
+    assert summary["photos"] == 1 and sent == []
     assert photos == [("https://pbs.twimg.com/media/synthetic.jpg",
-                       '🔴 <b>NewsDesk</b>: חדשה עם גרף <a href="https://x.com/NewsDesk/status/91">↗</a>')]
+                       '🔴 <b>NewsDesk</b>: חדשה עם גרף <a href="https://x.com/NewsDesk/status/93">↗</a>')]
 
 
 def test_a_photo_telegram_cannot_fetch_goes_as_text(tmp_path):
@@ -259,13 +269,14 @@ def test_a_chart_gets_one_line_saying_what_it_shows(tmp_path):
                           {"post_id": "102", "importance": 5, "summary_he": "תמונה של מנכ\"ל"}]}
 
     llm = SyntheticLLM(answer)
-    photos = []
+    sent = []
     page = {"tweets": [photo_row("101"), photo_row("102")], "has_next_page": False}
-    summary, _ = run(tmp_path, FakeReader(page), llm, [], send_photo=lambda u, c: photos.append(c),
+    summary, _ = run(tmp_path, FakeReader(page), llm, sent, send_photo=lambda u, c: None,
                      fetch=lambda url: ("image/jpeg", b"synthetic"))
     assert summary["explained"] == 1 and llm.images == [2] and summary["claude_today"] == 2
-    assert photos[0].endswith("\n📊 גרף של תשואת האג&quot;ח ל-10 שנים בשנה האחרונה")
-    assert "📊" not in photos[1]                                        # not a chart: no line
+    first, second = sent[0].split("\n\n")                               # one message for the round
+    assert first.endswith("\n📊 גרף של תשואת האג&quot;ח ל-10 שנים בשנה האחרונה")
+    assert "📊" not in second                                           # not a chart: no line
 
 
 def test_the_news_goes_out_even_if_the_picture_look_fails(tmp_path):
