@@ -389,6 +389,32 @@ class WatchlistSettings:
             raise ConfigError("watchlist.move_pct must be 1..20")
 
 
+@dataclass(frozen=True)
+class SetupsListSettings:
+    # The bot's own TradingView watchlist of good setups and fresh breakouts, refreshed
+    # every evening (tascreen/setups_list.py; owner, 2026-10-02). Only its opaque id is here.
+    enabled: bool = True
+    id: str = ""
+    max_size: int = 40
+    max_gap_pct: float = 8.0         # a setup leaves when its close is this far below the line
+    setup_sessions: int = 15         # ...or after this many sessions without a breakout
+    breakout_sessions: int = 10      # a breakout is "fresh" this many sessions
+
+    def __post_init__(self):
+        object.__setattr__(self, "id", str(self.id or "").strip())
+        for name in ("max_size", "setup_sessions", "breakout_sessions"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        object.__setattr__(self, "max_gap_pct", float(self.max_gap_pct))
+        if self.id and not self.id.isdigit():
+            raise ConfigError("setups_list.id must be the watchlist's number")
+        if not 1 <= self.max_size <= 200:
+            raise ConfigError("setups_list.max_size must be 1..200")
+        if not 1 <= self.max_gap_pct <= 30:
+            raise ConfigError("setups_list.max_gap_pct must be 1..30")
+        if not (1 <= self.setup_sessions <= 60 and 1 <= self.breakout_sessions <= 60):
+            raise ConfigError("setups_list: setup_sessions and breakout_sessions must be 1..60")
+
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
@@ -403,6 +429,7 @@ _SECTIONS = {
     "explain": ExplainSettings,
     "research": ResearchSettings,
     "watchlist": WatchlistSettings,
+    "setups_list": SetupsListSettings,
 }
 
 
@@ -422,6 +449,7 @@ class Settings:
     explain: ExplainSettings = field(default_factory=ExplainSettings)
     research: ResearchSettings = field(default_factory=ResearchSettings)
     watchlist: WatchlistSettings = field(default_factory=WatchlistSettings)
+    setups_list: SetupsListSettings = field(default_factory=SetupsListSettings)
 
     @property
     def data_dir(self) -> Path:

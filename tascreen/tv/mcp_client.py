@@ -24,7 +24,9 @@ calls. Scanning thousands of symbols goes through `session()` / `with_session()`
 instead: one connection for many calls.
 
 The same account can create and delete alerts and edit watchlists through this
-server. Only get/list/search/screener tools can be called (`is_read_only`).
+server. Only get/list/search/screener tools can be called (`is_read_only`), with one
+exception: `OwnListSession` may add to and remove from the bot's own setups watchlist
+(`own_list_edit`; owner, 2026-10-02).
 """
 from __future__ import annotations
 
@@ -290,6 +292,23 @@ class ReadOnlySession:
         return await self._client.call_tool(name, arguments or {})
 
 
+class OwnListSession(ReadOnlySession):
+    """A read-only session that may also edit ONE watchlist: the bot's own setups list
+    (tascreen/setups_list.py; owner, 2026-10-02). Adding to and removing from that list's
+    id, and creating it under its own name, are the only writes; alerts, other lists,
+    renames and deletes stay refused (`refuse_writes`)."""
+
+    def __init__(self, client: Any, own_list: str, own_name: str):
+        super().__init__(client)
+        self.own_list, self.own_name = str(own_list or ""), own_name
+
+    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+        arguments = arguments or {}
+        if not own_list_edit(name, arguments, self.own_list, self.own_name):
+            refuse_writes(name)
+        return await self._client.call_tool(name, arguments)
+
+
 class TradingViewMCP:
     def __init__(
         self,
@@ -408,6 +427,12 @@ class TradingViewMCP:
         async with self._client() as client:
             yield ReadOnlySession(client)
 
+    @asynccontextmanager
+    async def own_list_session(self, own_list: str, own_name: str) -> AsyncIterator[OwnListSession]:
+        """`session`, plus edits of the bot's own watchlist only (OwnListSession)."""
+        async with self._client() as client:
+            yield OwnListSession(client, own_list, own_name)
+
     # ----------------------------------------------------------------- sync API
     def list_tools(self) -> list[Any]:
         return _run(self.list_tools_async())
@@ -421,6 +446,20 @@ class TradingViewMCP:
             async with self.session() as session:
                 return await work(session)
         return _run(go())
+
+
+OWN_LIST_EDITS = ("mcp-watchlist-add-to-watchlist", "mcp-watchlist-remove-from-watchlist")
+OWN_LIST_CREATE = "mcp-watchlist-create-watchlist"
+
+
+def own_list_edit(name: str, arguments: dict[str, Any], own_list: str, own_name: str) -> bool:
+    """True only for an edit of the bot's own list: add/remove on its id, or creating a
+    list under its exact name when no id is known yet."""
+    if name in OWN_LIST_EDITS:
+        return bool(own_list) and str(arguments.get("watchlist_id", "")) == own_list
+    if name == OWN_LIST_CREATE:
+        return not own_list and arguments.get("name") == own_name
+    return False
 
 
 def refuse_writes(name: str) -> None:

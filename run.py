@@ -555,6 +555,8 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
         summary["complete"] = complete
     if settings.alerts.enabled:
         summary["alerts"] = _evening_alerts(settings, store, target)
+    if settings.setups_list.enabled:
+        summary["setups_list"] = _setups_list(settings, store, target)
     if settings.research.enabled:
         summary["research_weekly"] = _research_weekly(settings, store)
     summary["market"] = _market_snapshot(settings, store, target)
@@ -611,6 +613,55 @@ def _evening_alerts(settings, store, target) -> dict:
     except ScreenerError as exc:
         log.error("breakout report failed: %s", exc)             # the private log only
         return {"status": "failed", "error": type(exc).__name__}
+
+
+def _setups_list(settings, store, target, client=None, owner=None) -> dict:
+    """The bot's own TradingView list of setups and fresh breakouts (tascreen/setups_list.py),
+    once per session, after the evening report (its research picks go in). Counts only:
+    this goes to the public log."""
+    from tascreen import alerts, notify, research, setups_list
+    from tascreen.patterns.rules import load_rules
+    from tascreen.web.data import ScanRepository
+
+    cfg = settings.setups_list
+    if not cfg.id:
+        return {"status": "no list id"}
+    if cfg.id == settings.watchlist.id:
+        return {"status": "refused: that is the owner's own list"}
+    if not alerts.read_sent(store, target).get("evening"):
+        return {"status": "waiting for the evening report"}
+    state = setups_list.read(store.root)
+    if state.get("id") != cfg.id:
+        state = {}
+    if state.get("day") != target.isoformat():
+        view = ScanRepository(store, load_rules()).current()
+        if view is None or view.day != target:
+            return {"status": "no scan of the session yet"}
+        state = setups_list.refresh(state, research.read_picks(store), view, store.read_bars, cfg)
+        setups_list.write(store.root, state)
+        text = setups_list.message(state)
+        owner = owner or notify.owner_from_environment()
+        if text and owner is not None:
+            owner.send(text, html=True)
+    out = {"entries": len(state["entries"]), "changes": len(state.get("events") or [])}
+    if state.get("synced"):
+        return {**out, "status": "kept"}
+    client = client or make_tradingview(settings)
+    wanted = [e["symbol"] for e in state["entries"]]
+
+    async def work():
+        async with client.own_list_session(cfg.id, setups_list.NAME) as session:
+            return await setups_list.sync(session, cfg.id, wanted, state.get("managed") or [],
+                                          settings.tradingview.rate_limit_delays)
+    try:
+        from tascreen.tv.mcp_client import _run
+
+        counts = _run(work())
+    except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("the setups list was not synced: %s", type(exc).__name__)
+        return {**out, "status": "not synced", "error": type(exc).__name__}
+    setups_list.write(store.root, {**state, "synced": True})
+    return {**out, **counts, "status": "synced"}
 
 
 def _market_snapshot(settings, store, day) -> str:

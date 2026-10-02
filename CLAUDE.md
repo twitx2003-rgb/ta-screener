@@ -99,6 +99,8 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 - **Read only.** `is_read_only()` refuses alert and watchlist writes. The same 10
   tools are denied in `.claude/settings.json`, and `tests/test_claude_config.py` keeps
   the two in sync.
+  One exception (owner, 2026-10-02): `OwnListSession` may add to / remove from the bot's
+  own setups list (`setups_list.id`) and nothing else; Claude Code sessions stay denied.
 - **Never guess a field.** Payload fields go through `tascreen.fields.pick()`. Screener
   columns come from the live catalogue (`--discover`), never from memory.
 - Every stored frame is checked against a contract in `tascreen/contracts.py`.
@@ -160,6 +162,9 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   pole-direction breaks; high-tight flag gets a pole-height target; doubles, triples and
   H&S must break out within their own length (`max_breakout_wait_share`). Next: the same
   drawing and a shorter text in the `$SYMBOL` analysis.
+- Setups list (2026-10-02, `tascreen/setups_list.py`): the bot's own TradingView list,
+  refreshed nightly after the evening report: research picks in; failed, drifted,
+  vanished, too-slow, target-reached and stale entries out; changes to the private chat.
 - Open: pattern quality in the scanner (triangle touches, cup depth: discuss first, it
   changes every alert), earnings dates, relative strength, gaps; the hosting keepalive
   before about 2026-11-23.

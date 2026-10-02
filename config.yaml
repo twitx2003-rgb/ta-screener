@@ -197,3 +197,16 @@ watchlist:
   enabled: true
   id: "170201612"
   move_pct: 4
+
+setups_list:
+  # The bot's own TradingView watchlist (owner, 2026-10-02): the research team's picks go in
+  # every evening, as a setup or a fresh breakout; what did not work out leaves (closed back
+  # below the line, drifted away, the pattern vanished, no breakout in time), and so does
+  # what reached its target or is no longer fresh. Changes go to the owner's PRIVATE chat.
+  # The symbols stay in the private state repo (data/setups_list.json); only the id is here.
+  enabled: true
+  id: "349311195"
+  max_size: 40
+  max_gap_pct: 8
+  setup_sessions: 15
+  breakout_sessions: 10
