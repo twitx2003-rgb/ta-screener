@@ -162,6 +162,11 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   pole-direction breaks; high-tight flag gets a pole-height target; doubles, triples and
   H&S must break out within their own length (`max_breakout_wait_share`). Next: the same
   drawing and a shorter text in the `$SYMBOL` analysis.
+- Support tests (2026-10-05, `analyst/support.py`, `knowledge/support.md`): the 20/150-day
+  averages as support (holds, breaks, strength with the bounce's volume not weak), the latest
+  close across each, and retests after pattern/zone/150-day breakouts. A program-written
+  "בדיקות תמיכה" line in every analysis (`view.support_lines`), key events, the 20-day on the
+  chart when named, and the research team's prompts.
 - Setups list (2026-10-02, `tascreen/setups_list.py`): the bot's own TradingView list,
   refreshed nightly after the evening report: research picks in; failed, drifted,
   vanished, too-slow, target-reached and stale entries out; changes to the private chat.

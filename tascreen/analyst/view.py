@@ -33,7 +33,8 @@ LINE_UP, LINE_DOWN = "קו ההתנגדות", "קו התמיכה"
 FIB = "פיבונאצ׳י"
 # what else sits in a band: as the chart labels it, and as the text names it
 NOTE_WORDS = {"hi52": "שיא שנתי", "lo52": "שפל שנתי", "line": "קו מגמה", "pat": "קו התבנית",
-              "sma50": "ממוצע 50 יום", "sma150": "ממוצע 150 יום", "sma200": "ממוצע 200 יום",
+              "sma20": "ממוצע 20 יום", "sma50": "ממוצע 50 יום", "sma150": "ממוצע 150 יום",
+              "sma200": "ממוצע 200 יום",
               "poc": "נפח מרבי"}
 NOTE_TEXT = {**NOTE_WORDS, "hi52": HIGH52, "lo52": LOW52}
 SHORT = {HIGH52: "שיא שנתי", LOW52: "שפל שנתי", LINE_UP: "קו התנגדות", LINE_DOWN: "קו תמיכה"}
@@ -49,6 +50,107 @@ def note_parts(key: str) -> tuple[str, str]:
 def _dm(day: Any) -> str:
     day = str(day or "")
     return f"{day[8:10]}/{day[5:7]}" if len(day) >= 10 else ""
+
+
+# ------------------------------------------------------------------ support tests
+BROKE_WORDS = ("נשבר", "נכשלה", "לא החזיקה", "לא משמש")
+
+
+def support_tone(text: str) -> str:
+    """held / testing / broke / waiting, from a support fact's words (support.py)."""
+    if any(w in text for w in BROKE_WORDS):
+        return "broke"
+    if "החזיק" in text:
+        return "held"
+    if "עכשיו" in text:
+        return "testing"
+    return "waiting"
+
+
+def _ma_line(value, n: int, span: int) -> tuple[str, list[str]] | None:
+    """The n-day average in one sentence: a recent breakout above it (the 150-day) and its
+    retest, else a test of it as support now or lately, else how strong it has been."""
+    name, k = f"ממוצע {n} יום", f"sma{n}.support"
+    state, strength = value(f"{k}.state"), str(value(f"{k}.strength") or "")
+    strong = strength.startswith("תמיכה חזקה")
+    cross, ago = str(value(f"sma{n}.cross") or ""), value(f"sma{n}.cross_sessions_ago")
+    if n >= 50 and cross.startswith("פריצה") and isinstance(ago, int) and ago <= span:
+        volume = value(f"sma{n}.cross_volume")
+        text = f"פריצה מעל {name} ב-{_dm(value(f'sma{n}.cross_day'))}" + (f" בנפח {volume}" if volume else "")
+        cites = [f"sma{n}.cross", f"sma{n}.cross_day"] + ([f"sma{n}.cross_volume"] if volume else [])
+        retest = value(f"sma{n}.cross.retest")
+        if retest:
+            text, cites = f"{text}; {retest}", cites + [f"sma{n}.cross.retest"]
+        return text, cites
+    if state:
+        return state + (f" ({strength})" if strong else ""), [f"{k}.state"] + ([f"{k}.strength"] if strong else [])
+    vs = value(f"vs_sma{n}_pct")
+    if not isinstance(vs, (int, float)):
+        return None
+    if vs < 0:                                       # under the 20-day is too common to tell
+        return (f"המחיר {abs(vs):.1f}% מתחת ל{name}: הממוצע לא משמש עכשיו תמיכה", [f"vs_sma{n}_pct"]) \
+            if n >= 50 else None
+    if strength and support_tone(strength) != "broke":
+        when = value(f"{k}.last_low_day")
+        return (strength + (f" (הבדיקה האחרונה ב-{_dm(when)})" if when else ""),
+                [f"{k}.strength"] + ([f"{k}.last_low_day"] if when else []))
+    return None
+
+
+def support_lines(facts: dict[str, dict[str, Any]], rules: dict[str, Any]) -> list[dict[str, Any]]:
+    """The support tests every analysis tells (owner, 2026-10-05: "significant for me in
+    every analysis"; the facts come from support.py), by priority: a recent breakout's
+    retest (a pattern's line, a broken zone, the 150-day average crossed upward), then the
+    150-day and the 20-day averages as support. Each line: {"text", "tone", "cites", "ma"
+    (the average's period, else None)}. A pattern the price fell back into is left to the
+    key event, which already says so."""
+    value = lambda key: (facts.get(key) or {}).get("value")          # noqa: E731
+    span, fresh = rules["breakout_retest_sessions"], rules["event_fresh_sessions"]
+    out: list[dict[str, Any]] = []
+
+    def add(text: str, cites: list[str], ma: int | None = None) -> None:
+        tone = support_tone(text)
+        if tone == "waiting" and any(line["tone"] == "waiting" for line in out):
+            return                             # "not back to test it yet" once is enough
+        out.append({"text": text, "tone": tone, "cites": cites, "ma": ma})
+
+    for p in sorted({k.split(".")[0] for k in facts if k.startswith("pat_") and k.endswith(".retest")}):
+        since, state = value(f"{p}.sessions_since_breakout"), str(value(f"{p}.state") or "")
+        if isinstance(since, int) and since <= span and "חזר אל תוך" not in state and "נכשלה" not in state:
+            add(f"{value(f'{p}.retest')} (תבנית {value(f'{p}.name')})", [f"{p}.retest", f"{p}.name"])
+    for z in sorted({k.split(".")[0] for k in facts if k.startswith("zone_") and k.endswith(".retest")}):
+        text, ago = str(value(f"{z}.retest")), value(f"{z}.breakout_sessions_ago")
+        if support_tone(text) in ("held", "testing") or (isinstance(ago, int) and ago <= fresh):
+            add(text, [f"{z}.retest", f"{z}.breakout_day"])
+    for n in sorted(rules["support_ma_periods"], reverse=True):
+        line = _ma_line(value, n, span)
+        if line:
+            add(*line, ma=n)
+    return out
+
+
+def _ma_event(value, n: int, rules: dict[str, Any]) -> tuple[str, str] | None:
+    """The n-day average as the key event: a breakout above it in the last few sessions
+    (the 150-day), a test of it as support now, a hold lately, or a break (the 150-day)."""
+    name, k = f"ממוצע {n} יום", f"sma{n}.support"
+    fresh, recent = rules["event_fresh_sessions"], rules["new_extreme_sessions"]
+    cross, cross_ago = str(value(f"sma{n}.cross") or ""), value(f"sma{n}.cross_sessions_ago")
+    if n >= 50 and cross.startswith("פריצה") and isinstance(cross_ago, int) and cross_ago <= recent:
+        return (f"פריצה מעל {name} ב-{_dm(value(f'sma{n}.cross_day'))}"
+                + _volume_words(value(f"sma{n}.cross_volume_ratio")), "ma_breakout")
+    state, ago = str(value(f"{k}.state") or ""), value(f"{k}.sessions_ago")
+    if not state or not isinstance(ago, int):
+        return None
+    strength = str(value(f"{k}.strength") or "")
+    strong = f" ({strength})" if strength.startswith("תמיכה חזקה") else ""
+    tone = support_tone(state)
+    if tone == "testing":
+        return state + strong, "ma_support_test"
+    if tone == "held" and ago <= (fresh if n >= 50 else recent):
+        return state + strong, "ma_support_held"
+    if tone == "broke" and n >= 50 and ago <= recent:
+        return state, "ma_support_broke"
+    return None
 
 
 def _plan(analysis: Analysis, rules: dict[str, Any]) -> dict[str, Any]:
@@ -294,6 +396,8 @@ def simple_view(analysis: Analysis, rules: dict[str, Any] | None = None) -> dict
     # chart did not show. The averages; a 52-week high or low within reach that no drawn
     # band holds; the outline of a pattern whose breakout is fresh or undone.
     view["ma"] = {"type": "ma", "periods": [50, 150, 200]}    # the text names all three
+    if any(line["ma"] == 20 for line in support_lines(facts, rules)):
+        view["ma"]["periods"] = [20, 50, 150, 200]            # the support line names it
     for key, label, price_key in (("hi52", "שיא שנתי", "high_52w"), ("lo52", "שפל שנתי", "low_52w")):
         price = (facts.get(price_key) or {}).get("value")
         near_close = isinstance(price, (int, float)) and abs(price / close - 1) * 100 <= rules["extreme_draw_pct"]
@@ -552,6 +656,10 @@ def _key_event(facts: dict[str, dict[str, Any]], position: str, rules: dict[str,
             line = value(f"{p}.line_now")
             return (f"אחרי ה{word} מתבנית {name} ב-{when}, המחיר חזר לבדוק את קו ה{word} "
                     f"({line:.2f}) מ{'למעלה' if up else 'למטה'}", "retest")
+        retest, held_ago = str(value(f"{p}.retest") or ""), value(f"{p}.retest_sessions_ago")
+        if (up and support_tone(retest) == "held" and isinstance(held_ago, int) and held_ago <= fresh
+                and isinstance(since, int) and since <= rules["breakout_retest_sessions"]):
+            return f"אחרי הפריצה מתבנית {name} ב-{when}, {retest}", "retest_held"
         if since == 0:                           # review round 2: "stayed above" on day one
             line = value(f"{p}.line_now")
             return (f"המחיר נסגר היום לראשונה {'מעל קו הפריצה' if up else 'מתחת לקו השבירה'} של תבנית {name}"
@@ -581,6 +689,14 @@ def _key_event(facts: dict[str, dict[str, Any]], position: str, rules: dict[str,
                 if change > 0 and lo - 0.25 * atr <= prev <= hi and close > hi:
                     return (f"המחיר קפץ היום מאזור התמיכה שבין {lo:.2f} ל-{hi:.2f} ועלה "
                             f"{change:.1f}%", "bounced")
+    # a broken zone retested from above (owner, 2026-10-05)
+    retested = sorted((value(f"{k.rsplit('.', 1)[0]}.retest_sessions_ago"), k.rsplit(".", 1)[0])
+                      for k in facts if k.startswith("zone_") and k.endswith(".retest")
+                      and isinstance(value(f"{k.rsplit('.', 1)[0]}.retest_sessions_ago"), int))
+    for ago, z in retested:
+        text = str(value(f"{z}.retest"))
+        if ago <= fresh and support_tone(text) in ("held", "testing"):
+            return f"אחרי הפריצה מעל אזור ההתנגדות ב-{dm(value(f'{z}.breakout_day'))}, {text}", "zone_retest"
     broken = sorted((value(f"{k.rsplit('.', 1)[0]}.broken_sessions_ago"), k.rsplit(".", 1)[0])
                     for k in facts if k.startswith("zone_") and k.endswith(".broken"))
     if broken:
@@ -596,6 +712,10 @@ def _key_event(facts: dict[str, dict[str, Any]], position: str, rules: dict[str,
         if not up and new_low:
             text += f", ורשם שפל שנתי חדש {when_ago(low_ago, value('low_52w_day'))}"
         return text, "zone_break"
+    long_ma = [n for n in sorted(rules.get("support_ma_periods", []), reverse=True) if n >= 50]
+    for n in long_ma:                            # the 150-day average: before the yearly extremes
+        if event := _ma_event(value, n, rules):
+            return event
     if new_high or new_low:
         up = new_high and (not new_low or high_ago <= low_ago)
         ago, level = (high_ago, value("high_52w")) if up else (low_ago, value("low_52w"))
@@ -618,6 +738,9 @@ def _key_event(facts: dict[str, dict[str, Any]], position: str, rules: dict[str,
     if isinstance(low_gap, (int, float)) and low_gap <= near:
         return (("המחיר בשפל של השנה האחרונה" if low_gap <= 0.5 else
                  f"המחיר {low_gap:.1f}% מעל השפל השנתי ({value('low_52w'):.2f})"), "near_low")
+    for n in [n for n in sorted(rules.get("support_ma_periods", []), reverse=True) if n < 50]:
+        if event := _ma_event(value, n, rules):  # the 20-day average: after them
+            return event
     move = value("change_20d_pct")
     if isinstance(move, (int, float)) and abs(move) >= rules["event_big_move_pct"]:
         return (f"{'עלייה' if move > 0 else 'ירידה'} של {abs(move):.1f}% ב-20 ימי המסחר האחרונים", "big_move")

@@ -77,3 +77,17 @@ scenario_cancel_band_atr: {value: 0.3, origin: ours, note: "a trigger band at le
 band_confluence_atr: {value: 0.25, origin: ours, note: "an average or a pattern's line this close to a band is named with it"}
 hold_sessions: {value: 5, origin: ours, note: "a breakout this recent, still near its line, makes its scenario 'the breakout holds above the line'"}
 hold_max_atr: {value: 1.5, origin: ours, note: "... while the close is within this of the broken line"}
+
+# support tests (owner, 2026-10-05: "strong support on the 150-day average with volume that is
+# not weak, the same on the 20-day, and breakouts with the support tests after them, in every
+# analysis"; analyst/support.py).
+support_ma_periods: {value: [20, 150], origin: ours, note: "the averages tested as support (150 days is about 30 weeks)"}
+support_lookback_sessions: {value: {20: 60, 150: 250}, origin: ours, note: "tests counted over about 3 months (20-day) and a year (150-day)"}
+support_away_atr: {value: 1.5, origin: ours, note: "a test starts only after a close this far above the level, on a session that did not touch it"}
+support_touch_atr: {value: 0.5, origin: ours, note: "a low this close above the level (or below it) touches it"}
+support_bounce_atr: {value: 1.0, origin: ours, note: "a close this far above the level after a touch: the support held"}
+support_break_atr: {value: 0.5, origin: ours, note: "a close this far below the level: the support broke"}
+support_max_test_sessions: {value: 15, origin: ours, note: "a touch undecided for this long is hugging the level, not a test"}
+support_volume_min: {value: 0.85, origin: ours, note: "a bounce's busiest up-session under this x the 50-day average is weak volume (volume_words calls it low)"}
+support_strong_holds: {value: 2, origin: ours, note: "this many holds in a row, the last on volume that is not weak: strong support"}
+breakout_retest_sessions: {value: 30, origin: ours, note: "a breakout this recent is followed for its support tests (about six weeks)"}

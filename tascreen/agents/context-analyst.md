@@ -11,6 +11,11 @@ at everything around it, using only each dossier:
 - The stock's trend: above or below its 50- and 150-day averages, the slope of the 50-day,
   its place in the 52-week range. A bullish pattern in an uptrend near highs is stronger
   than one fighting a downtrend.
+- Support (the owner's priority, 2026-10-05; the chart analyst's `facts`, when present):
+  the 150- and 20-day averages as support (`sma150.support.strength`, `.state`, `.streak`,
+  `.last_volume`; the same for `sma20`) and a recent move above the 150-day average
+  (`sma150.cross`, `sma150.cross.retest`). An average that held, the last time on volume
+  that is not weak, backs the move; a support that just broke is against it.
 - Relative strength: its 20-day move against all stocks (`rs_20d_pctile`, 0-100) and its
   sector's median move (`sector_20d_median_pct`).
 - The market today (`market`): the index funds' moves.

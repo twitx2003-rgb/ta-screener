@@ -30,12 +30,12 @@ from .text_rules import NUMBER, STRUCTURAL, banned, fact_numbers
 from ..llm import LLM
 from . import load_rules
 from .facts import Analysis
-from .view import FIB, HIGH52, LOW52, note_parts, simple_view
+from .view import FIB, HIGH52, LOW52, note_parts, simple_view, support_lines
 
 KNOWLEDGE_DIR = Path(__file__).with_name("knowledge")
 # The trend section is titled by what it describes (2026-09-30: "מגמת עלייה:" in the headline
 # and a later "מגמה:" read as two sections on the same thing).
-PARTS = {"headline": "בקצרה", "levels": "רמות", "trend": "ממוצעים נעים",
+PARTS = {"headline": "בקצרה", "support": "בדיקות תמיכה", "levels": "רמות", "trend": "ממוצעים נעים",
          "fibonacci": FIB, "volume": "נפח", "momentum": "מומנטום", "patterns": "תבניות",
          "up": "תרחיש עלייה", "down": "תרחיש ירידה"}
 # The model writes these; the program writes the levels line and the two scenarios from the
@@ -71,8 +71,15 @@ DOWN_TREND = ("מגמה יורדת", "מגמת ירידה", "מגמה שלילי
 UP_WORDS, DOWN_WORDS = ("עולה", "עלייה", "שורי"), ("יורד", "ירידה", "דובי")
 # The headline's lead against the key event's direction (2026-09-30: "אין מגמה ברורה:" over a
 # breakdown on high volume; "מגמת עלייה, אחרי שבירה:" said neither).
-LEAD_UP, LEAD_DOWN = ("פריצה", "עלייה", "שיא", "קפץ", "קפיצה"), ("שבירה", "ירידה", "שפל", "תיקון", "נבלם")
-EVENT_UP = {"bounced": True, "rejected": False, "new_high": True, "new_low": False}
+LEAD_UP = ("פריצה", "עלייה", "שיא", "קפץ", "קפיצה", "תמיכה", "החזיק", "החזיקה")
+LEAD_DOWN = ("שבירה", "ירידה", "שפל", "תיקון", "נבלם", "נשבר", "נשברה")
+EVENT_UP = {"bounced": True, "rejected": False, "new_high": True, "new_low": False,
+            "retest_held": True, "zone_retest": True, "ma_breakout": True, "ma_support_held": True,
+            "ma_support_broke": False}
+# The support line (owner, 2026-10-05: support tests "significant in every analysis"): at most
+# this many sentences, the program's words (view.support_lines), a light by what they say.
+SUPPORT_MAX = 3
+SUPPORT_LIGHT = {"held": "green", "testing": "yellow", "waiting": "yellow", "broke": "red"}
 MUDDLED_LEAD = re.compile(r"אחרי (?:ה)?(?:שבירה|פריצה)")
 # Percentages measured from a scenario's own level, not from the close: kept in the analysis,
 # left out of the model's brief (2026-09-30: one scenario quoted two bases).
@@ -116,8 +123,11 @@ These rules are checked by a program; a section that breaks one is thrown away:
 14. A trendline (tl_N) only if the chart draws it (see "chart"); say its price.
 
 The reader's message already opens with the ticker, the close, the day's change and the date.
-After your headline the program writes the levels line (level.r1 and level.s1, with what is in
-them) and, at the end, the two scenarios (up.* and down.*): never repeat their numbers.
+After your headline the program writes the support line (a recent breakout's retest and the
+20- and 150-day averages as support: *.retest, sma20.support.*, sma150.support.*, sma150.cross*),
+the levels line (level.r1 and level.s1, with what is in them) and, at the end, the two
+scenarios (up.* and down.*): never repeat their numbers. A support test may still be the
+headline when it is the `event`.
 You write, ONE short sentence each, at most one of each:
 - headline (required, <= 170 characters, at most two numbers): a lead of two to four words
   and a colon, then the key event, quoting the `event` fact as given (it must cite `event`).
@@ -224,7 +234,8 @@ def response_schema() -> dict:
 def allowed_numbers(facts: dict[str, dict], rules: dict[str, Any]) -> list[float]:
     """Fact values, plus the method's own constants a text may name (38.2%, MACD 12/26/9)."""
     extra = [r * 100 for r in [*rules["fib_retracements"], *rules["fib_extensions"]]]
-    extra += [*rules["macd"], *rules["ma_periods"], rules["rsi_period"], rules["rsi_overbought"],
+    extra += [*rules["macd"], *rules["ma_periods"], *rules["support_ma_periods"], rules["rsi_period"],
+              rules["rsi_overbought"],
               rules["rsi_oversold"], rules["value_area"] * 100]
     return fact_numbers(facts) + [float(x) for x in extra]
 
@@ -451,6 +462,22 @@ def levels_part(facts: dict[str, dict]) -> list[dict[str, Any]]:
     return [{"part": "levels", "signal": "pin", "text": ". ".join(sentences) + ".", "cites": cites}]
 
 
+def support_part(facts: dict[str, dict], rules: dict[str, Any]) -> list[dict[str, Any]]:
+    """The support line, written by the program in every analysis that has one (owner,
+    2026-10-05): a recent breakout's retest, the 150-day and the 20-day averages as support
+    (view.support_lines), at most SUPPORT_MAX sentences. The light: red when the first line
+    says a support broke, green when one held and none broke, else yellow."""
+    lines = support_lines(facts, rules)[:SUPPORT_MAX]
+    if not lines:
+        return []
+    tones = [line["tone"] for line in lines]
+    signal = ("red" if tones[0] == "broke" else "green" if "held" in tones and "broke" not in tones
+              else SUPPORT_LIGHT.get(tones[0], "yellow"))
+    text = ". ".join(line["text"] for line in lines) + "."
+    return [{"part": "support", "signal": signal, "text": text,
+             "cites": [c for line in lines for c in line["cites"]]}]
+
+
 def scenario_parts(facts: dict[str, dict]) -> list[dict[str, Any]]:
     """The two scenarios, written by the program from the up.* / down.* facts: always
     conditional, ONE short line each (owner, 2026-09-29: "shorter"; they were three lines
@@ -557,6 +584,7 @@ def write(analysis: Analysis, llm: LLM, *, rules: dict[str, Any] | None = None, 
                 kept[name] = part
         dropped += [{**d, "retry": True} for d in dropped2]
     kept.update({p["part"]: p for p in levels_part(analysis.facts)})
+    kept.update({p["part"]: p for p in support_part(analysis.facts, rules)})
     parts = [{**kept[part], "title": PARTS[part]} for part in PARTS if part in kept]
     parts += scenario_parts(analysis.facts)
     value = lambda key: (analysis.facts.get(key) or {}).get("value")      # noqa: E731
@@ -617,7 +645,7 @@ def telegram_html(written: dict[str, Any]) -> str:
         lines.append(f"<i>{html.escape(DISCLAIMER)}</i>")
         message = "\n".join(lines)
         optional = [p for p in parts if p["part"] not in REQUIRED and p["part"] not in SCENARIOS
-                    and p["part"] != "levels"]
+                    and p["part"] not in ("levels", "support")]
         if len(message) <= TELEGRAM_LIMIT or not optional:
             return message
         parts.remove(optional[-1])

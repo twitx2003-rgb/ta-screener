@@ -20,6 +20,11 @@ Judge each one on the pattern itself, using only its dossier:
   (`extended_pct`: far means less room and a worse risk).
 - Approach quality (verge): how close to the line, and whether volume and trend support a
   break (`volume_trend`, the moving averages).
+- The retest (breakout; the chart analyst's `facts`, when present): `pat_N.retest` and
+  `zone_N.retest` say whether the price came back to the broken line and held (with the
+  bounce's volume, `*_volume`), is on it now, or broke back under it. A retest that held on
+  volume that is not weak is a strength the owner weighs heavily (2026-10-05); a close back
+  under the line is a failure sign.
 - Room: the distance to the pattern's target against the distance to the invalidation
   level (`reward_pct`, `risk_pct`).
 

@@ -23,7 +23,7 @@ from ..patterns.candles import detect_candles
 from ..patterns.chart import detect_chart
 from ..patterns.levels import invalidation
 from ..patterns.rules import Rules, load_rules as load_pattern_rules
-from . import load_rules
+from . import load_rules, support
 from .signals import divergences, ma_stack, macd, rsi_series, volume_profile, volume_trend
 from .zones import fibonacci, pivots, sr_zones, trendlines
 
@@ -110,6 +110,11 @@ def _broken_line_now(lines: list[dict], level: float, index: dict[str, int], at_
     session), extended to the last session. A wedge's or triangle's line keeps its slope:
     review round 2 found a close measured against the flat breakout price called
     "back inside" while it was still under the rising line (a retest from below)."""
+    return _broken_line(lines, level, index, at_i)(last)
+
+
+def _broken_line(lines: list[dict], level: float, index: dict[str, int], at_i: int):
+    """session -> the broken line's value (flat at `level` when no drawn line fits)."""
     best, best_gap = None, math.inf
     for line in lines or []:
         i1, i2 = index.get(str(line.get("x1"))), index.get(str(line.get("x2")))
@@ -120,9 +125,9 @@ def _broken_line_now(lines: list[dict], level: float, index: dict[str, int], at_
         if abs(value - level) < best_gap:
             best, best_gap = (float(line["y1"]), slope, i1), abs(value - level)
     if best is None:
-        return level
+        return lambda i: level
     y1, slope, i1 = best
-    return y1 + slope * (last - i1)
+    return lambda i: y1 + slope * (i - i1)
 
 
 def _zone_break(close: np.ndarray, low: float, high: float, last: int, fresh: int) -> tuple[str, int] | None:
@@ -135,6 +140,16 @@ def _zone_break(close: np.ndarray, low: float, high: float, last: int, fresh: in
             return ("up", j) if (close[j:last + 1] > high).all() else None
         if price < low and close[j] < low <= close[j - 1] and (before > high).any():
             return ("down", j) if (close[j:last + 1] < low).all() else None
+    return None
+
+
+def _zone_breakout(close: np.ndarray, low: float, high: float, last: int, span: int) -> int | None:
+    """The latest session in the last `span` that closed above a zone it came to from below
+    (a breakout over resistance), whatever the price did after; None without one."""
+    for j in range(last, max(0, last - span), -1):
+        before = close[max(0, j - 5):j]
+        if close[j] > high >= close[j - 1] and (before < low).any():
+            return j
     return None
 
 
@@ -152,6 +167,8 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
     price = float(close.iloc[-1])
     result = Analysis(symbol, _day(bars, last), first)
     f, d = _Facts(), result.drawings
+    ratios = support.volume_ratios(bars["volume"])
+    day = lambda i: _day(bars, i)                                    # noqa: E731
 
     f.add("close", price, "סגירה אחרונה", "$")
     f.add("last_date", _day(bars, last), "יום המסחר האחרון")
@@ -232,6 +249,21 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
             f.add("range.low", float(span["low"].min()), "תחתית הטווח (החודשים האחרונים)", "$")
             f.add("range.sessions", len(span), "אורך הטווח בימי מסחר", "", 0)
     d["ma"] = {"type": "ma", "periods": list(rules["ma_periods"])}
+    # support tests on the 20- and 150-day averages, and the latest close across each
+    # (owner, 2026-10-05; analyst/support.py)
+    for n in rules["support_ma_periods"]:
+        if n not in stack["values"]:
+            line_n = sma(close, n)
+            value = float(line_n.iloc[-1])
+            f.add(f"sma{n}", value, f"ממוצע {n} יום", "$")
+            if math.isfinite(value):
+                f.add(f"vs_sma{n}_pct", _pct(price, value), f"המרחק מממוצע {n}", "%", 1)
+            if last >= 10 and math.isfinite(float(line_n.iloc[-11])):
+                slope = _pct(value, float(line_n.iloc[-11]))
+                f.add(f"sma{n}.slope_pct", slope, f"שיפוע ממוצע {n} (אחוז ב-10 ימי מסחר)", "%", 2)
+                f.add(f"sma{n}.direction", "עולה" if slope > 0.3 else "יורד" if slope < -0.3 else "שטוח",
+                      f"כיוון ממוצע {n}")
+        support.ma_facts(f, bars, n, atr, rules, ratios, day)
 
     # RSI and MACD
     rsi_values = rsi_series(close, int(rules["rsi_period"]))
@@ -283,6 +315,12 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
                   f"הנפח ביום הפריצה/השבירה של {key} חלקי ממוצע 50 יום", "x", 2)
             f.add(f"{key}.broken_volume", volume_words(_volume_ratio(bars, j)),
                   f"הנפח ביום הפריצה/השבירה של {key}, במילים")
+        up_at = _zone_breakout(close.to_numpy(float), zone.low, zone.high, last, int(rules["breakout_retest_sessions"]))
+        if up_at is not None:
+            f.add(f"{key}.breakout_day", _day(bars, up_at), f"יום הפריצה מעל {key}")
+            f.add(f"{key}.breakout_sessions_ago", last - up_at, f"ימי מסחר מאז הפריצה מעל {key}", "", 0)
+            support.retest_facts(f, key, f"האזור שנפרץ ({zone.low:.2f}-{zone.high:.2f})",
+                                 np.full(len(bars), float(zone.high)), up_at, bars, atr, rules, ratios, day)
     for tl in trendlines(bars, minor, atr, rules):
         key, now_value = tl.id, tl.at(last)
         slope10 = _pct(tl.at(last), tl.at(last - 10)) if last >= 10 else math.nan
@@ -369,14 +407,23 @@ def analyse(bars: pd.DataFrame, symbol: str, *, rules: dict[str, Any] | None = N
             b = int((bars["timestamp"] <= det.breakout_date).sum()) - 1
             since = last - b
             index = {day: i for i, day in enumerate(bars["timestamp"].dt.strftime("%Y-%m-%d"))}
-            level = _broken_line_now(det.lines, float(det.breakout_price), index, b, last)
+            line_at = _broken_line(det.lines, float(det.breakout_price), index, b)
+            level = line_at(last)
             back = price < level if up else price > level
             after = bars.iloc[b + 1:]
-            went = (float(after["high"].max()) - level if up else level - float(after["low"].min())) if len(after) else 0.0
-            far_i = int(after["high"].idxmax() if up else after["low"].idxmin()) if len(after) else last
-            retest = (not back and math.isfinite(atr_now) and abs(price - level) <= atr_now
-                      and went >= rules["retest_away_atr"] * atr_now
-                      and last - far_i >= 3)             # it moved away, then came back over days
+            if up:
+                # the support tests of the broken line (support.py): a retest is a return to
+                # it after the price had left it (owner, 2026-10-05)
+                levels = np.full(len(bars), np.nan)
+                levels[b:] = [line_at(i) for i in range(b, last + 1)]
+                tests = support.retest_facts(f, key, line_word, levels, b, bars, atr, rules, ratios, day)
+                retest = not back and bool(tests) and tests[-1].result == support.TESTING
+            else:
+                went = level - float(after["low"].min()) if len(after) else 0.0
+                far_i = int(after["low"].idxmin()) if len(after) else last
+                retest = (not back and math.isfinite(atr_now) and abs(price - level) <= atr_now
+                          and went >= rules["retest_away_atr"] * atr_now
+                          and last - far_i >= 3)         # it moved away, then came back over days
             f.add(f"{key}.sessions_since_breakout", since, f"ימי מסחר מאז {word} של {key}", "", 0)
             f.add(f"{key}.line_now", level, f"{line_word} של {key}, ממשיך עד היום", "$")
             f.add(f"{key}.close_vs_breakout_pct", _pct(price, level), f"הסגירה ביחס ל{line_word} של {key} היום", "%", 1)

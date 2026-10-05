@@ -28,7 +28,7 @@ MAX_BARS = 250                  # a named pattern that started earlier widens th
 PATTERN_LEVEL_ATR = 3.0         # a pattern's cancel level farther than this is left off the chart
 # never Fibonacci's gold, nor the patterns' lavender (review round 3: 150, 200 and the
 # pattern were three purples)
-MA_COLORS = {50: INK["sma150"], 150: "#94A3B8", 200: "#E2E8F0"}
+MA_COLORS = {20: "#FB923C", 50: INK["sma150"], 150: "#94A3B8", 200: "#E2E8F0"}   # 20: when the support line names it
 ZONE = {"support": ANN["bull"], "resistance": ANN["bear"]}
 
 
