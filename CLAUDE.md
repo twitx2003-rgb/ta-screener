@@ -1,7 +1,8 @@
 # CLAUDE.md — project brief for Claude Code
 
 A Hebrew Telegram bot that screens US stocks above a $5B market cap (was $1B until
-2026-09-28) by technical
+2026-09-28) and a 10-day average volume of 1M shares a day (2026-10-05, `universe.min_avg_volume`:
+the scan, reports, live crossings, pre-market movers and the setups list) by technical
 analysis (the website was removed on 2026-09-27: the owner uses Telegram only). It looks at:
 
 - chart patterns, following Bulkowski's *Encyclopedia of Chart Patterns*;

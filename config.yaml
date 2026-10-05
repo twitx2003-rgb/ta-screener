@@ -39,6 +39,12 @@ universe:
   # If the screener is rate limited (429), --update goes on with the newest saved
   # universe when it is at most this many days old.
   max_age_days: 7
+  # Owner, 2026-10-05: only stocks with a relatively large volume, "not a few tens of
+  # thousands": a 10-day average of at least this many shares a day (TradingView's
+  # average_volume_10d_calc). It holds for everything the bot picks: the scan, the evening
+  # report and research, the live crossings, the pre-market movers and the setups list;
+  # not for an analysis the owner asks for or his own watchlist.
+  min_avg_volume: 1.0e6
 
 bars:
   history: 600               # daily bars on first fetch (~2.4 years)

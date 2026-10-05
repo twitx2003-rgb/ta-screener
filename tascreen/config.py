@@ -81,6 +81,11 @@ class UniverseSettings:
     # When the screener is rate limited, `--update` may go on with the newest saved
     # universe if it is at most this many days old.
     max_age_days: float = 7
+    # A stock is followed only while its 10-day average volume (shares a day, the
+    # screener's `average_volume_10d_calc`) is at least this; 0 = no floor (owner,
+    # 2026-10-05: "relatively large volume, not a few tens of thousands"). Applied when
+    # the universe is read, so a saved one obeys it too.
+    min_avg_volume: float = 0.0
 
     def __post_init__(self):
         # PyYAML (YAML 1.1) reads `1.0e9` without a sign as a *string*; sent as the
@@ -88,6 +93,7 @@ class UniverseSettings:
         # of ~4000). Every number here is converted explicitly.
         object.__setattr__(self, "min_market_cap", float(self.min_market_cap))
         object.__setattr__(self, "max_age_days", float(self.max_age_days))
+        object.__setattr__(self, "min_avg_volume", float(self.min_avg_volume))
         object.__setattr__(self, "row_cap", int(self.row_cap))
         object.__setattr__(self, "band_edges", tuple(float(e) for e in self.band_edges))
         object.__setattr__(self, "drop_exchanges", tuple(self.drop_exchanges))
@@ -99,6 +105,8 @@ class UniverseSettings:
             raise ConfigError("universe.band_edges must be strictly increasing")
         if not 1 <= self.row_cap <= 1000:
             raise ConfigError("universe.row_cap must be 1..1000 (the screener's cap)")
+        if not 0 <= self.min_avg_volume <= 1e8:
+            raise ConfigError("universe.min_avg_volume must be 0..100,000,000 shares a day")
 
 
 @dataclass(frozen=True)

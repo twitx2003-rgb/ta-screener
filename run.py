@@ -305,8 +305,12 @@ def usable_universe(settings, *, max_age_days: float | None = None):
         log.error("the newest saved universe is from %s (%d days old, limit %g)", day, age,
                   max_age_days)
         return None
-    # a universe saved under a lower floor (the owner raised it to $5B, 2026-09-28)
-    return day, frame.loc[frame["market_cap"] >= settings.universe.min_market_cap].reset_index(drop=True)
+    # a universe saved under a lower floor (the owner raised it to $5B, 2026-09-28), and the
+    # volume floor (2026-10-05): a stock trading too few shares a day is not followed
+    keep = frame["market_cap"] >= settings.universe.min_market_cap
+    if settings.universe.min_avg_volume > 0:
+        keep &= frame["avg_volume_10d"] >= settings.universe.min_avg_volume
+    return day, frame.loc[keep].reset_index(drop=True)
 
 
 def bars(settings, limit: int | None, stop_at=None) -> int:

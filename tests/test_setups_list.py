@@ -109,6 +109,14 @@ def test_a_setup_that_drifts_away_or_vanishes_or_waits_too_long_leaves():
         == "no_breakout"
 
 
+def test_a_stock_the_bot_no_longer_follows_leaves():
+    # the volume floor (owner, 2026-10-05) took it out of the universe, so out of the scan
+    view = _view([_stock("NYSE:OTHER", 50.0)], [_det("NYSE:ZZZ", "flag", "forming", "bullish")])
+    kept, events = _review([_breakout()], view)
+    assert kept == [] and events[0]["reason"] == "unfollowed"
+    assert "מחזור מסחר" in setups_list.REASONS["unfollowed"]
+
+
 def test_an_entry_without_the_sessions_close_is_kept_as_is():
     old = _view([_stock("NYSE:AAA", 90.0, day=date(2026, 3, 19))], [_det("NYSE:ZZZ", "flag", "forming", "bullish")])
     assert _review([_breakout()], old) == ([_breakout()], [])

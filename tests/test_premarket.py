@@ -13,9 +13,31 @@ from tascreen.errors import ConfigError
 NY = "America/New_York"
 
 
-def row(symbol="NASDAQ:AAA", close=100.0, change_abs=5.0, price=105.0, pct=5.0, volume=90000.0, **kw):
+def row(symbol="NASDAQ:AAA", close=100.0, change_abs=5.0, price=105.0, pct=5.0, volume=90000.0,
+        avg=2_000_000.0, **kw):
     return {"symbol": symbol, "close": close, "premarket_change_abs": change_abs, "premarket_close": price,
-            "premarket_change": pct, "premarket_volume": volume, "description": "Company A", **kw}
+            "premarket_change": pct, "premarket_volume": volume, "description": "Company A",
+            "average_volume_10d_calc": avg, **kw}
+
+
+def test_a_thin_stock_is_not_a_mover():
+    """Owner, 2026-10-05: only stocks trading a relatively large volume (the 10-day average)."""
+    import asyncio
+
+    from fakes import result
+
+    class Session:
+        async def call_tool(self, name, args):
+            rows = ([row("NASDAQ:THIN", avg=300_000.0), row("NASDAQ:BIG"), row("NASDAQ:NONE", avg=None)]
+                    if args["sort_order"] == "desc" else [])
+            assert "average_volume_10d_calc" in args["columns"]
+            return result({"success": True, "data": {"rows": rows, "totalCount": len(rows)}})
+
+    cfg = UniverseSettings(min_market_cap=5e9, band_edges=(5e9, 1e10), min_avg_volume=1e6)
+    got = asyncio.run(premarket.fetch_movers(Session(), cfg, (), min_pct=3.0, min_volume=50_000.0))
+    assert [m["symbol"] for m in got["up"]] == ["NASDAQ:BIG"] and got["thin"] == 2
+    no_floor = asyncio.run(premarket.fetch_movers(Session(), UniverseSettings(), (), min_pct=3.0, min_volume=50_000.0))
+    assert len(no_floor["up"]) == 3
 
 
 def test_only_todays_figures_are_used():

@@ -13,7 +13,9 @@ Once per session, after the evening report:
    - a breakout leaves when a session closes below its breakout line (the same rule as
      alerts.bullish_breakouts), when a high reaches the target (it worked: the move is
      done), or after `breakout_sessions` sessions (no longer fresh);
-   - the oldest leave first when the list holds more than `max_size`.
+   - the oldest leave first when the list holds more than `max_size`;
+   - a stock the scan no longer covers leaves (it fell under the universe's market-cap or
+     volume floor; owner, 2026-10-05: only stocks with a relatively large volume).
 3. TradingView: missing symbols are added, and symbols this bot added that left are removed;
    a symbol the owner put there by hand stays. Only this list's id can be edited
    (tv.mcp_client.OwnListSession).
@@ -53,6 +55,7 @@ REASONS = {
     "target": "הגיעה ליעד ✅",
     "stale": "הפריצה כבר לא טרייה",
     "room": "פינוי מקום לחדשות",
+    "unfollowed": "כבר לא ברשימת המניות של הבוט (מחזור מסחר או שווי)",
 }
 
 
@@ -158,8 +161,12 @@ def review(entries: list[dict], view: ScanView, bars_of: Callable, *, max_gap_pc
     def drop(e: dict, reason: str) -> None:
         events.append({"symbol": e["symbol"], "name": e.get("name", ""), "what": "removed", "reason": reason})
 
+    followed = set(view.stocks["symbol"])
     for e in entries:
         e = dict(e)
+        if e["symbol"] not in followed:             # left the universe (e.g. the volume floor)
+            drop(e, "unfollowed")
+            continue
         close = _close(view, e["symbol"])
         if close is None:
             kept.append(e)

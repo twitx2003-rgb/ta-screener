@@ -184,3 +184,26 @@ def test_a_universe_saved_under_a_lower_floor_is_cut_to_the_new_one(tmp_path):
                                             _universe([f"NYSE:S{i}" for i in range(5)]), {})
     day, frame = run.usable_universe(settings)
     assert sorted(frame["market_cap"]) == [5e9, 6e9]
+
+
+def test_a_stock_trading_too_few_shares_a_day_is_not_followed(tmp_path):
+    """Owner, 2026-10-05: "relatively large volume, not a few tens of thousands"."""
+    import dataclasses
+
+    import run
+    from test_scan import _universe
+    from tascreen.config import Settings
+    from tascreen.errors import ConfigError
+    from tascreen.store import Store
+
+    universe = _universe([f"NYSE:S{i}" for i in range(5)])
+    universe["avg_volume_10d"] = [40_000.0, 2_500_000.0, 999_999.0, 1_000_000.0, float("nan")]
+    floor = UniverseSettings(min_market_cap=2e9, band_edges=(2e9, 1e10), min_avg_volume=1e6)
+    settings = dataclasses.replace(Settings(root=tmp_path), universe=floor)
+    Store(settings.data_dir).write_universe(run._market_today(settings), universe, {})
+    _, frame = run.usable_universe(settings)
+    assert list(frame["symbol"]) == ["NYSE:S1", "NYSE:S3"]
+    none = dataclasses.replace(settings, universe=dataclasses.replace(floor, min_avg_volume=0.0))
+    assert len(run.usable_universe(none)[1]) == 5
+    with pytest.raises(ConfigError):
+        UniverseSettings(min_avg_volume=-1)

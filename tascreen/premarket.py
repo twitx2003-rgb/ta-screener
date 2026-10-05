@@ -31,7 +31,7 @@ from .universe import parse_screener
 SLOTS = (time(7, 30), time(8, 30), time(9, 15))    # New York; the open is 09:30
 SLOT_WINDOW_MIN = 40         # a late GitHub start still counts for its slot, this long
 COLUMNS = ["close", "premarket_close", "premarket_change", "premarket_change_abs",
-           "premarket_volume", "market_cap_basic", "description"]
+           "premarket_volume", "market_cap_basic", "description", "average_volume_10d_calc"]
 PER_SIDE = 8                 # movers shown up and down
 
 
@@ -79,9 +79,11 @@ def mover(row: dict[str, Any], context: str, drop_exchanges: tuple[str, ...] | l
         values[key] = float(value)
     if not fresh(values["close"], values["premarket_change_abs"], values["premarket_close"]):
         return None
+    average = pick(row, ["average_volume_10d_calc"], context=context, allow_null=True)
     return {"symbol": symbol, "name": str(pick(row, ["description"], context=context, allow_null=True) or ""),
             "prev_close": values["close"], "price": values["premarket_close"],
-            "change_pct": values["premarket_change"], "volume": values["premarket_volume"]}
+            "change_pct": values["premarket_change"], "volume": values["premarket_volume"],
+            "avg_volume": float(average) if average is not None else math.nan}
 
 
 def fresh(close: float, change_abs: float, price: float) -> bool:
@@ -89,9 +91,11 @@ def fresh(close: float, change_abs: float, price: float) -> bool:
 
 
 async def fetch_movers(session, cfg: UniverseSettings, delays, *, min_pct: float,
-                       min_volume: float, limit: int = 40) -> dict[str, Any]:
-    """The biggest fresh movers up and down (two screener calls)."""
-    out: dict[str, Any] = {"up": [], "down": [], "stale": 0}
+                       min_volume: float, limit: int = 60) -> dict[str, Any]:
+    """The biggest fresh movers up and down (two screener calls), only stocks whose 10-day
+    average volume reaches `cfg.min_avg_volume` (owner, 2026-10-05; checked here on the row,
+    not sent as a filter: thin stocks are many among big pre-market moves, so `limit` is 60)."""
+    out: dict[str, Any] = {"up": [], "down": [], "stale": 0, "thin": 0}
     for up in (True, False):
         context = f"{SCREENER_TOOL} premarket {'up' if up else 'down'}"
         payload = await fetch_in_session(session, SCREENER_TOOL,
@@ -102,6 +106,9 @@ async def fetch_movers(session, cfg: UniverseSettings, delays, *, min_pct: float
             m = mover(row, context, cfg.drop_exchanges)
             if m is None:
                 out["stale"] += 1
+                continue
+            if cfg.min_avg_volume > 0 and not m["avg_volume"] >= cfg.min_avg_volume:
+                out["thin"] += 1                    # nan (no average) is thin too
                 continue
             if (m["change_pct"] >= min_pct) if up else (m["change_pct"] <= -min_pct):
                 out["up" if up else "down"].append(m)
