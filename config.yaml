@@ -124,18 +124,20 @@ xnews:
   # and the bot sends a short Hebrew summary with a link. Account names without the @.
   enabled: true
   until: "2026-12-27"        # three months (owner, 2026-09-27); after it: one notice, then nothing
-  accounts: [   # the owner's list, 2026-09-27
-    unusual_whales, RyanDetrick, wallstengine, StockSavvyShay, cperruna, bespokeinvest,
-    MikeZaccardi, DeItaone, gurgavin, DivesTech, garyblack00, topdowncharts,
-    larryswedroe, DeanChristians, InvestingVisual, Mr_Derivatives, GinaMartinAdams,
-    zerohedge, LizAnnSonders, charliebilello, KobeissiLetter, sentimentrader,
-    Callum_Thomas, NorthmanTrader, TheChartReport, YardeniResearch, LukeGromen,
-    jsblokland, Tier1alpha, MacroAlf, CrescatCapital, GrantWilliams11, WolfStreet,
-    TheBondFreak, markets, CNBC, Bloomberg, WSJmarkets, FT, ReutersBiz, DavidInglesTV,
-    RampCapitalLLC, julius_fox, RealVision, SchwabResearch, GoldmanSachs, JPMorgan,
-    MorganStanley, BofA_Merrill, Citi, UBS, Barclays, HSBC, Fidelity, Vanguard_Group,
-    BlackRock, StateStreet, InvescoUS, PIMCO, TrowePrice, JanusHenderson, ARKInvest,
-    CathieDWood]
+  # The owner's list (2026-09-27), cleaned 2026-10-06 (owner: "remove the pages that hardly
+  # post news"): only accounts with at least one pick in a week of runs stay, so the whole
+  # list fits one search call (xnews.QUERY_ACCOUNTS). Removed, none picked in that week:
+  # RyanDetrick, cperruna, DivesTech, topdowncharts, larryswedroe, DeanChristians,
+  # GinaMartinAdams, sentimentrader, Callum_Thomas, NorthmanTrader, YardeniResearch,
+  # LukeGromen, jsblokland, Tier1alpha, MacroAlf, CrescatCapital, GrantWilliams11,
+  # WolfStreet, TheBondFreak, markets, Bloomberg, DavidInglesTV, RampCapitalLLC, julius_fox,
+  # RealVision, SchwabResearch, GoldmanSachs, JPMorgan, MorganStanley, BofA_Merrill, Citi,
+  # UBS, Barclays, HSBC, Fidelity, Vanguard_Group, BlackRock, StateStreet, InvescoUS, PIMCO,
+  # TrowePrice, JanusHenderson, ARKInvest, CathieDWood
+  accounts: [
+    unusual_whales, wallstengine, StockSavvyShay, bespokeinvest, MikeZaccardi, DeItaone,
+    gurgavin, garyblack00, InvestingVisual, Mr_Derivatives, zerohedge, LizAnnSonders,
+    charliebilello, KobeissiLetter, TheChartReport, CNBC, WSJmarkets, FT, ReutersBiz]
   min_importance: 3          # 1-5: 5 = market-moving now, 4 = relevant to specific stocks today,
                              # 3 = a useful Wall Street update (owner, 2026-09-28: not only the dramatic)
   weekend_min_importance: 4  # Saturday and Sunday: only the dramatic, and what matters for the week

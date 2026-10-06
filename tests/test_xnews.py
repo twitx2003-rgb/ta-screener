@@ -78,14 +78,16 @@ def test_an_invented_or_broken_pick_is_rejected(tmp_path):
 
 
 def test_accounts_are_grouped_and_pages_followed(tmp_path):
-    accounts = [f"acct{n}" for n in range(12)]
+    last = xnews.QUERY_ACCOUNTS              # one account more than a group fit: a second call
+    accounts = [f"acct{n}" for n in range(last + 1)]
     reader = FakeReader({"tweets": [row("31")], "has_next_page": True, "next_cursor": "c2"},
                         {"tweets": [row("32")], "has_next_page": False},
-                        {"tweets": [row("33", author="acct11")], "has_next_page": False})
+                        {"tweets": [row("33", author=f"acct{last}")], "has_next_page": False})
     summary, _ = run(tmp_path, reader, picker(), [], accounts=accounts)
     assert summary["calls"] == 3 and summary["read"] == 3
     assert reader.queries[0]["query"].startswith("(from:acct0 OR from:acct1") and "cursor" not in reader.queries[0]
-    assert reader.queries[1]["cursor"] == "c2" and "from:acct11" in reader.queries[2]["query"]
+    assert reader.queries[1]["cursor"] == "c2" and f"from:acct{last}" in reader.queries[2]["query"]
+    assert f"from:acct{last - 1})" in reader.queries[0]["query"] and reader.queries[2]["query"].startswith(f"(from:acct{last})")
     since = int(NOW.timestamp()) - 900 - xnews.OVERLAP_S
     assert reader.queries[0]["query"].endswith(f"since_time:{since} -filter:replies")
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))

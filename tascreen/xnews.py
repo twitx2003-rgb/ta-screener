@@ -41,8 +41,13 @@ from .llm import UsageLimit
 API = "https://api.twitterapi.io"
 CREDENTIALS = Path("~/.ta-screener/x.json")
 ACCOUNT = re.compile(r"^@?([A-Za-z0-9_]{1,15})$")
-QUERY_ACCOUNTS = 10          # accounts per search call ("from:a OR from:b ..."); fewer calls, same posts
-MAX_PAGES = 5                # pages of up to 20 posts per call; more than 100 new posts in 10 minutes is a flood
+# Accounts per search call ("from:a OR from:b ..."): fewer calls, same posts. Every call costs
+# 15 credits even when it finds nothing, and about half the bill was such empty calls (owner,
+# 2026-10-06: 10 accounts a call -> 7 calls a pass), so the cleaned list fits one call.
+QUERY_ACCOUNTS = 20
+# Pages of up to 20 posts per call: 10 posts per account at most, as with 10 accounts and 5
+# pages, so the morning's catch-up of the night is not cut shorter by the bigger groups.
+MAX_PAGES = 10
 OVERLAP_S = 120              # each search starts a little before the last one ended; ids dedupe
 # After a gap (the night, a weekend, a stopped workflow) at most this much is read back. It
 # was one hour (a night of 63 accounts flooded the chat); since `ration` sends at most two a
