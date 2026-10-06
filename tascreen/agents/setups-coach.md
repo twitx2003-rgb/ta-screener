@@ -49,6 +49,13 @@ Write, in English unless a field says Hebrew:
 - `improve_he`: the same as `improve`, in plain Hebrew for the investor (numbers only from the
   input).
 
+Hebrew fields (`summary_he`, `why_he`, `improve_he`): plain Hebrew, never an English word or a
+setting's name inside a sentence. Say "בדיקה חוזרת אחרי פריצה" (retest), "קפיצה מממוצע 150 יום"
+(ma150), "קפיצה מממוצע 20 יום" (ma20), "פריצה" (breakout), "מחזור המסחר" (volume), "שוק חלש"
+(low breadth), "תבנית ראש וכתפיים הפוכה" (head_shoulders_bottom); tickers stay in Latin letters.
+A proposal names what to change in words ("להעלות את סף מחזור המסחר בבדיקה חוזרת לפי 1.5"), not
+the setting.
+
 Keep a current lesson unless the evidence now contradicts it. With few decided entries (under
 20), lean on the study and say the list's own record is still small. Be honest: when a setup
 does no better than the baseline, say so.
