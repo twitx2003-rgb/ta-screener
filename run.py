@@ -561,6 +561,8 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
         summary["alerts"] = _evening_alerts(settings, store, target)
     if settings.setups_list.enabled:
         summary["setups_list"] = _setups_list(settings, store, target)
+        if settings.setups_list.coach:
+            summary["setups_coach"] = _setups_coach(settings, store, target)
     if settings.research.enabled:
         summary["research_weekly"] = _research_weekly(settings, store)
     summary["market"] = _market_snapshot(settings, store, target)
@@ -623,6 +625,8 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
     """The bot's own TradingView list of the owner's setups (tascreen/setups_list.py), once per
     session, after the evening report: the chart analyst over every stock the scan covers.
     Counts only: this goes to the public log."""
+    import pandas as pd
+
     from tascreen import alerts, notify, setups_list
     from tascreen.analyst import load_rules as analyst_rules
     from tascreen.patterns.rules import load_rules
@@ -644,11 +648,20 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
         if view is None or view.day != target:
             return {"status": "no scan of the session yet"}
         extra, list_counts = _owner_list_stocks(settings, client, store, view) if cfg.owner_lists else ([], {})
-        found, counts = setups_list.find_setups(store.root, list(view.stocks["symbol"]) + extra, cfg)
-        log.info("setups list: %s; the owner's lists: %s", counts, list_counts)
+        above = pd.to_numeric(view.stocks.get("above_sma150"), errors="coerce") if "above_sma150" in view.stocks else None
+        breadth = float(above.mean() * 100) if above is not None and above.notna().any() else None
+        weak = breadth is not None and breadth < cfg.weak_market_pct
+        found, counts = setups_list.find_setups(store.root, list(view.stocks["symbol"]) + extra, cfg, weak_market=weak)
+        log.info("setups list: %s; the owner's lists: %s; breadth %s", counts, list_counts,
+                 None if breadth is None else round(breadth, 1))
         state = setups_list.refresh(state, found, view, store.read_bars, cfg, extra=extra,
                                     break_atr=float(analyst_rules()["support_break_atr"]))
         setups_list.write(store.root, state)
+        from tascreen import setups_coach
+
+        setups_coach.write_ledger(store.root, setups_coach.record(
+            setups_coach.read_ledger(store.root), state, target.isoformat(),
+            price_of=lambda s: _close_on(store, s, target), bars_of=store.read_bars))
         text = setups_list.message(state)
         owner = owner or notify.owner_from_environment()
         if text and owner is not None:
@@ -1018,6 +1031,68 @@ def ci_live(settings, max_minutes: float) -> int:
         clock.sleep(max(0.0, min(wait, limit.total_seconds())))
 
 
+def _close_on(store, symbol: str, day) -> float | None:
+    """A stored stock's close on `day`, if its bars reach it."""
+    bars = store.read_bars(symbol)
+    if bars is None or bars.empty or bars["timestamp"].iloc[-1].date() != day:
+        return None
+    return float(bars["close"].iloc[-1])
+
+
+def _setups_coach(settings, store, target) -> dict:
+    """The setups coach (tascreen/setups_coach.py), once per session after the list's refresh:
+    the study rebuilt when due, one model call, the lessons and the analyst's notes saved, the
+    owner's private note when something left the list (and on Saturdays). Counts only."""
+    from datetime import date as _date, datetime, timezone
+
+    from tascreen import notify, setups_coach, setups_list, setups_study
+    from tascreen.llm import ClaudeCodeLLM
+
+    cfg, day = settings.setups_list, target.isoformat()
+    state = setups_list.read(store.root)
+    if state.get("day") != day:
+        return {"status": "waiting for the list"}
+    base = setups_coach.folder(store.root)
+    if (base / "coach" / f"{day}.json").exists():
+        return {"status": "already done"}
+    study = setups_coach.read_study(store.root)
+    built = str(study.get("built", ""))[:10]
+    out: dict = {}
+    if not built or (target - _date.fromisoformat(built)).days >= cfg.study_days:
+        try:
+            symbols = [p.stem.replace("_", ":", 1) for p in sorted(store.bars_dir.glob("*.parquet"))]
+            frame = setups_study.run_study(store.bars_dir.parent, symbols, store.read_ledger(), workers=cfg.workers)
+            study = {"built": day, **setups_study.summarise(frame)}
+            from tascreen.store import _write_json
+
+            _write_json(base / "study.json", study)
+            out["study"] = "rebuilt"
+        except Exception as exc:                     # the coach goes on with the old study
+            log.warning("the setups study failed: %s", type(exc).__name__)
+            out["study"] = f"failed: {type(exc).__name__}"
+    ledger = setups_coach.read_ledger(store.root)
+    keys = ("min_bounce_volume", "min_breakout_volume", "entry_sessions", "keep_sessions", "min_size",
+            "fill_bounce_volume", "fill_sessions", "exclude_patterns", "ma20_bounce_volume", "ma20_needs_strong",
+            "weak_market_pct")
+    user = setups_coach.inputs(state, ledger, study, {k: getattr(cfg, k) for k in keys},
+                               setups_coach.read_lessons(store.root), day)
+    try:
+        llm = ClaudeCodeLLM(model=settings.research.model, effort=settings.research.effort,
+                            timeout_s=settings.research.timeout_s)
+        result = setups_coach.coach(llm, user)
+    except Exception as exc:                         # the model's failure never stops the night
+        log.warning("the setups coach failed: %s", type(exc).__name__)
+        return {**out, "status": "failed", "error": type(exc).__name__}
+    setups_coach.save(store.root, day, result)
+    weekly = target.weekday() == 4                  # Friday's session: the week's note
+    text = setups_coach.message(result, user["left_today"], weekly=weekly)
+    owner = notify.owner_from_environment()
+    if text and owner is not None:
+        owner.send(text, html=True)
+    return {**out, "status": "done", "left_today": len(user["left_today"]), "lessons": len(result["keep"]) + len(result["improve"]),
+            "notes": len(result["analyst_notes"]), "sent": bool(text)}
+
+
 def _owner_list_stocks(settings, client, store, view) -> tuple[list[str], dict]:
     """The stocks on the owner's own TradingView lists that the scan does not cover (owner,
     2026-10-06: "research all the stocks on all my watchlists"): US-listed, their bars brought
@@ -1071,7 +1146,12 @@ def _setups_open(settings, client, store, day, owner) -> dict:
     state = setups_list.open_review(state, got["prices"], cfg, day=day.isoformat(),
                                     break_atr=float(analyst_rules()["support_break_atr"]))
     setups_list.write(store.root, state)
+    from tascreen import setups_coach
+
+    setups_coach.write_ledger(store.root, setups_coach.record(
+        setups_coach.read_ledger(store.root), state, day.isoformat(), price_of=got["prices"].get))
     push_token_file(setups_list.path(store.root), "setups list at the open")
+    push_token_file(setups_coach.folder(store.root) / "ledger.json", "setups ledger at the open")
     text = setups_list.message(state, at_open=True)
     if text:
         owner.send(text, html=True)

@@ -64,15 +64,21 @@ def test_a_hold_of_the_150_day_average_on_enough_volume_goes_in():
     assert weak == old == down == []
 
 
-def test_the_20_day_average_counts_only_as_strong_support_in_a_rise():
+def test_the_20_day_average_goes_in_on_high_volume_while_it_rises():
     facts = {**UPTREND, "sma20.direction": "עולה", "sma20.support.last_result": "החזיק",
              "sma20.support.sessions_ago": 0, "sma20.support.last_volume_ratio": 1.6,
              "sma20.support.state": "ממוצע 20 יום החזיק כתמיכה: המחיר ירד אליו ב-28/02 וקפץ ממנו",
              "sma20.support.strength": "תמיכה חזקה: ממוצע 20 יום החזיק 2 פעמים ברצף, ובקפיצה האחרונה הנפח לא היה חלש"}
     got = setups_list.setups_of(BARS, _analysis(facts), CFG)
     assert got[0]["kind"] == "ma20" and got[0]["text"].endswith("(תמיכה חזקה)")
+    # owner, 2026-10-06, after the study: a first hold is enough, but only on high volume
     once = {**facts, "sma20.support.strength": "ממוצע 20 יום החזיק כתמיכה"}
-    assert setups_list.setups_of(BARS, _analysis(once), CFG) == []
+    assert [s["kind"] for s in setups_list.setups_of(BARS, _analysis(once), CFG)] == ["ma20"]
+    strong_only = dataclasses.replace(CFG, ma20_needs_strong=True)
+    assert setups_list.setups_of(BARS, _analysis(once), strong_only) == []
+    assert setups_list.setups_of(BARS, _analysis({**facts, "sma20.support.last_volume_ratio": 1.4}), CFG) == []
+    falling = {**facts, "sma20.direction": "יורד"}
+    assert setups_list.setups_of(BARS, _analysis(falling), CFG) == []
 
 
 def _pattern(key="flag", breakout=100.0):
@@ -95,6 +101,25 @@ def test_a_breakout_retest_that_held_goes_in_first_and_follows_its_line():
     best = got[0]
     assert best["pattern"] == "flag" and best["target"] == 120.0 and best["text"].endswith("(תבנית דגל)")
     assert (best["level"], best["line"], best["slope"], best["line_day"]) == ("line", 100.0, 0.0, LAST)
+
+
+def test_a_weak_market_lets_in_only_the_150_day_holds():
+    facts = {**RETEST, "sma150.support.last_result": "החזיק", "sma150.support.sessions_ago": 0,
+             "sma150.support.last_volume_ratio": 2.0, "sma150.support.state": "ממוצע 150 יום החזיק כתמיכה"}
+    assert [s["kind"] for s in setups_list.setups_of(BARS, _analysis(facts, _pattern()), CFG)] == ["retest", "ma150"]
+    weak = setups_list.setups_of(BARS, _analysis(facts, _pattern()), CFG, weak_market=True)
+    assert [s["kind"] for s in weak] == ["ma150"]
+
+
+def test_an_entry_the_tightened_rules_no_longer_take_leaves():
+    thin20 = {**_ma_entry(), "volume": 1.3}
+    kept, events = _review([thin20], _view([_stock("NYSE:AAA", 100.0)]), FLAT)
+    assert len(kept) == 1 and events == []                   # without the rule, it stays
+    kept, events = setups_list.review([thin20, {**_line_entry(), "pattern": "rising_wedge"}],
+                                      _view([_stock("NYSE:AAA", 100.0)]), lambda s: FLAT, break_atr=0.5,
+                                      keep_sessions=10, qualify=lambda e: setups_list.qualifies(e, CFG))
+    assert kept == [] and [e["reason"] for e in events] == ["redefined", "redefined"]
+    assert setups_list.qualifies({**_ma_entry(), "volume": 1.6}, CFG)
 
 
 def test_wedges_are_left_out():

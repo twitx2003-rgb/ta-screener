@@ -93,6 +93,7 @@ save-alerts)
     if [ -d data/alerts ]; then git add -- data/alerts; fi
     if [ -f data/watchlist.json ]; then git add -- data/watchlist.json; fi   # the owner's list (private repo)
     if [ -f data/setups_list.json ]; then git add -- data/setups_list.json; fi   # the setups list's open review
+    if [ -f data/setups/ledger.json ]; then git add -- data/setups/ledger.json; fi   # ...and its ledger
     git commit -qm "live watch $(date -u +%Y-%m-%dT%H:%MZ): token, alerts and log" || true
     git push -q origin HEAD:main
     echo "state: token, alerts and log saved"

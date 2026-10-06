@@ -54,7 +54,7 @@ def company_name(scans_dir: Path, symbol: str, universe_dir: Path | None = None)
 
 def produce(symbol: str, bars: pd.DataFrame, folder: Path, *, llm: LLM | None = None,
             bot: Telegram | None = None, to_png: Callable[[Path, Path], Path] | None = None,
-            name: str | None = None) -> dict[str, Any]:
+            name: str | None = None, notes: str = "") -> dict[str, Any]:
     analysis = analyse(bars, symbol)
     folder.mkdir(parents=True, exist_ok=True)
     stem = f"{symbol_file_stem(symbol)}-{analysis.last_day}"
@@ -63,7 +63,7 @@ def produce(symbol: str, bars: pd.DataFrame, folder: Path, *, llm: LLM | None = 
     pine.write_text(pine_script(analysis, bars), encoding="utf-8")
     written = message = None
     if llm is not None:
-        written = writer.write(analysis, llm, name=name)
+        written = writer.write(analysis, llm, name=name, notes=notes)
         message = writer.telegram_html(written)
         (folder / f"{stem}.written.json").write_text(json.dumps(written, ensure_ascii=False, indent=1),
                                                      encoding="utf-8")
@@ -115,7 +115,10 @@ def handle_request(text: str, *, bars_dir: Path, read_bars: Callable[[str], pd.D
         return "not in the list"
     folder = today / f"{stamp:%H%M%S}-{symbol_file_stem(symbol)}"
     try:
-        produce(symbol, bars, folder, llm=make_llm(), bot=bot, to_png=to_png, name=name_of(symbol))
+        from ..setups_coach import analyst_notes
+
+        produce(symbol, bars, folder, llm=make_llm(), bot=bot, to_png=to_png, name=name_of(symbol),
+                notes=analyst_notes(bars_dir.parent))
     except Exception:
         # members see a plain sorry; the exception itself reaches the run's log (re-raised)
         try:

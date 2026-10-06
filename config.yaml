@@ -240,3 +240,14 @@ setups_list:
   # the US-listed ones, under the same volume floor, even if the universe does not have them.
   owner_lists: true
   list_exchanges: ["NASDAQ", "NYSE", "AMEX"]
+  # Owner, 2026-10-06: an expert agent that studies the setups daily (tascreen/setups_coach.py):
+  # the list's own record against the history study (rebuilt every study_days), why exits fell,
+  # what to keep and improve (proposals only), notes for the chart analyst; private chat.
+  coach: true
+  study_days: 7
+  # Owner, 2026-10-06, after the study: a 20-day bounce only on high volume, and a first hold is
+  # enough (holds in a row did no better); in a weak market (under weak_market_pct of the
+  # followed stocks above their 150-day) only the 150-day holds go in.
+  ma20_bounce_volume: 1.5
+  ma20_needs_strong: false
+  weak_market_pct: 40

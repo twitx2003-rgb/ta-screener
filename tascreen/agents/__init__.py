@@ -7,7 +7,8 @@ and then the role's instructions, which are the model's system prompt. Two teams
 - news desk (tascreen/xnews.py, tascreen/explain.py): news-screener (with
   news-deduper), chart-reader, market-explainer;
 - breakout research (tascreen/research.py): pattern-auditor, context-analyst,
-  statistician, chief-strategist, learning-coach.
+  statistician, chief-strategist, learning-coach;
+- setups (tascreen/setups_coach.py): setups-coach, who studies the owner's setups list.
 """
 from __future__ import annotations
 

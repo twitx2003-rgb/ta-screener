@@ -7,7 +7,7 @@ import pytest
 from tascreen import agents
 from tascreen.errors import ConfigError
 
-TEAMS = {"news-desk", "breakout-research"}
+TEAMS = {"news-desk", "breakout-research", "setups"}
 
 
 def test_every_role_file_is_complete():

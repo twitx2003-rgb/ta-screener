@@ -556,13 +556,15 @@ def check_parts(raw: dict, facts: dict[str, dict], rules: dict[str, Any],
 
 
 def write(analysis: Analysis, llm: LLM, *, rules: dict[str, Any] | None = None, name: str | None = None,
-          now=lambda: datetime.now(timezone.utc)) -> dict[str, Any]:
+          now=lambda: datetime.now(timezone.utc), notes: str = "") -> dict[str, Any]:
     """The written analysis: sections in display order, what was dropped, and the usage.
     The model writes the headline and up to one optional section; the program adds the
     levels line and the two scenarios."""
     rules = rules or load_rules()
     started = time.monotonic()
-    system, user, schema = system_prompt(), user_prompt(analysis), response_schema()
+    # the setups coach's notes (setups_coach.analyst_notes): guidance, never facts to quote
+    system = system_prompt() + (f"\n\n{notes}" if notes else "")
+    user, schema = user_prompt(analysis), response_schema()
     drawn = {k for k, v in simple_view(analysis, rules).items() if v.get("type") == "line"}
     raw, usage = llm.complete(system=system, user=user, schema=schema)
     kept, dropped = check_parts(raw, analysis.facts, rules, drawn)

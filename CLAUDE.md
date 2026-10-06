@@ -171,13 +171,20 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
 - Setups list (2026-10-02, `tascreen/setups_list.py`): the bot's own TradingView list,
   refreshed nightly after the evening report. Since 2026-10-05 the owner's setups only (no
   research picks): the analyst over every followed stock; in an uptrend, a 150-day hold, a
-  strong 20-day hold, a breakout retest that held (bounce >= 1.15x volume), or a fresh
-  breakout (>= 1.5x); no wedges. Out: a close through the level, a target, 10 sessions
+  20-day hold (>= 1.5x volume, a first hold is enough: 2026-10-06 after the study), a breakout
+  retest that held (bounce >= 1.15x volume), or a fresh breakout (>= 1.5x); no wedges; in a
+  weak market (< 40% above the 150-day) only 150-day holds go in. Out: a close through the level, a target, 10 sessions
   without renewal, or a stock no longer followed. At least 10 (2026-10-06: filled on volume
   that is not weak, up to 5 sessions back); 15 minutes after the open the live watch takes
   out what opened under its level and refills from last night's pool. Private chat.
   Also scanned (2026-10-06): the US stocks and funds on the owner's own TradingView lists
   (`owner_lists`, under the volume floor; entries marked `from_lists`).
+- Setups coach (2026-10-06, `tascreen/setups_coach.py`, `agents/setups-coach.md`, `setups_study.py`):
+  every evening after the list's refresh: the list's ledger (data/setups/ledger.json; the open's
+  exits too), the history study (the same setups, no look-ahead, vs a baseline; rebuilt weekly),
+  one model call: why exits fell, keep/improve (proposals only, never applied), notes for the
+  chart analyst (data/setups/analyst_notes.md, added to the writer's prompt). Private chat:
+  when something left, and Friday's session.
 - Foreign companies (2026-10-06): TradingView types ADRs "dr" (TSM, ASML, ARM), which the
   "stock" query never returned; `universe.depositary_receipts` fetches them by a query of
   their own (fail-safe: the stocks go on alone if it fails).

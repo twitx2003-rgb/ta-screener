@@ -8,12 +8,17 @@ and volume floors):
 - ma150: a test of the 150-day average that held in the last `entry_sessions` sessions, the
   bounce on at least `min_bounce_volume` times the average volume; also a breakout above
   the 150-day average whose retest held so;
-- ma20: the same on the 20-day average when it is strong support (holds in a row, the 20-day
-  rising);
+- ma20: the same on the 20-day average while it rises, the bounce on at least
+  `ma20_bounce_volume` (owner, 2026-10-06, after the study: high volume only, and a first hold
+  is enough; `ma20_needs_strong` brings back "holds in a row");
 - retest: a chart-pattern breakout (not a wedge, `exclude_patterns`) or a resistance-zone
   breakout whose retest held so;
 - breakout: a chart-pattern breakout (not a wedge) in the last `entry_sessions` sessions, on
   at least `min_breakout_volume` times the average volume: on the list to follow its retest.
+
+In a weak market (under `weak_market_pct` of the followed stocks above their 150-day average)
+only the 150-day holds go in (owner, 2026-10-06, after the study: the other setups failed most
+there). An entry that no longer meets the list's rules (`qualifies`) leaves at the review.
 
 At least `min_size` entries (owner, 2026-10-06: "at least ten stocks"): when the strict
 setups above are fewer, the list is filled with the same setups at the owner's own words,
@@ -89,6 +94,7 @@ REASONS = {
     "redefined": "לא עומדת בהגדרות החדשות של הרשימה",
     "opened_below": "נפתחה מתחת לרמה שלה: התמיכה נשברה בפתיחה",
 }
+WEAK_MARKET_KINDS = ("ma150",)            # what may go in while the market is weak
 
 
 # ------------------------------------------------------------------ state
@@ -141,7 +147,17 @@ def _dm(day: str) -> str:
     return f"{day[8:10]}/{day[5:7]}"
 
 
-def setups_of(bars: pd.DataFrame, analysis, cfg) -> list[dict[str, Any]]:
+def qualifies(entry: dict[str, Any], cfg) -> bool:
+    """Whether an entry still meets the list's rules as they are now (a rule tightened since
+    it went in takes it out): no excluded pattern, a 20-day bounce on enough volume."""
+    if entry.get("pattern") in cfg.exclude_patterns:
+        return False
+    if entry.get("kind") == "ma20" and _finite(entry.get("volume")):
+        return float(entry["volume"]) >= cfg.ma20_bounce_volume
+    return True
+
+
+def setups_of(bars: pd.DataFrame, analysis, cfg, *, weak_market: bool = False) -> list[dict[str, Any]]:
     """The owner's setups in one stock's analysis, best first (KINDS order). Each: kind, text,
     volume (the bounce's or the breakout's, x the 50-day average), since (the session that
     made it), the level to watch and, for a pattern, its key and target."""
@@ -203,12 +219,13 @@ def setups_of(bars: pd.DataFrame, analysis, cfg) -> list[dict[str, Any]]:
         k = f"sma{n}.support"
         ago, vol = value(f"{k}.sessions_ago"), value(f"{k}.last_volume_ratio")
         strong = str(value(f"{k}.strength") or "").startswith("תמיכה חזקה")
+        floor = cfg.fill_bounce_volume if n == 150 else cfg.ma20_bounce_volume
+        twenty = n == 150 or (value(f"sma{n}.direction") == "עולה" and (strong or not cfg.ma20_needs_strong))
         if (value(f"{k}.last_result") == "החזיק" and isinstance(ago, int) and ago <= cfg.fill_sessions
-                and _finite(vol) and float(vol) > cfg.fill_bounce_volume
-                and (n == 150 or (strong and value(f"sma{n}.direction") == "עולה"))):
+                and _finite(vol) and (float(vol) > floor if n == 150 else float(vol) >= floor) and twenty):
             out.append({"kind": f"ma{n}", "text": str(value(f"{k}.state")) + (" (תמיכה חזקה)" if strong else ""),
                         "volume": float(vol), "since": days[last - ago],
-                        "strict": strict(ago, float(vol), cfg.min_bounce_volume),
+                        "strict": strict(ago, float(vol), cfg.min_bounce_volume if n == 150 else cfg.ma20_bounce_volume),
                         "level": "ma", "n": n, "watch": value(f"sma{n}")})
     for key in patterns:                                   # a fresh breakout on high volume
         since, vol = value(f"{key}.sessions_since_breakout"), value(f"{key}.breakout_volume_ratio")
@@ -220,6 +237,8 @@ def setups_of(bars: pd.DataFrame, analysis, cfg) -> list[dict[str, Any]]:
                                  + (f" בנפח {volume}" if volume else "")),
                         "volume": float(vol), "since": days[last - since], "target": value(f"{key}.target"),
                         "strict": strict(since, float(vol), cfg.min_breakout_volume), **line_of(key)})
+    if weak_market:
+        out = [s for s in out if s["kind"] in WEAK_MARKET_KINDS]
     for s in out:
         s["atr"] = atr
     out.sort(key=rank)
@@ -237,21 +256,22 @@ def _one(job: tuple[str, str, Any]) -> tuple[str, dict[str, Any] | None, str | N
     from .analyst.facts import analyse
     from .store import Store
 
-    root, symbol, cfg = job
+    root, symbol, cfg, weak = job
     try:
         bars = Store(Path(root)).read_bars(symbol)
         if bars is None or len(bars) < 160:
             return symbol, None, None
-        found = setups_of(bars, analyse(bars, symbol), cfg)
+        found = setups_of(bars, analyse(bars, symbol), cfg, weak_market=weak)
         return symbol, (found[0] if found else None), None
     except Exception as exc:                               # one stock never stops the rest
         return symbol, None, type(exc).__name__
 
 
-def find_setups(root: Path, symbols: list[str], cfg, workers: int | None = None) -> tuple[dict[str, dict], dict[str, int]]:
+def find_setups(root: Path, symbols: list[str], cfg, workers: int | None = None, *,
+                weak_market: bool = False) -> tuple[dict[str, dict], dict[str, int]]:
     """{symbol: its best setup} over `symbols` (the analyst on each, `workers` processes), and
     counts for the public log (errors by class name)."""
-    jobs = [(str(root), s, cfg) for s in symbols]
+    jobs = [(str(root), s, cfg, weak_market) for s in symbols]
     workers = max(1, min(int(workers or cfg.workers), os.cpu_count() or 1))
     if workers == 1:
         results = map(_one, jobs)
@@ -299,7 +319,8 @@ def level_now(entry: dict[str, Any], bars: pd.DataFrame) -> float:
 
 
 def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr: float,
-           keep_sessions: int, extra: list[str] | tuple = ()) -> tuple[list[dict], list[dict]]:
+           keep_sessions: int, extra: list[str] | tuple = (),
+           qualify: Callable[[dict], bool] = lambda e: True) -> tuple[list[dict], list[dict]]:
     """(entries kept, events): each event is {"symbol", "kind", "what": "removed", "reason"}.
     `extra`: the owner's stocks followed beside the scan's. An entry without the session's
     close is kept as it is (a gap in the data)."""
@@ -311,6 +332,9 @@ def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr:
 
         if e["symbol"] not in followed:                    # left the universe (e.g. the volume floor)
             drop("unfollowed")
+            continue
+        if not qualify(e):                                  # the rules tightened since it went in
+            drop("redefined")
             continue
         close, bars = _close(view, e["symbol"]), bars_of(e["symbol"])
         if close is None and bars is not None and len(bars) and day_of(bars["timestamp"].iloc[-1]) == view.day:
@@ -358,7 +382,7 @@ def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_
                    for e in entries if e["symbol"] not in found]
         entries = []
     kept, gone = review(entries, view, bars_of, break_atr=break_atr, keep_sessions=cfg.keep_sessions,
-                        extra=extra)
+                        extra=extra, qualify=lambda e: qualifies(e, cfg))
     mine = set(extra)
     events += gone
     by = {e["symbol"]: e for e in kept}

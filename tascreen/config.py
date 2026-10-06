@@ -419,14 +419,21 @@ class SetupsListSettings:
     pool_size: int = 30              # next-best candidates kept for the open's refill
     open_after_minutes: int = 15     # the open's review, this long after the open (live watch)
     owner_lists: bool = True         # the owner's own TradingView lists scanned too (2026-10-06)
+    coach: bool = True               # the setups coach every evening (tascreen/setups_coach.py)
+    # owner, 2026-10-06, after the study (tascreen/setups_study.py):
+    ma20_bounce_volume: float = 1.5  # a 20-day bounce only on high volume
+    ma20_needs_strong: bool = False  # a first hold of the 20-day is enough
+    weak_market_pct: float = 40.0    # under this share above their 150-day: only 150-day holds go in
+    study_days: int = 7              # the history study (setups_study.py) is rebuilt this often
     list_exchanges: tuple[str, ...] = ("NASDAQ", "NYSE", "AMEX")   # ...their US-listed stocks and funds
 
     def __post_init__(self):
         object.__setattr__(self, "id", str(self.id or "").strip())
         for name in ("max_size", "entry_sessions", "keep_sessions", "workers", "min_size", "fill_sessions",
-                     "pool_size", "open_after_minutes"):
+                     "pool_size", "open_after_minutes", "study_days"):
             object.__setattr__(self, name, int(getattr(self, name)))
-        for name in ("min_bounce_volume", "min_breakout_volume", "fill_bounce_volume"):
+        for name in ("min_bounce_volume", "min_breakout_volume", "fill_bounce_volume", "ma20_bounce_volume",
+                     "weak_market_pct"):
             object.__setattr__(self, name, float(getattr(self, name)))
         object.__setattr__(self, "exclude_patterns", tuple(self.exclude_patterns))
         object.__setattr__(self, "list_exchanges", tuple(self.list_exchanges))
@@ -444,6 +451,8 @@ class SetupsListSettings:
             raise ConfigError("setups_list: min_size 0..max_size, fill_sessions entry_sessions..10")
         if not 0.5 <= self.fill_bounce_volume <= self.min_bounce_volume:
             raise ConfigError("setups_list.fill_bounce_volume must be 0.5..min_bounce_volume")
+        if not (0.5 <= self.ma20_bounce_volume <= 5 and 0 <= self.weak_market_pct <= 100):
+            raise ConfigError("setups_list: ma20_bounce_volume 0.5..5, weak_market_pct 0..100")
         if not (0 <= self.pool_size <= 100 and 0 <= self.open_after_minutes <= 120):
             raise ConfigError("setups_list: pool_size 0..100, open_after_minutes 0..120")
 
