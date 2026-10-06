@@ -51,10 +51,15 @@ def test_a_hold_of_the_150_day_average_on_enough_volume_goes_in():
     facts = {**UPTREND, "sma150.support.last_result": "החזיק", "sma150.support.sessions_ago": 1,
              "sma150.support.last_volume_ratio": 1.4,
              "sma150.support.state": "ממוצע 150 יום החזיק כתמיכה: המחיר ירד אליו ב-26/02 וקפץ ממנו"}
-    got = setups_list.setups_of(BARS, _analysis(facts), CFG)
-    assert [(s["kind"], s["since"], s["level"], s["n"]) for s in got] == [("ma150", D[-2], "ma", 150)]
-    weak = setups_list.setups_of(BARS, _analysis({**facts, "sma150.support.last_volume_ratio": 1.0}), CFG)
-    old = setups_list.setups_of(BARS, _analysis({**facts, "sma150.support.sessions_ago": 3}), CFG)
+    got = setups_list.setups_of(BARS, _analysis({**facts, "atr": 2.0, "sma150": 97.0}), CFG)
+    assert [(s["kind"], s["since"], s["level"], s["n"], s["strict"]) for s in got] == [("ma150", D[-2], "ma", 150, True)]
+    assert (got[0]["watch"], got[0]["atr"]) == (97.0, 2.0)            # what the open is checked against
+    # volume that is not weak, or a hold of a few sessions back: only to fill the list to ten
+    normal = setups_list.setups_of(BARS, _analysis({**facts, "sma150.support.last_volume_ratio": 1.0}), CFG)
+    older = setups_list.setups_of(BARS, _analysis({**facts, "sma150.support.sessions_ago": 4}), CFG)
+    assert [s["strict"] for s in normal + older] == [False, False]
+    weak = setups_list.setups_of(BARS, _analysis({**facts, "sma150.support.last_volume_ratio": 0.8}), CFG)
+    old = setups_list.setups_of(BARS, _analysis({**facts, "sma150.support.sessions_ago": 6}), CFG)
     down = setups_list.setups_of(BARS, _analysis({**facts, "sma150.direction": "יורד"}), CFG)
     assert weak == old == down == []
 
@@ -104,7 +109,10 @@ def test_a_fresh_breakout_needs_high_volume_and_to_stay_above_its_line():
              "pat_1.breakout_volume": "גבוה, פי 1.8 מהממוצע"}
     got = setups_list.setups_of(BARS, _analysis(facts, _pattern()), CFG)
     assert got[0]["kind"] == "breakout" and got[0]["text"] == f"פריצה מתבנית דגל ב-{_dm(D[-2])} בנפח גבוה, פי 1.8 מהממוצע"
-    thin = {**facts, "pat_1.breakout_volume_ratio": 1.2}
+    assert got[0]["strict"] and got[0]["watch"] == 100.0             # the flat line, tomorrow
+    normal = {**facts, "pat_1.breakout_volume_ratio": 1.2}             # only to fill the list
+    assert [s["strict"] for s in setups_list.setups_of(BARS, _analysis(normal, _pattern()), CFG)] == [False]
+    thin = {**facts, "pat_1.breakout_volume_ratio": 0.9}
     back = {**facts, "pat_1.state": "המחיר חזר אל תוך התבנית: הפריצה מוטלת בספק"}
     assert setups_list.setups_of(BARS, _analysis(thin, _pattern()), CFG) == []
     assert setups_list.setups_of(BARS, _analysis(back, _pattern()), CFG) == []
@@ -201,6 +209,48 @@ def test_an_old_list_is_replaced_and_a_breakout_whose_retest_held_is_renewed():
     assert second["managed"] == ["NYSE:AAA", "NYSE:GONE", "NYSE:NEW"]
     assert {e["symbol"]: e["kind"] for e in second["entries"]} == {"NYSE:AAA": "retest", "NYSE:NEW": "ma20"}
     assert second["entries"][0]["added"] == LAST                        # the day it first went in
+
+
+def _found(symbol, since, *, strict, volume=1.5, kind="ma150", watch=95.0):
+    return {"kind": kind, "text": f"setup {symbol}", "volume": volume, "since": since, "strict": strict,
+            "level": "ma", "n": 150, "watch": watch, "atr": 2.0}
+
+
+def test_a_short_list_is_filled_to_ten_best_first_and_the_rest_wait_for_the_open():
+    view = _view([_stock(f"NYSE:S{i:02d}", 100.0) for i in range(16)])
+    found = {f"NYSE:S{i:02d}": _found(f"NYSE:S{i:02d}", D[-1], strict=i < 3) for i in range(3)}
+    found.update({f"NYSE:S{i:02d}": _found(f"NYSE:S{i:02d}", D[-1 - i % 5], strict=False, volume=0.9 + i / 100)
+                  for i in range(3, 16)})
+    state = setups_list.refresh({"version": setups_list.VERSION}, found, view, lambda s: FLAT, CFG, break_atr=0.5)
+    assert len(state["entries"]) == 10
+    filled = [e for e in state["entries"] if e.get("filled")]
+    assert len(filled) == 7 and all(not e["strict"] for e in filled)
+    assert [e["what"] for e in state["events"]].count("filled") == 7
+    # the newest of the filling ones went first; the others wait in the pool
+    assert max(e["since"] for e in filled) == D[-1] and len(state["pool"]) == 6
+    assert all(c["symbol"] not in {e["symbol"] for e in state["entries"]} for c in state["pool"])
+    full = setups_list.refresh({"version": setups_list.VERSION}, {k: {**v, "strict": True} for k, v in found.items()},
+                               view, lambda s: FLAT, CFG, break_atr=0.5)
+    assert len(full["entries"]) == 16 and not any(e.get("filled") for e in full["entries"])
+
+
+def test_the_open_takes_out_what_opened_under_its_level_and_refills_from_the_pool():
+    entries = [{**_found("NYSE:A", D[-1], strict=True), "symbol": "NYSE:A"},
+               {**_found("NYSE:B", D[-1], strict=True), "symbol": "NYSE:B"}]
+    pool = [{**_found("NYSE:C", D[-2], strict=False, watch=50.0), "symbol": "NYSE:C"},
+            {**_found("NYSE:D", D[-2], strict=False, watch=50.0), "symbol": "NYSE:D"}]
+    state = {"version": setups_list.VERSION, "entries": entries, "pool": pool, "managed": ["NYSE:A", "NYSE:B"]}
+    cfg = dataclasses.replace(CFG, min_size=2)
+    # A opens at 93.5, more than half an ATR (2) under its 95: out; C is above its 50: in; D has no price
+    got = setups_list.open_review(state, {"NYSE:A": 93.5, "NYSE:B": 94.5, "NYSE:C": 51.0}, cfg,
+                                  break_atr=0.5, day=LAST)
+    assert [e["symbol"] for e in got["entries"]] == ["NYSE:B", "NYSE:C"] and got["open_day"] == LAST
+    assert [(e["symbol"], e["what"], e.get("reason")) for e in got["events"]] == [
+        ("NYSE:A", "removed", "opened_below"), ("NYSE:C", "filled", None)]
+    assert [c["symbol"] for c in got["pool"]] == ["NYSE:D"] and "NYSE:C" in got["managed"]
+    text = setups_list.message(got, at_open=True)
+    assert text.startswith("📋 <b>רשימת הסטאפים בטריידינגוויו עודכנה בפתיחת המסחר</b>")
+    assert "• A: נפתחה מתחת לרמה שלה: התמיכה נשברה בפתיחה" in text
 
 
 def test_the_message_tells_what_changed():

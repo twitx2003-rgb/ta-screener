@@ -223,3 +223,12 @@ setups_list:
   keep_sessions: 10
   exclude_patterns: ["rising_wedge", "falling_wedge"]
   workers: 4
+  # Owner, 2026-10-06: at least min_size stocks; when the setups above are fewer, the same
+  # setups fill in on volume that is not weak (fill_bounce_volume) up to fill_sessions back.
+  # And the list is checked open_after_minutes after the open (the live watch): an entry
+  # already under its level leaves, and the next-best of last night (pool_size) fill in.
+  min_size: 10
+  fill_bounce_volume: 0.85
+  fill_sessions: 5
+  pool_size: 30
+  open_after_minutes: 15

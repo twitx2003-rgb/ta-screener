@@ -410,12 +410,18 @@ class SetupsListSettings:
     keep_sessions: int = 10          # an entry leaves this many sessions after its setup, unless renewed
     exclude_patterns: tuple[str, ...] = ("rising_wedge", "falling_wedge")   # "without wedges"
     workers: int = 4                 # processes for the analyst over every stock
+    min_size: int = 10               # at least this many (owner, 2026-10-06), filled when short:
+    fill_bounce_volume: float = 0.85  # ...a bounce on volume that is not weak (the analysis' word)
+    fill_sessions: int = 5           # ...decided up to this many sessions ago
+    pool_size: int = 30              # next-best candidates kept for the open's refill
+    open_after_minutes: int = 15     # the open's review, this long after the open (live watch)
 
     def __post_init__(self):
         object.__setattr__(self, "id", str(self.id or "").strip())
-        for name in ("max_size", "entry_sessions", "keep_sessions", "workers"):
+        for name in ("max_size", "entry_sessions", "keep_sessions", "workers", "min_size", "fill_sessions",
+                     "pool_size", "open_after_minutes"):
             object.__setattr__(self, name, int(getattr(self, name)))
-        for name in ("min_bounce_volume", "min_breakout_volume"):
+        for name in ("min_bounce_volume", "min_breakout_volume", "fill_bounce_volume"):
             object.__setattr__(self, name, float(getattr(self, name)))
         object.__setattr__(self, "exclude_patterns", tuple(self.exclude_patterns))
         if self.id and not self.id.isdigit():
@@ -428,6 +434,12 @@ class SetupsListSettings:
             raise ConfigError("setups_list: entry_sessions 0..5, keep_sessions 1..60")
         if not 1 <= self.workers <= 16:
             raise ConfigError("setups_list.workers must be 1..16")
+        if not (0 <= self.min_size <= self.max_size and self.entry_sessions <= self.fill_sessions <= 10):
+            raise ConfigError("setups_list: min_size 0..max_size, fill_sessions entry_sessions..10")
+        if not 0.5 <= self.fill_bounce_volume <= self.min_bounce_volume:
+            raise ConfigError("setups_list.fill_bounce_volume must be 0.5..min_bounce_volume")
+        if not (0 <= self.pool_size <= 100 and 0 <= self.open_after_minutes <= 120):
+            raise ConfigError("setups_list: pool_size 0..100, open_after_minutes 0..120")
 
 
 _SECTIONS = {

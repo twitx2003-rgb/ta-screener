@@ -638,7 +638,7 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
     state = setups_list.read(store.root)
     if state.get("id") != cfg.id:
         state = {}
-    if state.get("day") != target.isoformat():
+    if state.get("day") != target.isoformat() or state.get("version") != setups_list.VERSION:
         view = ScanRepository(store, load_rules()).current()
         if view is None or view.day != target:
             return {"status": "no scan of the session yet"}
@@ -1006,12 +1006,60 @@ def ci_live(settings, max_minutes: float) -> int:
             summary["alerts"] += len(found)
         if holdings:
             _holding_alerts(settings, owner, client, store, view, got, holdings, day, sent, summary)
+        if settings.setups_list.enabled and "setups_open" not in summary and datetime.now(timezone.utc) >= (
+                session_bounds(day, tz)[0] + timedelta(minutes=settings.setups_list.open_after_minutes)):
+            summary["setups_open"] = _setups_open(settings, client, store, day, owner)
         # TradingView slows down after heavy use: a slow pass stretches the interval
         if got["seconds"] and statistics.median(got["seconds"]) > 5:
             interval = min(interval * 2, 60.0)
         wait = pass_started + interval * 60 - clock.monotonic()
         limit = min(ends, hand_over) - datetime.now(timezone.utc)
         clock.sleep(max(0.0, min(wait, limit.total_seconds())))
+
+
+def _setups_open(settings, client, store, day, owner) -> dict:
+    """The setups list at the open (tascreen/setups_list.py open_review; owner, 2026-10-06):
+    once a session, the prices of the list and of last night's pool, the entries already
+    under their level out, the pool's best in. Counts only: this goes to the public log."""
+    from tascreen import alerts, setups_list
+    from tascreen.analyst import load_rules as analyst_rules
+    from tascreen.tv.mcp_client import _run, push_token_file
+
+    cfg = settings.setups_list
+    state = setups_list.read(store.root)
+    if not cfg.id or cfg.id == settings.watchlist.id or state.get("id") != cfg.id:
+        return {"status": "no list"}
+    if state.get("version") != setups_list.VERSION or state.get("open_day") == day.isoformat():
+        return {"status": "not due"}
+    symbols = sorted({e["symbol"] for e in state.get("entries") or []} | {c["symbol"] for c in state.get("pool") or []})
+    try:
+        got = client.with_session(lambda session: alerts.fetch_live_prices(
+            session, symbols, day, settings.market.timezone, concurrency=settings.bars.concurrency))
+    except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("the setups list's open prices failed: %s", type(exc).__name__)
+        return {"status": "no prices", "error": type(exc).__name__}
+    state = setups_list.open_review(state, got["prices"], cfg, day=day.isoformat(),
+                                    break_atr=float(analyst_rules()["support_break_atr"]))
+    setups_list.write(store.root, state)
+    push_token_file(setups_list.path(store.root), "setups list at the open")
+    text = setups_list.message(state, at_open=True)
+    if text:
+        owner.send(text, html=True)
+    out = {"entries": len(state["entries"]), "changes": len(state["events"])}
+    wanted = [e["symbol"] for e in state["entries"]]
+
+    async def work():
+        async with client.own_list_session(cfg.id, setups_list.NAME) as session:
+            return await setups_list.sync(session, cfg.id, wanted, state.get("managed") or [],
+                                          settings.tradingview.rate_limit_delays)
+    try:
+        counts = _run(work())
+    except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("the setups list was not synced at the open: %s", type(exc).__name__)
+        return {**out, "status": "not synced", "error": type(exc).__name__}
+    setups_list.write(store.root, {**state, "synced": True})
+    push_token_file(setups_list.path(store.root), "setups list synced at the open")
+    return {**out, **counts, "status": "synced"}
 
 
 def _holdings(settings, store, client, day) -> list[str]:

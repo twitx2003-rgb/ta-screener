@@ -173,7 +173,9 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   research picks): the analyst over every followed stock; in an uptrend, a 150-day hold, a
   strong 20-day hold, a breakout retest that held (bounce >= 1.15x volume), or a fresh
   breakout (>= 1.5x); no wedges. Out: a close through the level, a target, 10 sessions
-  without renewal, or a stock no longer followed. Changes to the private chat.
+  without renewal, or a stock no longer followed. At least 10 (2026-10-06: filled on volume
+  that is not weak, up to 5 sessions back); 15 minutes after the open the live watch takes
+  out what opened under its level and refills from last night's pool. Private chat.
 - Open: pattern quality in the scanner (triangle touches, cup depth: discuss first, it
   changes every alert), earnings dates, relative strength, gaps; the hosting keepalive
   before about 2026-11-23.

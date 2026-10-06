@@ -15,6 +15,11 @@ and volume floors):
 - breakout: a chart-pattern breakout (not a wedge) in the last `entry_sessions` sessions, on
   at least `min_breakout_volume` times the average volume: on the list to follow its retest.
 
+At least `min_size` entries (owner, 2026-10-06: "at least ten stocks"): when the strict
+setups above are fewer, the list is filled with the same setups at the owner's own words,
+the bounce on volume that is not weak (`fill_bounce_volume`) up to `fill_sessions` sessions
+back (a fresh breakout on at least average volume), best first; they are marked `filled`.
+
 Once per session, after the evening report:
 1. Review (our rules, not Bulkowski's): an entry leaves when a session closes more than
    `support_break_atr` (analyst rules) below its level (the average, or the broken line
@@ -26,6 +31,12 @@ Once per session, after the evening report:
    a symbol the owner put there by hand stays. Only this list's id can be edited
    (tv.mcp_client.OwnListSession).
 4. What changed goes to the owner's PRIVATE chat.
+
+And `open_after_minutes` after the open (owner, 2026-10-06: "update at the open and the
+close"; the live watch runs it, without bars): an entry whose price is already more than
+`support_break_atr` ATRs under the level it was left with last night (`watch`, `atr`)
+leaves, and the list is refilled from last night's next-best candidates (`pool`) still
+above their level, up to `min_size`.
 
 The entries are kept in the private state repo (data/setups_list.json); public logs get
 counts only.
@@ -68,6 +79,7 @@ REASONS = {
     "room": "פינוי מקום לחדשות",
     "unfollowed": "כבר לא ברשימת המניות של הבוט (מחזור מסחר או שווי)",
     "redefined": "לא עומדת בהגדרות החדשות של הרשימה",
+    "opened_below": "נפתחה מתחת לרמה שלה: התמיכה נשברה בפתיחה",
 }
 
 
@@ -113,14 +125,18 @@ def setups_of(bars: pd.DataFrame, analysis, cfg) -> list[dict[str, Any]]:
         return []                                          # only in an uptrend
     days = bars["timestamp"].map(day_of).astype(str).tolist()
     last = len(days) - 1
-    fresh = int(cfg.entry_sessions)
+    atr = float(value("atr")) if _finite(value("atr")) else math.nan
     out: list[dict[str, Any]] = []
 
+    def strict(ago: int, vol: float, floor: float) -> bool:
+        return ago <= cfg.entry_sessions and vol >= floor
+
     def held(key: str) -> tuple[int, float] | None:
-        """(sessions ago, the bounce's volume) of a hold decided lately on enough volume."""
+        """(sessions ago, the bounce's volume) of a hold decided lately on volume that is not
+        weak (the filling threshold; `strict` tells the list's own)."""
         text, ago, vol = str(value(key) or ""), value(f"{key}_sessions_ago"), value(f"{key}_volume_ratio")
-        if ("החזיק" in text and "נשבר" not in text and isinstance(ago, int) and ago <= fresh
-                and _finite(vol) and float(vol) >= cfg.min_bounce_volume):
+        if ("החזיק" in text and "נשבר" not in text and isinstance(ago, int) and ago <= cfg.fill_sessions
+                and _finite(vol) and float(vol) > cfg.fill_bounce_volume):
             return ago, float(vol)
         return None
 
@@ -130,8 +146,9 @@ def setups_of(bars: pd.DataFrame, analysis, cfg) -> list[dict[str, Any]]:
         index = {day: i for i, day in enumerate(days)}
         b = index.get(str(d.get("breakout_day")))
         at = _broken_line(d.get("lines") or [], float(d["breakout"]), index, b if b is not None else last)
-        return {"level": "line", "line": float(at(last)), "slope": float(at(last) - at(last - 1)),
-                "line_day": days[last]}
+        slope = float(at(last) - at(last - 1))
+        return {"level": "line", "line": float(at(last)), "slope": slope, "line_day": days[last],
+                "watch": float(at(last)) + slope}
 
     patterns = [k for k, d in drawings.items() if d.get("type") == "pattern" and d.get("family") == "chart"
                 and d.get("direction") == "bullish" and d.get("status") == "breakout"
@@ -141,37 +158,49 @@ def setups_of(bars: pd.DataFrame, analysis, cfg) -> list[dict[str, Any]]:
             out.append({"kind": "retest", "pattern": drawings[key]["pattern"],
                         "text": f"{value(f'{key}.retest')} (תבנית {value(f'{key}.name')})",
                         "volume": h[1], "since": days[last - h[0]], "target": value(f"{key}.target"),
-                        **line_of(key)})
+                        "strict": strict(*h, cfg.min_bounce_volume), **line_of(key)})
     for key in sorted(k.rsplit(".", 1)[0] for k in facts if k.startswith("zone_") and k.endswith(".retest")):
         if (h := held(f"{key}.retest")) is not None:       # a resistance zone's breakout retested
             out.append({"kind": "retest", "pattern": None, "text": str(value(f"{key}.retest")),
                         "volume": h[1], "since": days[last - h[0]], "target": None,
+                        "strict": strict(*h, cfg.min_bounce_volume),
                         "level": "line", "line": float(value(f"{key}.high")), "slope": 0.0,
-                        "line_day": days[last]})
+                        "line_day": days[last], "watch": float(value(f"{key}.high"))})
     if (h := held("sma150.cross.retest")) is not None:     # a breakout above the 150-day retested
         out.append({"kind": "ma150", "text": str(value("sma150.cross.retest")), "volume": h[1],
-                    "since": days[last - h[0]], "level": "ma", "n": 150})
+                    "since": days[last - h[0]], "strict": strict(*h, cfg.min_bounce_volume),
+                    "level": "ma", "n": 150, "watch": value("sma150")})
     for n in (150, 20):                                    # a test of an average that held
         k = f"sma{n}.support"
         ago, vol = value(f"{k}.sessions_ago"), value(f"{k}.last_volume_ratio")
         strong = str(value(f"{k}.strength") or "").startswith("תמיכה חזקה")
-        if (value(f"{k}.last_result") == "החזיק" and isinstance(ago, int) and ago <= fresh
-                and _finite(vol) and float(vol) >= cfg.min_bounce_volume
+        if (value(f"{k}.last_result") == "החזיק" and isinstance(ago, int) and ago <= cfg.fill_sessions
+                and _finite(vol) and float(vol) > cfg.fill_bounce_volume
                 and (n == 150 or (strong and value(f"sma{n}.direction") == "עולה"))):
             out.append({"kind": f"ma{n}", "text": str(value(f"{k}.state")) + (" (תמיכה חזקה)" if strong else ""),
-                        "volume": float(vol), "since": days[last - ago], "level": "ma", "n": n})
+                        "volume": float(vol), "since": days[last - ago],
+                        "strict": strict(ago, float(vol), cfg.min_bounce_volume),
+                        "level": "ma", "n": n, "watch": value(f"sma{n}")})
     for key in patterns:                                   # a fresh breakout on high volume
         since, vol = value(f"{key}.sessions_since_breakout"), value(f"{key}.breakout_volume_ratio")
-        if (isinstance(since, int) and since <= fresh and _finite(vol) and float(vol) >= cfg.min_breakout_volume
+        if (isinstance(since, int) and since <= cfg.fill_sessions and _finite(vol) and float(vol) >= 1.0
                 and str(value(f"{key}.state")) == "המחיר מעל קו הפריצה"):
             volume = value(f"{key}.breakout_volume")
             out.append({"kind": "breakout", "pattern": drawings[key]["pattern"],
                         "text": (f"פריצה מתבנית {value(f'{key}.name')} ב-{_dm(days[last - since])}"
                                  + (f" בנפח {volume}" if volume else "")),
                         "volume": float(vol), "since": days[last - since], "target": value(f"{key}.target"),
-                        **line_of(key)})
-    out.sort(key=lambda s: (KINDS.index(s["kind"]), -s["volume"]))
+                        "strict": strict(since, float(vol), cfg.min_breakout_volume), **line_of(key)})
+    for s in out:
+        s["atr"] = atr
+    out.sort(key=rank)
     return out
+
+
+def rank(s: dict[str, Any]) -> tuple:
+    """Best first: the list's own thresholds, then the kind (KINDS), the newest, the busiest."""
+    return (not s.get("strict", True), KINDS.index(s["kind"]), -date.fromisoformat(s["since"]).toordinal(),
+            -(s.get("volume") or 0.0))
 
 
 def _one(job: tuple[str, str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
@@ -266,8 +295,9 @@ def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr:
             drop("target")
         elif len(after) > keep_sessions:
             drop("stale")
-        else:
-            kept.append(e)
+        else:                                  # the level the open is checked against tomorrow
+            watch = level + (float(e.get("slope") or 0.0) if e.get("level") == "line" else 0.0)
+            kept.append({**e, "watch": watch, "atr": atr})
     return kept, events
 
 
@@ -296,20 +326,58 @@ def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_
     kept, gone = review(entries, view, bars_of, break_atr=break_atr, keep_sessions=cfg.keep_sessions)
     events += gone
     by = {e["symbol"]: e for e in kept}
-    for symbol, setup in sorted(found.items()):
-        entry = {"symbol": symbol, **setup, "added": by.get(symbol, {}).get("added", view.day.isoformat())}
+    ranked = sorted(found.items(), key=lambda item: (rank(item[1]), item[0]))
+    for symbol, setup in ranked:
         old = by.get(symbol)
+        if not setup.get("strict", True) and old is None:
+            continue                               # a filling candidate: only if the list is short
+        entry = {"symbol": symbol, **setup, "added": (old or {}).get("added", view.day.isoformat())}
         if old is None:
             events.append({"symbol": symbol, "kind": setup["kind"], "what": "added", "text": setup["text"]})
         elif (old.get("kind"), old.get("since")) != (setup["kind"], setup["since"]):
             events.append({"symbol": symbol, "kind": setup["kind"], "what": "renewed", "text": setup["text"]})
         by[symbol] = entry
+    for symbol, setup in ranked:                   # at least min_size (owner, 2026-10-06)
+        if len(by) >= cfg.min_size:
+            break
+        if symbol not in by:
+            by[symbol] = {"symbol": symbol, **setup, "added": view.day.isoformat(), "filled": True}
+            events.append({"symbol": symbol, "kind": setup["kind"], "what": "filled", "text": setup["text"]})
     entries, room = cap(list(by.values()), cfg.max_size)
     events += room
     added = {e["symbol"] for e in entries}
+    pool = [{"symbol": s, **c} for s, c in ranked if s not in added][: cfg.pool_size]
     managed = sorted(set(state.get("managed") or []) | added)
     return {"version": VERSION, "id": cfg.id, "day": view.day.isoformat(), "entries": entries,
-            "managed": managed, "events": events, "synced": False}
+            "pool": pool, "managed": managed, "events": events, "synced": False}
+
+
+def open_review(state: dict[str, Any], prices: dict[str, float], cfg, *, break_atr: float,
+                day: str) -> dict[str, Any]:
+    """At the open: an entry already through last night's level by more than `break_atr`
+    ATRs leaves; then the pool's best still above their level fill the list to min_size.
+    Prices missing for a stock leave it as it is."""
+    events: list[dict] = []
+    entries: list[dict] = []
+    for e in state.get("entries") or []:
+        price, watch, atr = prices.get(e["symbol"]), e.get("watch"), e.get("atr")
+        if _finite(price) and _finite(watch) and _finite(atr) and float(price) < float(watch) - break_atr * float(atr):
+            events.append({"symbol": e["symbol"], "kind": e.get("kind"), "what": "removed", "reason": "opened_below"})
+        else:
+            entries.append(e)
+    have = {e["symbol"] for e in entries}
+    pool = []
+    for c in state.get("pool") or []:
+        price = prices.get(c["symbol"])
+        if (len(entries) < cfg.min_size and c["symbol"] not in have and _finite(price)
+                and _finite(c.get("watch")) and float(price) >= float(c["watch"])):
+            entries.append({**c, "added": day, "filled": True})
+            have.add(c["symbol"])
+            events.append({"symbol": c["symbol"], "kind": c["kind"], "what": "filled", "text": c["text"]})
+        elif c["symbol"] not in have:
+            pool.append(c)
+    return {**state, "entries": entries, "pool": pool, "events": events, "open_day": day, "synced": False,
+            "managed": sorted(set(state.get("managed") or []) | have)}
 
 
 # ------------------------------------------------------------------ TradingView
@@ -337,13 +405,14 @@ def _ticker(symbol: str) -> str:
     return html.escape(symbol.split(":", 1)[-1])
 
 
-def message(state: dict[str, Any]) -> str | None:
+def message(state: dict[str, Any], *, at_open: bool = False) -> str | None:
     """The private chat's note on what changed; None when nothing did."""
     events = state.get("events") or []
     if not events:
         return None
-    lines = ["📋 <b>רשימת הסטאפים בטריידינגוויו עודכנה</b>"]
-    for what, head in (("added", "נכנסו:"), ("renewed", "התחדשו:")):
+    lines = ["📋 <b>רשימת הסטאפים בטריידינגוויו עודכנה" + (" בפתיחת המסחר" if at_open else "") + "</b>"]
+    for what, head in (("added", "נכנסו:"), ("renewed", "התחדשו:"),
+                       ("filled", "נכנסו כדי שיהיו לפחות 10 (מחזור לא חלש, או קפיצה מהימים האחרונים):")):
         part = [e for e in events if e["what"] == what]
         if part:
             lines += ["", f"<b>{head}</b>"]
