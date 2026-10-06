@@ -399,28 +399,35 @@ class WatchlistSettings:
 
 @dataclass(frozen=True)
 class SetupsListSettings:
-    # The bot's own TradingView watchlist of good setups and fresh breakouts, refreshed
-    # every evening (tascreen/setups_list.py; owner, 2026-10-02). Only its opaque id is here.
+    # The bot's own TradingView watchlist, refreshed every evening: the owner's setups only
+    # (tascreen/setups_list.py; owner, 2026-10-02 and 2026-10-05). Only its opaque id is here.
     enabled: bool = True
     id: str = ""
     max_size: int = 40
-    max_gap_pct: float = 8.0         # a setup leaves when its close is this far below the line
-    setup_sessions: int = 15         # ...or after this many sessions without a breakout
-    breakout_sessions: int = 10      # a breakout is "fresh" this many sessions
+    min_bounce_volume: float = 1.15  # a hold's bounce: at least this x the 50-day average volume
+    min_breakout_volume: float = 1.5  # a fresh breakout: at least this x (the analysis' "high")
+    entry_sessions: int = 2          # a hold or breakout decided this many sessions ago or less
+    keep_sessions: int = 10          # an entry leaves this many sessions after its setup, unless renewed
+    exclude_patterns: tuple[str, ...] = ("rising_wedge", "falling_wedge")   # "without wedges"
+    workers: int = 4                 # processes for the analyst over every stock
 
     def __post_init__(self):
         object.__setattr__(self, "id", str(self.id or "").strip())
-        for name in ("max_size", "setup_sessions", "breakout_sessions"):
+        for name in ("max_size", "entry_sessions", "keep_sessions", "workers"):
             object.__setattr__(self, name, int(getattr(self, name)))
-        object.__setattr__(self, "max_gap_pct", float(self.max_gap_pct))
+        for name in ("min_bounce_volume", "min_breakout_volume"):
+            object.__setattr__(self, name, float(getattr(self, name)))
+        object.__setattr__(self, "exclude_patterns", tuple(self.exclude_patterns))
         if self.id and not self.id.isdigit():
             raise ConfigError("setups_list.id must be the watchlist's number")
         if not 1 <= self.max_size <= 200:
             raise ConfigError("setups_list.max_size must be 1..200")
-        if not 1 <= self.max_gap_pct <= 30:
-            raise ConfigError("setups_list.max_gap_pct must be 1..30")
-        if not (1 <= self.setup_sessions <= 60 and 1 <= self.breakout_sessions <= 60):
-            raise ConfigError("setups_list: setup_sessions and breakout_sessions must be 1..60")
+        if not (0.5 <= self.min_bounce_volume <= 5 and 0.5 <= self.min_breakout_volume <= 5):
+            raise ConfigError("setups_list: the volume floors must be 0.5..5 (x the average)")
+        if not (0 <= self.entry_sessions <= 5 and 1 <= self.keep_sessions <= 60):
+            raise ConfigError("setups_list: entry_sessions 0..5, keep_sessions 1..60")
+        if not 1 <= self.workers <= 16:
+            raise ConfigError("setups_list.workers must be 1..16")
 
 
 _SECTIONS = {

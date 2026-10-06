@@ -205,14 +205,21 @@ watchlist:
   move_pct: 4
 
 setups_list:
-  # The bot's own TradingView watchlist (owner, 2026-10-02): the research team's picks go in
-  # every evening, as a setup or a fresh breakout; what did not work out leaves (closed back
-  # below the line, drifted away, the pattern vanished, no breakout in time), and so does
-  # what reached its target or is no longer fresh. Changes go to the owner's PRIVATE chat.
-  # The symbols stay in the private state repo (data/setups_list.json); only the id is here.
+  # The bot's own TradingView watchlist (owner, 2026-10-02; the owner's setups only since
+  # 2026-10-05, "accurate and good, as I defined them, without wedges"): every evening the
+  # chart analyst runs on every stock the bot follows (the market-cap and volume floors), and
+  # in go, in an uptrend (above a rising 150-day average): a hold of the 150-day average, a
+  # strong 20-day support that held, a breakout's retest that held, each bounce on at least
+  # min_bounce_volume x the average volume; and a fresh breakout on min_breakout_volume x.
+  # Out: a close through the level, a target reached, keep_sessions without renewal, or a
+  # stock no longer followed. Changes go to the owner's PRIVATE chat. The symbols stay in the
+  # private state repo (data/setups_list.json); only the id is here.
   enabled: true
   id: "349311195"
   max_size: 40
-  max_gap_pct: 8
-  setup_sessions: 15
-  breakout_sessions: 10
+  min_bounce_volume: 1.15
+  min_breakout_volume: 1.5
+  entry_sessions: 2
+  keep_sessions: 10
+  exclude_patterns: ["rising_wedge", "falling_wedge"]
+  workers: 4

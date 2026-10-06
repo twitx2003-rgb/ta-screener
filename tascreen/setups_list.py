@@ -1,21 +1,27 @@
-"""The bot's own TradingView watchlist of good setups and fresh breakouts (owner, 2026-10-02:
-"a watchlist of the interesting stocks with a good setup or just after a breakout, that
-refreshes itself and does not keep stocks or setups that did not work out").
+"""The bot's own TradingView watchlist: the owner's setups only (owner, 2026-10-05: "focus on
+the setups I gave you, accurate and good, as I defined them, without wedges"; the list
+itself: 2026-10-02, "refreshes itself and does not keep what did not work out").
+
+The setups, from the chart analyst's own facts (analyst/support.py), each in an uptrend (the
+close above a rising 150-day average) and on stocks the bot follows (the universe's market-cap
+and volume floors):
+- ma150: a test of the 150-day average that held in the last `entry_sessions` sessions, the
+  bounce on at least `min_bounce_volume` times the average volume; also a breakout above
+  the 150-day average whose retest held so;
+- ma20: the same on the 20-day average when it is strong support (holds in a row, the 20-day
+  rising);
+- retest: a chart-pattern breakout (not a wedge, `exclude_patterns`) or a resistance-zone
+  breakout whose retest held so;
+- breakout: a chart-pattern breakout (not a wedge) in the last `entry_sessions` sessions, on
+  at least `min_breakout_volume` times the average volume: on the list to follow its retest.
 
 Once per session, after the evening report:
-1. In: the research team's picks of the session (data/research/picks.json), a forming
-   pattern as a "setup", a confirmed breakout as a "breakout".
-2. Review of every entry against the session's scan and bars (our rules, not Bulkowski's):
-   - a setup that broke out becomes a breakout;
-   - a setup leaves when its close drifts more than `max_gap_pct` below the line, when the
-     scan has not found its pattern for two sessions, or after `setup_sessions` sessions
-     without a breakout;
-   - a breakout leaves when a session closes below its breakout line (the same rule as
-     alerts.bullish_breakouts), when a high reaches the target (it worked: the move is
-     done), or after `breakout_sessions` sessions (no longer fresh);
-   - the oldest leave first when the list holds more than `max_size`;
-   - a stock the scan no longer covers leaves (it fell under the universe's market-cap or
-     volume floor; owner, 2026-10-05: only stocks with a relatively large volume).
+1. Review (our rules, not Bulkowski's): an entry leaves when a session closes more than
+   `support_break_atr` (analyst rules) below its level (the average, or the broken line
+   followed with its slope), when a pattern's target is reached (it worked), after
+   `keep_sessions` sessions without a new hold, or when the scan no longer covers the stock.
+2. In: tonight's setups; a stock already on the list is renewed (a breakout whose retest
+   held becomes a retest). The oldest leave first over `max_size`.
 3. TradingView: missing symbols are added, and symbols this bot added that left are removed;
    a symbol the owner put there by hand stays. Only this list's id can be edited
    (tv.mcp_client.OwnListSession).
@@ -29,33 +35,39 @@ from __future__ import annotations
 import html
 import json
 import math
+import os
+from concurrent.futures import ProcessPoolExecutor
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
 import pandas as pd
 
 from .fields import pick
-from .patterns.levels import day_of, invalidation
+from .indicators import atr as atr_series
+from .indicators import sma
+from .patterns.levels import day_of
 from .store import _write_json
 from .tv.data import fetch_in_session
-from .web.data import ScanView, detection_record
+from .web.data import ScanView
 
 NAME = "הבוט: סטאפים ופריצות"        # the list's name in TradingView, given when it was created
 GET = "mcp-watchlist-get-watchlist"   # {"watchlist": {"id", "name", "symbols": [...]}} (live, 2026-10-02)
 ADD = "mcp-watchlist-add-to-watchlist"
 REMOVE = "mcp-watchlist-remove-from-watchlist"
-MISSING_LIMIT = 2                     # sessions in a row without the pattern in the scan
+VERSION = 2                           # 2026-10-05: the owner's setups (1: the research team's picks)
+KINDS = ("retest", "ma150", "breakout", "ma20")   # one entry a stock: the first of these it shows
 
+KIND_HE = {"ma150": "ממוצע 150", "ma20": "ממוצע 20", "retest": "בדיקה אחרי פריצה", "breakout": "פריצה"}
 REASONS = {
-    "drifted": "התרחקה מקו הפריצה",
-    "vanished": "התבנית כבר לא מופיעה בסריקה",
-    "no_breakout": "לא פרצה בזמן",
-    "fell_back": "נסגרה מתחת לקו הפריצה",
+    "fell_ma": "נסגרה מתחת לממוצע: התמיכה נשברה",
+    "fell_back": "נסגרה מתחת לקו שנפרץ: הפריצה לא החזיקה",
     "target": "הגיעה ליעד ✅",
-    "stale": "הפריצה כבר לא טרייה",
+    "stale": "הסטאפ כבר לא טרי: לא התחדש בימים האחרונים",
     "room": "פינוי מקום לחדשות",
     "unfollowed": "כבר לא ברשימת המניות של הבוט (מחזור מסחר או שווי)",
+    "redefined": "לא עומדת בהגדרות החדשות של הרשימה",
 }
 
 
@@ -76,7 +88,7 @@ def write(data_dir: Path, state: dict[str, Any]) -> None:
     _write_json(path(data_dir), state)
 
 
-# ------------------------------------------------------------------ the scan's facts
+# ------------------------------------------------------------------ the setups of one stock
 def _finite(x: Any) -> bool:
     try:
         return math.isfinite(float(x))
@@ -84,18 +96,124 @@ def _finite(x: Any) -> bool:
         return False
 
 
-def _row(view: ScanView, symbol: str, pattern: str, status: str) -> dict[str, Any] | None:
-    """The scan's newest bullish row of this symbol's pattern with this status."""
-    d = view.detections
-    rows = d.loc[(d["symbol"] == symbol) & (d["pattern"] == pattern) & (d["status"] == status)
-                 & (d["family"] == "chart") & d["direction"].isin(["bullish", "either"])]
-    if not len(rows):
+def _dm(day: str) -> str:
+    return f"{day[8:10]}/{day[5:7]}"
+
+
+def setups_of(bars: pd.DataFrame, analysis, cfg) -> list[dict[str, Any]]:
+    """The owner's setups in one stock's analysis, best first (KINDS order). Each: kind, text,
+    volume (the bounce's or the breakout's, x the 50-day average), since (the session that
+    made it), the level to watch and, for a pattern, its key and target."""
+    from .analyst.facts import _broken_line
+
+    facts, drawings = analysis.facts, analysis.drawings
+    value = lambda key: (facts.get(key) or {}).get("value")          # noqa: E731
+    vs150 = value("vs_sma150_pct")
+    if not (_finite(vs150) and float(vs150) > 0 and value("sma150.direction") == "עולה"):
+        return []                                          # only in an uptrend
+    days = bars["timestamp"].map(day_of).astype(str).tolist()
+    last = len(days) - 1
+    fresh = int(cfg.entry_sessions)
+    out: list[dict[str, Any]] = []
+
+    def held(key: str) -> tuple[int, float] | None:
+        """(sessions ago, the bounce's volume) of a hold decided lately on enough volume."""
+        text, ago, vol = str(value(key) or ""), value(f"{key}_sessions_ago"), value(f"{key}_volume_ratio")
+        if ("החזיק" in text and "נשבר" not in text and isinstance(ago, int) and ago <= fresh
+                and _finite(vol) and float(vol) >= cfg.min_bounce_volume):
+            return ago, float(vol)
         return None
-    if "age" in rows.columns:
-        rows = rows.sort_values("age", kind="stable")
-    return rows.iloc[0].to_dict()
+
+    def line_of(key: str) -> dict[str, Any]:
+        """A pattern's broken line, as tonight's value and its slope a session."""
+        d = drawings[key]
+        index = {day: i for i, day in enumerate(days)}
+        b = index.get(str(d.get("breakout_day")))
+        at = _broken_line(d.get("lines") or [], float(d["breakout"]), index, b if b is not None else last)
+        return {"level": "line", "line": float(at(last)), "slope": float(at(last) - at(last - 1)),
+                "line_day": days[last]}
+
+    patterns = [k for k, d in drawings.items() if d.get("type") == "pattern" and d.get("family") == "chart"
+                and d.get("direction") == "bullish" and d.get("status") == "breakout"
+                and d.get("pattern") not in cfg.exclude_patterns and _finite(d.get("breakout"))]
+    for key in patterns:                                   # a pattern's breakout retested
+        if (h := held(f"{key}.retest")) is not None:
+            out.append({"kind": "retest", "pattern": drawings[key]["pattern"],
+                        "text": f"{value(f'{key}.retest')} (תבנית {value(f'{key}.name')})",
+                        "volume": h[1], "since": days[last - h[0]], "target": value(f"{key}.target"),
+                        **line_of(key)})
+    for key in sorted(k.rsplit(".", 1)[0] for k in facts if k.startswith("zone_") and k.endswith(".retest")):
+        if (h := held(f"{key}.retest")) is not None:       # a resistance zone's breakout retested
+            out.append({"kind": "retest", "pattern": None, "text": str(value(f"{key}.retest")),
+                        "volume": h[1], "since": days[last - h[0]], "target": None,
+                        "level": "line", "line": float(value(f"{key}.high")), "slope": 0.0,
+                        "line_day": days[last]})
+    if (h := held("sma150.cross.retest")) is not None:     # a breakout above the 150-day retested
+        out.append({"kind": "ma150", "text": str(value("sma150.cross.retest")), "volume": h[1],
+                    "since": days[last - h[0]], "level": "ma", "n": 150})
+    for n in (150, 20):                                    # a test of an average that held
+        k = f"sma{n}.support"
+        ago, vol = value(f"{k}.sessions_ago"), value(f"{k}.last_volume_ratio")
+        strong = str(value(f"{k}.strength") or "").startswith("תמיכה חזקה")
+        if (value(f"{k}.last_result") == "החזיק" and isinstance(ago, int) and ago <= fresh
+                and _finite(vol) and float(vol) >= cfg.min_bounce_volume
+                and (n == 150 or (strong and value(f"sma{n}.direction") == "עולה"))):
+            out.append({"kind": f"ma{n}", "text": str(value(f"{k}.state")) + (" (תמיכה חזקה)" if strong else ""),
+                        "volume": float(vol), "since": days[last - ago], "level": "ma", "n": n})
+    for key in patterns:                                   # a fresh breakout on high volume
+        since, vol = value(f"{key}.sessions_since_breakout"), value(f"{key}.breakout_volume_ratio")
+        if (isinstance(since, int) and since <= fresh and _finite(vol) and float(vol) >= cfg.min_breakout_volume
+                and str(value(f"{key}.state")) == "המחיר מעל קו הפריצה"):
+            volume = value(f"{key}.breakout_volume")
+            out.append({"kind": "breakout", "pattern": drawings[key]["pattern"],
+                        "text": (f"פריצה מתבנית {value(f'{key}.name')} ב-{_dm(days[last - since])}"
+                                 + (f" בנפח {volume}" if volume else "")),
+                        "volume": float(vol), "since": days[last - since], "target": value(f"{key}.target"),
+                        **line_of(key)})
+    out.sort(key=lambda s: (KINDS.index(s["kind"]), -s["volume"]))
+    return out
 
 
+def _one(job: tuple[str, str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
+    """One stock in a worker process: (symbol, its best setup or None, an error class name)."""
+    from .analyst.facts import analyse
+    from .store import Store
+
+    root, symbol, cfg = job
+    try:
+        bars = Store(Path(root)).read_bars(symbol)
+        if bars is None or len(bars) < 160:
+            return symbol, None, None
+        found = setups_of(bars, analyse(bars, symbol), cfg)
+        return symbol, (found[0] if found else None), None
+    except Exception as exc:                               # one stock never stops the rest
+        return symbol, None, type(exc).__name__
+
+
+def find_setups(root: Path, symbols: list[str], cfg, workers: int | None = None) -> tuple[dict[str, dict], dict[str, int]]:
+    """{symbol: its best setup} over `symbols` (the analyst on each, `workers` processes), and
+    counts for the public log (errors by class name)."""
+    jobs = [(str(root), s, cfg) for s in symbols]
+    workers = max(1, min(int(workers or cfg.workers), os.cpu_count() or 1))
+    if workers == 1:
+        results = map(_one, jobs)
+    else:
+        pool = ProcessPoolExecutor(max_workers=workers)
+        results = pool.map(_one, jobs, chunksize=8)
+    found, errors = {}, {}
+    try:
+        for symbol, setup, error in results:
+            if error:
+                errors[error] = errors.get(error, 0) + 1
+            elif setup is not None:
+                found[symbol] = setup
+    finally:
+        if workers > 1:
+            pool.shutdown()
+    return found, {"analysed": len(jobs), "setups": len(found), **{f"error {k}": v for k, v in errors.items()}}
+
+
+# ------------------------------------------------------------------ the review
 def _close(view: ScanView, symbol: str) -> float | None:
     """The session's close, only when the stock's last bar is the scan's session."""
     s = view.stocks
@@ -108,133 +226,90 @@ def _close(view: ScanView, symbol: str) -> float | None:
     return float(row["close"])
 
 
-def _after(bars: pd.DataFrame | None, day: str) -> pd.DataFrame:
+def _after(bars: pd.DataFrame, day: str) -> pd.DataFrame:
     """The bars of the sessions after `day`, up to the newest."""
     if bars is None or bars.empty or not day:
         return pd.DataFrame(columns=["high"])
-    since = date.fromisoformat(day[:10])
-    days = bars["timestamp"].map(day_of)
-    return bars.loc[days > since]
+    return bars.loc[bars["timestamp"].map(day_of) > date.fromisoformat(day[:10])]
 
 
-def _as_breakout(entry: dict[str, Any], row: dict[str, Any], bars_of: Callable) -> dict[str, Any]:
-    return {**entry, "kind": "breakout", "line": float(row["breakout_price"]),
-            "target": float(row["target"]) if _finite(row.get("target")) else None,
-            "invalidation": _num(invalidation(detection_record(row), bars_of(entry["symbol"]))),
-            "breakout_day": str(day_of(row.get("event_day")) or ""), "missing": 0}
+def level_now(entry: dict[str, Any], bars: pd.DataFrame) -> float:
+    """The level an entry stands on, tonight: its average, or its line moved by its slope."""
+    if entry.get("level") == "ma":
+        return float(sma(bars["close"], int(entry["n"])).iloc[-1])
+    return float(entry["line"]) + float(entry.get("slope") or 0.0) * len(_after(bars, entry["line_day"]))
 
 
-def _num(x: Any) -> float | None:
-    return float(x) if _finite(x) else None
-
-
-# ------------------------------------------------------------------ in and out
-def new_entries(picks: list[dict], view: ScanView, bars_of: Callable, have: set[str]) -> list[dict]:
-    """The session's research picks not on the list yet, with their line and target."""
-    out = []
-    for p in picks:
-        symbol, pattern = p.get("symbol"), p.get("pattern")
-        if not symbol or symbol in have or p.get("day") != view.day.isoformat():
-            continue
-        base = {"symbol": symbol, "pattern": pattern, "added": view.day.isoformat(), "missing": 0}
-        breakout = _row(view, symbol, pattern, "breakout")
-        forming = _row(view, symbol, pattern, "forming")
-        if p.get("kind") == "breakout" and breakout is not None:
-            entry = _as_breakout({**base, "name": breakout.get("name_he") or pattern}, breakout, bars_of)
-        elif forming is not None and _finite(forming.get("trigger_up")):
-            entry = {**base, "name": forming.get("name_he") or pattern, "kind": "setup",
-                     "line": float(forming["trigger_up"]), "target": _num(forming.get("target")),
-                     "breakout_day": ""}
-        else:
-            continue                                    # the pick's pattern is not in the scan
-        out.append(entry)
-        have = have | {symbol}
-    return out
-
-
-def review(entries: list[dict], view: ScanView, bars_of: Callable, *, max_gap_pct: float,
-           setup_sessions: int, breakout_sessions: int) -> tuple[list[dict], list[dict]]:
-    """(entries kept, events): each event is {"symbol", "name", "what": "broke_out" |
-    "removed", "reason"}. An entry without a close of the session is kept as it is."""
+def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr: float,
+           keep_sessions: int) -> tuple[list[dict], list[dict]]:
+    """(entries kept, events): each event is {"symbol", "kind", "what": "removed", "reason"}.
+    An entry without the session's close is kept as it is (a gap in the data)."""
     kept, events = [], []
-
-    def drop(e: dict, reason: str) -> None:
-        events.append({"symbol": e["symbol"], "name": e.get("name", ""), "what": "removed", "reason": reason})
-
     followed = set(view.stocks["symbol"])
     for e in entries:
-        e = dict(e)
-        if e["symbol"] not in followed:             # left the universe (e.g. the volume floor)
-            drop(e, "unfollowed")
+        def drop(reason: str) -> None:
+            events.append({"symbol": e["symbol"], "kind": e.get("kind"), "what": "removed", "reason": reason})
+
+        if e["symbol"] not in followed:                    # left the universe (e.g. the volume floor)
+            drop("unfollowed")
             continue
-        close = _close(view, e["symbol"])
-        if close is None:
+        close, bars = _close(view, e["symbol"]), bars_of(e["symbol"])
+        if close is None or bars is None or bars.empty:
             kept.append(e)
             continue
-        bars = bars_of(e["symbol"])
-        if e["kind"] == "setup":
-            broke = _row(view, e["symbol"], e["pattern"], "breakout")
-            broke_day = day_of(broke.get("event_day")) if broke is not None else None
-            if broke is not None and broke_day and broke_day >= date.fromisoformat(e["added"]) \
-                    and _finite(broke.get("breakout_price")):
-                e = _as_breakout(e, broke, bars_of)
-                events.append({"symbol": e["symbol"], "name": e.get("name", ""), "what": "broke_out", "reason": ""})
-            else:
-                forming = _row(view, e["symbol"], e["pattern"], "forming")
-                if forming is None:
-                    e["missing"] = int(e.get("missing") or 0) + 1
-                    if e["missing"] >= MISSING_LIMIT:
-                        drop(e, "vanished")
-                        continue
-                else:
-                    e["missing"] = 0
-                    if _finite(forming.get("trigger_up")):
-                        e["line"] = float(forming["trigger_up"])
-                    if (e["line"] / close - 1) * 100 > max_gap_pct:
-                        drop(e, "drifted")
-                        continue
-                if len(_after(bars, e["added"])) > setup_sessions:
-                    drop(e, "no_breakout")
-                    continue
-                kept.append(e)
-                continue
-        # a breakout (or a setup that just became one)
-        after = _after(bars, e.get("breakout_day", ""))
-        if close < float(e["line"]):
-            drop(e, "fell_back")
+        atr = float(atr_series(bars, 14).iloc[-1])
+        level = level_now(e, bars)
+        after = _after(bars, e["since"])
+        if _finite(atr) and _finite(level) and close < level - break_atr * atr:
+            drop("fell_ma" if e.get("level") == "ma" else "fell_back")
         elif _finite(e.get("target")) and len(after) and float(after["high"].max()) >= float(e["target"]):
-            drop(e, "target")
-        elif len(after) > breakout_sessions:
-            drop(e, "stale")
+            drop("target")
+        elif len(after) > keep_sessions:
+            drop("stale")
         else:
             kept.append(e)
     return kept, events
 
 
 def cap(entries: list[dict], max_size: int) -> tuple[list[dict], list[dict]]:
-    """The newest `max_size` entries; the oldest leave first."""
+    """The newest `max_size` entries; the oldest leave first (then the weakest volume)."""
     if len(entries) <= max_size:
         return entries, []
-    ordered = sorted(entries, key=lambda e: (e["added"], e["symbol"]))
+    ordered = sorted(entries, key=lambda e: (e["since"], e.get("volume") or 0.0, e["symbol"]))
     out = ordered[: len(entries) - max_size]
     gone = {e["symbol"] for e in out}
     return ([e for e in entries if e["symbol"] not in gone],
-            [{"symbol": e["symbol"], "name": e.get("name", ""), "what": "removed", "reason": "room"} for e in out])
+            [{"symbol": e["symbol"], "kind": e.get("kind"), "what": "removed", "reason": "room"} for e in out])
 
 
-def refresh(state: dict[str, Any], picks: list[dict], view: ScanView, bars_of: Callable, cfg) -> dict[str, Any]:
-    """The new state after the session: review, then the picks in, then the cap. `events`
-    lists what changed (added / broke_out / removed)."""
-    kept, events = review(list(state.get("entries") or []), view, bars_of, max_gap_pct=cfg.max_gap_pct,
-                          setup_sessions=cfg.setup_sessions, breakout_sessions=cfg.breakout_sessions)
-    added = new_entries(picks, view, bars_of, {e["symbol"] for e in kept})
-    events += [{"symbol": e["symbol"], "name": e.get("name", ""), "what": "added", "reason": e["kind"]}
-               for e in added]
-    entries, gone = cap(kept + added, cfg.max_size)
+def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_of: Callable, cfg, *,
+            break_atr: float) -> dict[str, Any]:
+    """The new state after the session: review, tonight's setups in (or renewing an entry),
+    then the cap. `events` lists what changed (added / renewed / removed). A list from before
+    the owner's setups (version 1) is replaced: its entries leave unless they show one now."""
+    events: list[dict] = []
+    entries = list(state.get("entries") or [])
+    if state.get("version") != VERSION:
+        events += [{"symbol": e["symbol"], "kind": e.get("kind"), "what": "removed", "reason": "redefined"}
+                   for e in entries if e["symbol"] not in found]
+        entries = []
+    kept, gone = review(entries, view, bars_of, break_atr=break_atr, keep_sessions=cfg.keep_sessions)
     events += gone
-    managed = sorted(set(state.get("managed") or []) | {e["symbol"] for e in added})
-    return {"id": cfg.id, "day": view.day.isoformat(), "entries": entries, "managed": managed,
-            "events": events, "synced": False}
+    by = {e["symbol"]: e for e in kept}
+    for symbol, setup in sorted(found.items()):
+        entry = {"symbol": symbol, **setup, "added": by.get(symbol, {}).get("added", view.day.isoformat())}
+        old = by.get(symbol)
+        if old is None:
+            events.append({"symbol": symbol, "kind": setup["kind"], "what": "added", "text": setup["text"]})
+        elif (old.get("kind"), old.get("since")) != (setup["kind"], setup["since"]):
+            events.append({"symbol": symbol, "kind": setup["kind"], "what": "renewed", "text": setup["text"]})
+        by[symbol] = entry
+    entries, room = cap(list(by.values()), cfg.max_size)
+    events += room
+    added = {e["symbol"] for e in entries}
+    managed = sorted(set(state.get("managed") or []) | added)
+    return {"version": VERSION, "id": cfg.id, "day": view.day.isoformat(), "entries": entries,
+            "managed": managed, "events": events, "synced": False}
 
 
 # ------------------------------------------------------------------ TradingView
@@ -267,22 +342,18 @@ def message(state: dict[str, Any]) -> str | None:
     events = state.get("events") or []
     if not events:
         return None
-    by = {e["symbol"]: e for e in state.get("entries") or []}
-    lines = ["📋 <b>רשימת הסטאפים והפריצות בטריידינגוויו עודכנה</b>"]
-    added = [e for e in events if e["what"] == "added"]
-    broke = [e for e in events if e["what"] == "broke_out"]
+    lines = ["📋 <b>רשימת הסטאפים בטריידינגוויו עודכנה</b>"]
+    for what, head in (("added", "נכנסו:"), ("renewed", "התחדשו:")):
+        part = [e for e in events if e["what"] == what]
+        if part:
+            lines += ["", f"<b>{head}</b>"]
+            lines += [f"• {_ticker(e['symbol'])} ({KIND_HE.get(e['kind'], '')}): {html.escape(e['text'])}" for e in part]
     removed = [e for e in events if e["what"] == "removed"]
-    if added:
-        lines += ["", "<b>נכנסו:</b>"]
-        for e in added:
-            kind = "אחרי פריצה" if e["reason"] == "breakout" else "סטאפ לפני פריצה"
-            lines.append(f"• {_ticker(e['symbol'])}: {html.escape(e['name'])} ({kind})")
-    if broke:
-        lines += ["", "<b>פרצו (נשארות ברשימה):</b>"]
-        lines += [f"• {_ticker(e['symbol'])}: {html.escape(e['name'])}" for e in broke]
     if removed:
         lines += ["", "<b>יצאו:</b>"]
         lines += [f"• {_ticker(e['symbol'])}: {REASONS.get(e['reason'], e['reason'])}" for e in removed]
-    setups = sum(e["kind"] == "setup" for e in by.values())
-    lines += ["", f"ברשימה עכשיו: {len(by)} מניות ({setups} סטאפים, {len(by) - setups} אחרי פריצה)."]
+    entries = state.get("entries") or []
+    counts = {k: sum(e.get("kind") == k for e in entries) for k in KINDS}
+    parts = [f"{counts[k]} {KIND_HE[k]}" for k in KINDS if counts[k]]
+    lines += ["", f"ברשימה עכשיו: {len(entries)} מניות" + (f" ({', '.join(parts)})." if parts else ".")]
     return "\n".join(lines)

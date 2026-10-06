@@ -1,140 +1,218 @@
-"""The bot's own setups watchlist: who goes in, who leaves and why, the TradingView sync, the
-write guard and the private message. Made-up stocks and prices only."""
+"""The bot's own setups watchlist: the owner's setups (what goes in), the review (what leaves
+and why), one evening's refresh, the TradingView sync, the write guard and the private
+message. Made-up stocks, prices and volumes only."""
 from __future__ import annotations
 
 import asyncio
 import dataclasses
 from datetime import date
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
+from fakes import result
+from synth import frame
 from tascreen import setups_list
 from tascreen.config import ConfigError, SetupsListSettings
 from tascreen.errors import ProviderError
 from tascreen.tv.mcp_client import OwnListSession, own_list_edit
 from tascreen.web.data import ScanView
-from fakes import result
-from test_alerts import _det
 
-DAY = date(2026, 3, 20)
-CFG = SetupsListSettings(id="111", max_size=40, max_gap_pct=8, setup_sessions=15, breakout_sessions=10)
+CFG = SetupsListSettings(id="111")
 
 
-def _view(stocks, detections, day=DAY) -> ScanView:
-    return ScanView(day, {}, pd.DataFrame(stocks), pd.DataFrame(detections))
+def _bars(closes, *, spread=1.0):
+    rows, prev = [], closes[0]
+    for c in closes:
+        rows.append((prev, max(prev, c) + spread, min(prev, c) - spread, c))
+        prev = c
+    return frame(rows)
+
+
+D = [str(t.date()) for t in _bars([1.0] * 41)["timestamp"]]      # the sessions' days (synth's calendar)
+LAST, DAY = D[-1], date.fromisoformat(D[-1])
+
+
+def _dm(day):
+    return f"{day[8:10]}/{day[5:7]}"
+
+
+def _analysis(facts, drawings=None):
+    return SimpleNamespace(facts={k: {"value": v} for k, v in facts.items()}, drawings=drawings or {})
+
+
+UPTREND = {"vs_sma150_pct": 8.0, "sma150.direction": "עולה"}
+BARS = _bars([100.0 + i * 0.1 for i in range(41)])
+
+
+# ------------------------------------------------------------------ what goes in
+def test_a_hold_of_the_150_day_average_on_enough_volume_goes_in():
+    facts = {**UPTREND, "sma150.support.last_result": "החזיק", "sma150.support.sessions_ago": 1,
+             "sma150.support.last_volume_ratio": 1.4,
+             "sma150.support.state": "ממוצע 150 יום החזיק כתמיכה: המחיר ירד אליו ב-26/02 וקפץ ממנו"}
+    got = setups_list.setups_of(BARS, _analysis(facts), CFG)
+    assert [(s["kind"], s["since"], s["level"], s["n"]) for s in got] == [("ma150", D[-2], "ma", 150)]
+    weak = setups_list.setups_of(BARS, _analysis({**facts, "sma150.support.last_volume_ratio": 1.0}), CFG)
+    old = setups_list.setups_of(BARS, _analysis({**facts, "sma150.support.sessions_ago": 3}), CFG)
+    down = setups_list.setups_of(BARS, _analysis({**facts, "sma150.direction": "יורד"}), CFG)
+    assert weak == old == down == []
+
+
+def test_the_20_day_average_counts_only_as_strong_support_in_a_rise():
+    facts = {**UPTREND, "sma20.direction": "עולה", "sma20.support.last_result": "החזיק",
+             "sma20.support.sessions_ago": 0, "sma20.support.last_volume_ratio": 1.6,
+             "sma20.support.state": "ממוצע 20 יום החזיק כתמיכה: המחיר ירד אליו ב-28/02 וקפץ ממנו",
+             "sma20.support.strength": "תמיכה חזקה: ממוצע 20 יום החזיק 2 פעמים ברצף, ובקפיצה האחרונה הנפח לא היה חלש"}
+    got = setups_list.setups_of(BARS, _analysis(facts), CFG)
+    assert got[0]["kind"] == "ma20" and got[0]["text"].endswith("(תמיכה חזקה)")
+    once = {**facts, "sma20.support.strength": "ממוצע 20 יום החזיק כתמיכה"}
+    assert setups_list.setups_of(BARS, _analysis(once), CFG) == []
+
+
+def _pattern(key="flag", breakout=100.0):
+    return {"pat_1": {"type": "pattern", "family": "chart", "pattern": key, "status": "breakout",
+                      "direction": "bullish", "breakout": breakout, "breakout_day": "2025-02-20",
+                      "lines": [{"x1": "2025-02-03", "y1": breakout, "x2": "2025-02-14", "y2": breakout}]}}
+
+
+RETEST = {**UPTREND, "pat_1.name": "דגל", "pat_1.target": 120.0, "pat_1.sessions_since_breakout": 7,
+          "pat_1.state": "המחיר מעל קו הפריצה",
+          "pat_1.retest": "המחיר חזר לבדוק את קו הפריצה ב-27/02, החזיק מעליו וקפץ בנפח מעט מעל הממוצע (פי 1.3)",
+          "pat_1.retest_sessions_ago": 1, "pat_1.retest_volume_ratio": 1.3}
+
+
+def test_a_breakout_retest_that_held_goes_in_first_and_follows_its_line():
+    facts = {**RETEST, "sma150.support.last_result": "החזיק", "sma150.support.sessions_ago": 0,
+             "sma150.support.last_volume_ratio": 2.0, "sma150.support.state": "ממוצע 150 יום החזיק כתמיכה"}
+    got = setups_list.setups_of(BARS, _analysis(facts, _pattern()), CFG)
+    assert [s["kind"] for s in got] == ["retest", "ma150"]           # the retest is the better one
+    best = got[0]
+    assert best["pattern"] == "flag" and best["target"] == 120.0 and best["text"].endswith("(תבנית דגל)")
+    assert (best["level"], best["line"], best["slope"], best["line_day"]) == ("line", 100.0, 0.0, LAST)
+
+
+def test_wedges_are_left_out():
+    """Owner, 2026-10-05: "without wedges"."""
+    for key in ("rising_wedge", "falling_wedge"):
+        assert setups_list.setups_of(BARS, _analysis(RETEST, _pattern(key)), CFG) == []
+
+
+def test_a_fresh_breakout_needs_high_volume_and_to_stay_above_its_line():
+    facts = {**UPTREND, "pat_1.name": "דגל", "pat_1.target": 120.0, "pat_1.sessions_since_breakout": 1,
+             "pat_1.state": "המחיר מעל קו הפריצה", "pat_1.breakout_volume_ratio": 1.8,
+             "pat_1.breakout_volume": "גבוה, פי 1.8 מהממוצע"}
+    got = setups_list.setups_of(BARS, _analysis(facts, _pattern()), CFG)
+    assert got[0]["kind"] == "breakout" and got[0]["text"] == f"פריצה מתבנית דגל ב-{_dm(D[-2])} בנפח גבוה, פי 1.8 מהממוצע"
+    thin = {**facts, "pat_1.breakout_volume_ratio": 1.2}
+    back = {**facts, "pat_1.state": "המחיר חזר אל תוך התבנית: הפריצה מוטלת בספק"}
+    assert setups_list.setups_of(BARS, _analysis(thin, _pattern()), CFG) == []
+    assert setups_list.setups_of(BARS, _analysis(back, _pattern()), CFG) == []
+
+
+def test_the_analyst_finds_a_strong_20_day_support_in_real_bars(tmp_path):
+    from test_support import _uptrend_with_pullbacks
+    from tascreen.analyst.facts import analyse
+    from tascreen.store import Store
+
+    bars = _uptrend_with_pullbacks(8, 1_600_000.0)
+    got = setups_list.setups_of(bars, analyse(bars, "TEST:SYN"), CFG)
+    assert "ma20" in [s["kind"] for s in got]
+    Store(tmp_path).write_bars("NYSE:SYN", bars.assign(symbol="NYSE:SYN"))
+    found, counts = setups_list.find_setups(tmp_path, ["NYSE:SYN", "NYSE:NOBARS"], CFG, workers=1)
+    assert "NYSE:SYN" in found and counts["analysed"] == 2 and not any(k.startswith("error") for k in counts)
+
+
+# ------------------------------------------------------------------ what leaves
+def _view(stocks, day=DAY):
+    return ScanView(day, {}, pd.DataFrame(stocks), pd.DataFrame(columns=["symbol"]))
 
 
 def _stock(symbol, close, day=DAY):
-    return {"symbol": symbol, "close": close, "rel_volume": 1.0, "last_date": day.isoformat()}
+    return {"symbol": symbol, "close": close, "last_date": day.isoformat()}
 
 
-def _bars(highs, start="2026-03-02"):
-    days = pd.bdate_range(start, periods=len(highs))
-    return pd.DataFrame({"timestamp": days, "symbol": "X", "open": highs, "high": highs,
-                         "low": highs, "close": highs, "volume": 1.0})
+def _review(entries, view, bars):
+    return setups_list.review(entries, view, lambda s: bars, break_atr=0.5, keep_sessions=10)
 
 
-def _pick(symbol, pattern, kind, day=DAY):
-    return {"day": day.isoformat(), "symbol": symbol, "pattern": pattern, "kind": kind}
+FLAT = _bars([100.0] * 41)                 # the averages at 100, a session's range about 2
 
 
-# ------------------------------------------------------------------ in
-def test_the_sessions_picks_go_in_as_a_setup_or_a_breakout():
-    view = _view([_stock("NYSE:AAA", 101.0), _stock("NYSE:BBB", 48.0)],
-                 [_det("NYSE:AAA", "double_bottom", "breakout", "bullish"),
-                  _det("NYSE:BBB", "flag", "forming", "bullish", trigger=50.0)])
-    picks = [_pick("NYSE:AAA", "double_bottom", "breakout"), _pick("NYSE:BBB", "flag", "verge"),
-             _pick("NYSE:CCC", "flag", "verge", day=date(2026, 3, 19)),     # another session's pick
-             _pick("NYSE:DDD", "flag", "verge")]                             # not in the scan
-    got = setups_list.new_entries(picks, view, lambda s: None, set())
-    assert [(e["symbol"], e["kind"], e["line"]) for e in got] == [("NYSE:AAA", "breakout", 100.0),
-                                                                  ("NYSE:BBB", "setup", 50.0)]
-    assert got[0]["breakout_day"] == "2026-03-20" and got[0]["target"] == 110.0
-    assert setups_list.new_entries(picks, view, lambda s: None, {"NYSE:AAA", "NYSE:BBB"}) == []
+def _ma_entry(since=D[-3], symbol="NYSE:AAA"):
+    return {"symbol": symbol, "kind": "ma20", "level": "ma", "n": 20, "since": since, "volume": 1.5,
+            "text": "x", "added": since}
 
 
-# ------------------------------------------------------------------ out
-def _setup(symbol="NYSE:BBB", added="2026-03-18", line=50.0, **kw):
-    return {"symbol": symbol, "pattern": "flag", "name": "דגל", "kind": "setup", "added": added,
-            "line": line, "target": 60.0, "breakout_day": "", "missing": 0, **kw}
+def _line_entry(line=100.0, slope=0.0, target=None, since=D[-3]):
+    return {"symbol": "NYSE:AAA", "kind": "retest", "level": "line", "line": line, "slope": slope,
+            "line_day": D[-3], "since": since, "target": target, "volume": 1.3, "text": "x", "added": since}
 
 
-def _breakout(symbol="NYSE:AAA", line=100.0, target=110.0, day="2026-03-18"):
-    return {"symbol": symbol, "pattern": "double_bottom", "name": "תחתית כפולה", "kind": "breakout",
-            "added": day, "line": line, "target": target, "breakout_day": day, "missing": 0}
+def test_a_close_through_the_average_takes_it_out():
+    kept, events = _review([_ma_entry()], _view([_stock("NYSE:AAA", 98.5)]), FLAT)
+    assert kept == [] and events[0]["reason"] == "fell_ma"
+    kept, events = _review([_ma_entry()], _view([_stock("NYSE:AAA", 99.5)]), FLAT)   # inside the tolerance
+    assert len(kept) == 1 and events == []
 
 
-def _review(entries, view, bars=None):
-    return setups_list.review(entries, view, lambda s: bars, max_gap_pct=8, setup_sessions=15,
-                              breakout_sessions=10)
+def test_a_rising_line_is_followed_session_by_session():
+    # two sessions on, a line rising 1 a session stands at 102: a close of 100.5 is through it
+    assert setups_list.level_now(_line_entry(slope=1.0), FLAT) == 102.0
+    kept, events = _review([_line_entry(slope=1.0)], _view([_stock("NYSE:AAA", 100.5)]), FLAT)
+    assert events[0]["reason"] == "fell_back"
 
 
-def test_a_breakout_that_closes_back_below_its_line_leaves():
-    kept, events = _review([_breakout()], _view([_stock("NYSE:AAA", 99.0)], [_det("NYSE:ZZZ", "flag", "forming", "bullish")]))
-    assert kept == [] and events[0]["reason"] == "fell_back"
+def test_a_target_reached_or_a_setup_gone_stale_leaves():
+    peak = _bars([100.0] * 39 + [106.0, 103.0])
+    kept, events = _review([_line_entry(target=105.0)], _view([_stock("NYSE:AAA", 103.0)]), peak)
+    assert events[0]["reason"] == "target"
+    kept, events = _review([_ma_entry(since=D[-15])], _view([_stock("NYSE:AAA", 100.0)]), FLAT)
+    assert events[0]["reason"] == "stale"
 
 
-def test_a_breakout_that_reached_its_target_leaves_as_a_success():
-    bars = _bars([100.0] * 13 + [111.0, 105.0])          # a high at the target after the breakout day
-    kept, events = _review([_breakout()], _view([_stock("NYSE:AAA", 105.0)], [_det("NYSE:ZZZ", "flag", "forming", "bullish")]), bars)
-    assert kept == [] and events[0]["reason"] == "target"
-
-
-def test_a_breakout_is_fresh_for_breakout_sessions_only():
-    view = _view([_stock("NYSE:AAA", 104.0)], [_det("NYSE:ZZZ", "flag", "forming", "bullish")])
-    fresh = _bars([104.0] * 15)                          # 2026-03-02..20: two sessions after the 18th
-    assert _review([_breakout()], view, fresh)[0] != []
-    kept, events = _review([_breakout(day="2026-03-04")], view, fresh)   # 12 sessions after
-    assert kept == [] and events[0]["reason"] == "stale"
-
-
-def test_a_setup_that_broke_out_stays_as_a_breakout():
-    view = _view([_stock("NYSE:BBB", 51.0)],
-                 [_det("NYSE:BBB", "flag", "breakout", "bullish", breakout=50.0, target=60.0)])
-    kept, events = _review([_setup()], view)
-    assert kept[0]["kind"] == "breakout" and kept[0]["breakout_day"] == "2026-03-20"
-    assert [e["what"] for e in events] == ["broke_out"]
-
-
-def test_a_setup_that_drifts_away_or_vanishes_or_waits_too_long_leaves():
-    far = _view([_stock("NYSE:BBB", 45.0)], [_det("NYSE:BBB", "flag", "forming", "bullish", trigger=50.0)])
-    assert _review([_setup()], far)[1][0]["reason"] == "drifted"         # 11% below the line
-    gone = _view([_stock("NYSE:BBB", 49.0)], [_det("NYSE:ZZZ", "flag", "forming", "bullish")])
-    kept, events = _review([_setup()], gone)
-    assert kept[0]["missing"] == 1 and events == []                      # one session's grace
-    assert _review(kept, gone)[1][0]["reason"] == "vanished"
-    near = _view([_stock("NYSE:BBB", 49.0)], [_det("NYSE:BBB", "flag", "forming", "bullish", trigger=50.0)])
-    assert _review([_setup(added="2026-02-20")], near, _bars([49.0] * 30, start="2026-02-09"))[1][0]["reason"] \
-        == "no_breakout"
-
-
-def test_a_stock_the_bot_no_longer_follows_leaves():
-    # the volume floor (owner, 2026-10-05) took it out of the universe, so out of the scan
-    view = _view([_stock("NYSE:OTHER", 50.0)], [_det("NYSE:ZZZ", "flag", "forming", "bullish")])
-    kept, events = _review([_breakout()], view)
+def test_a_stock_the_bot_no_longer_follows_leaves_and_a_data_gap_keeps():
+    kept, events = _review([_ma_entry()], _view([_stock("NYSE:OTHER", 50.0)]), FLAT)
     assert kept == [] and events[0]["reason"] == "unfollowed"
-    assert "מחזור מסחר" in setups_list.REASONS["unfollowed"]
-
-
-def test_an_entry_without_the_sessions_close_is_kept_as_is():
-    old = _view([_stock("NYSE:AAA", 90.0, day=date(2026, 3, 19))], [_det("NYSE:ZZZ", "flag", "forming", "bullish")])
-    assert _review([_breakout()], old) == ([_breakout()], [])
+    gap = _view([_stock("NYSE:AAA", 90.0, day=date.fromisoformat(D[-2]))])
+    assert _review([_ma_entry()], gap, FLAT) == ([_ma_entry()], [])
 
 
 def test_the_oldest_leave_first_when_the_list_is_full():
-    entries = [_setup("NYSE:A1", added="2026-03-10"), _setup("NYSE:A2", added="2026-03-12"),
-               _setup("NYSE:A3", added="2026-03-11")]
+    entries = [_ma_entry(since=d, symbol=s) for s, d in (("NYSE:A1", D[-9]), ("NYSE:A2", D[-3]), ("NYSE:A3", D[-6]))]
     kept, gone = setups_list.cap(entries, 2)
     assert [e["symbol"] for e in kept] == ["NYSE:A2", "NYSE:A3"] and gone[0]["reason"] == "room"
 
 
-def test_refresh_keeps_what_the_bot_ever_added():
-    view = _view([_stock("NYSE:BBB", 48.0)], [_det("NYSE:BBB", "flag", "forming", "bullish", trigger=50.0)])
-    state = setups_list.refresh({"managed": ["NYSE:OLD"]}, [_pick("NYSE:BBB", "flag", "verge")], view,
-                                lambda s: None, CFG)
-    assert state["managed"] == ["NYSE:BBB", "NYSE:OLD"] and state["day"] == "2026-03-20"
-    assert state["events"] == [{"symbol": "NYSE:BBB", "name": "שם flag", "what": "added", "reason": "setup"}]
+# ------------------------------------------------------------------ one evening
+def test_an_old_list_is_replaced_and_a_breakout_whose_retest_held_is_renewed():
+    view = _view([_stock("NYSE:AAA", 100.0), _stock("NYSE:OLD", 50.0), _stock("NYSE:NEW", 20.0)])
+    old = {"version": 1, "managed": ["NYSE:GONE"],
+           "entries": [{"symbol": "NYSE:OLD", "kind": "setup"}, {"symbol": "NYSE:AAA", "kind": "breakout"}]}
+    found = {"NYSE:AAA": {**_line_entry(), "kind": "breakout"}}
+    first = setups_list.refresh(old, found, view, lambda s: FLAT, CFG, break_atr=0.5)
+    assert first["version"] == setups_list.VERSION
+    assert [(e["symbol"], e["what"], e.get("reason")) for e in first["events"]] == [
+        ("NYSE:OLD", "removed", "redefined"), ("NYSE:AAA", "added", None)]
+    renewed = {"NYSE:AAA": {**_line_entry(since=LAST), "kind": "retest"},
+               "NYSE:NEW": _ma_entry(since=LAST, symbol="NYSE:NEW")}
+    second = setups_list.refresh(first, renewed, view, lambda s: FLAT, CFG, break_atr=0.5)
+    assert sorted((e["symbol"], e["what"]) for e in second["events"]) == [("NYSE:AAA", "renewed"), ("NYSE:NEW", "added")]
+    assert second["managed"] == ["NYSE:AAA", "NYSE:GONE", "NYSE:NEW"]
+    assert {e["symbol"]: e["kind"] for e in second["entries"]} == {"NYSE:AAA": "retest", "NYSE:NEW": "ma20"}
+    assert second["entries"][0]["added"] == LAST                        # the day it first went in
+
+
+def test_the_message_tells_what_changed():
+    state = {"entries": [{"symbol": "NYSE:AAA", "kind": "retest"}, {"symbol": "NYSE:BBB", "kind": "ma150"}],
+             "events": [{"symbol": "NYSE:BBB", "kind": "ma150", "what": "added", "text": "ממוצע 150 יום החזיק כתמיכה"},
+                        {"symbol": "NYSE:AAA", "kind": "retest", "what": "renewed", "text": "החזיק מעל קו הפריצה"},
+                        {"symbol": "NYSE:CCC", "kind": "ma20", "what": "removed", "reason": "fell_ma"}]}
+    text = setups_list.message(state)
+    assert "• BBB (ממוצע 150): ממוצע 150 יום החזיק כתמיכה" in text
+    assert "<b>התחדשו:</b>" in text and "• CCC: נסגרה מתחת לממוצע: התמיכה נשברה" in text
+    assert text.endswith("ברשימה עכשיו: 2 מניות (1 בדיקה אחרי פריצה, 1 ממוצע 150).")
+    assert setups_list.message({"entries": [], "events": []}) is None
 
 
 # ------------------------------------------------------------------ TradingView
@@ -192,15 +270,6 @@ def test_settings_are_checked():
         SetupsListSettings(id="abc")
     with pytest.raises(ConfigError):
         SetupsListSettings(max_size=0)
-
-
-# ------------------------------------------------------------------ the message
-def test_the_message_tells_what_changed():
-    state = {"entries": [_setup(), _breakout()], "events": [
-        {"symbol": "NYSE:BBB", "name": "דגל", "what": "added", "reason": "setup"},
-        {"symbol": "NYSE:AAA", "name": "תחתית כפולה", "what": "broke_out", "reason": ""},
-        {"symbol": "NYSE:CCC", "name": "x", "what": "removed", "reason": "fell_back"}]}
-    text = setups_list.message(state)
-    assert "• BBB: דגל (סטאפ לפני פריצה)" in text and "• CCC: נסגרה מתחת לקו הפריצה" in text
-    assert text.endswith("ברשימה עכשיו: 2 מניות (1 סטאפים, 1 אחרי פריצה).")
-    assert setups_list.message({"entries": [], "events": []}) is None
+    with pytest.raises(ConfigError):
+        SetupsListSettings(min_bounce_volume=0.1)
+    assert SetupsListSettings(exclude_patterns=["rising_wedge"]).exclude_patterns == ("rising_wedge",)

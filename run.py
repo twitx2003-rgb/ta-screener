@@ -620,10 +620,11 @@ def _evening_alerts(settings, store, target) -> dict:
 
 
 def _setups_list(settings, store, target, client=None, owner=None) -> dict:
-    """The bot's own TradingView list of setups and fresh breakouts (tascreen/setups_list.py),
-    once per session, after the evening report (its research picks go in). Counts only:
-    this goes to the public log."""
-    from tascreen import alerts, notify, research, setups_list
+    """The bot's own TradingView list of the owner's setups (tascreen/setups_list.py), once per
+    session, after the evening report: the chart analyst over every stock the scan covers.
+    Counts only: this goes to the public log."""
+    from tascreen import alerts, notify, setups_list
+    from tascreen.analyst import load_rules as analyst_rules
     from tascreen.patterns.rules import load_rules
     from tascreen.web.data import ScanRepository
 
@@ -641,7 +642,10 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
         view = ScanRepository(store, load_rules()).current()
         if view is None or view.day != target:
             return {"status": "no scan of the session yet"}
-        state = setups_list.refresh(state, research.read_picks(store), view, store.read_bars, cfg)
+        found, counts = setups_list.find_setups(store.root, list(view.stocks["symbol"]), cfg)
+        log.info("setups list: %s", counts)
+        state = setups_list.refresh(state, found, view, store.read_bars, cfg,
+                                    break_atr=float(analyst_rules()["support_break_atr"]))
         setups_list.write(store.root, state)
         text = setups_list.message(state)
         owner = owner or notify.owner_from_environment()
