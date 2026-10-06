@@ -7,8 +7,10 @@ from __future__ import annotations
 import json
 import re
 import xml.dom.minidom
+from datetime import date
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import tascreen.chart_svg as cs
@@ -93,13 +95,13 @@ def _verticals(svg, color=cs.ANN["target"]):
 
 
 # ------------------------------------------------------------------- helpers
-def test_the_window_gives_the_pattern_half_and_never_cuts_its_first_bar():
-    first, last = cs._window(500, 400, 495)
-    assert (495 - 400 + 1) / (last - first + 1) >= 0.5 and first == 400 - cs.LEAD
-    first, last = cs._window(500, 400, 440)                 # long after its breakout: a short lead-in
-    assert first == 400 - cs.MIN_LEAD
-    first, last = cs._window(600, 250, 590)                 # a long cup: more than MAX_BARS
-    assert first <= 250 - cs.MIN_LEAD and last == 599
+def test_the_window_gives_the_pattern_half_and_stays_a_daily_zoom():
+    first, last = cs._window(500, 430, 495)
+    assert (495 - 430 + 1) / (last - first + 1) >= 0.5 and first == 430 - cs.LEAD
+    first, last = cs._window(500, 430, 460)                 # long after its breakout: a short lead-in
+    assert first == 430 - cs.MIN_LEAD
+    first, last = cs._window(600, 250, 590)                 # a long cup: only its last MAX_BARS
+    assert last - first + 1 == cs.MAX_BARS == 100 and last == 599
     first, last = cs._window(500, 480, 490)                 # a short flag still gets MIN_BARS
     assert last - first + 1 == cs.MIN_BARS
     assert cs._window(30, 2, 20)[0] == 0
@@ -262,3 +264,42 @@ def test_a_live_crossing_extends_the_real_line_to_the_live_session(monkeypatch):
     assert len(dashed) == 1
     assert float(dashed[0][0]) == pytest.approx(fr.x(last + 1), abs=0.2)
     assert float(dashed[0][1]) == pytest.approx(fr.y(record["trigger_up"]), abs=0.3)
+
+
+def test_a_live_crossing_draws_the_breaking_candle_so_far(monkeypatch):
+    bars, record = _detect(ASC_TRIANGLE[:8] + [(135, 98.5)], "ascending_triangle")
+    live = record["trigger_up"] * 1.006
+    today = {"open": record["trigger_up"] * 0.99, "high": live * 1.002, "low": record["trigger_up"] * 0.985,
+             "date": "2031-01-02"}
+    seen = {}
+    real = cs._Frame
+
+    class Frame(real):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            seen["fr"] = self
+
+    monkeypatch.setattr(cs, "_Frame", Frame)
+    svg = alerts.pattern_chart(bars, record, live_price=live, live_bar=today)
+    xml.dom.minidom.parseString(svg)
+    fr, last = seen["fr"], len(bars) - 1
+    x = fr.x(last + 1)
+    wick = re.findall(rf'<line class="ann" x1="{x:.1f}" x2="{x:.1f}" y1="([\d.]+)" y2="([\d.]+)"', svg)
+    assert wick and float(wick[0][0]) == pytest.approx(fr.y(today["high"]), abs=0.1)
+    assert float(wick[0][1]) == pytest.approx(fr.y(today["low"]), abs=0.1)
+    assert 'stroke-dasharray="3 3"' in svg                   # outlined as not final
+    assert fr.count >= len(bars) - fr.first + 3               # room right of it for the axis tags
+    assert f"חי {live:,.2f}" in svg and "02/01/2031" in svg
+    assert 'r="4.5" fill="#34D399"' not in svg                # its close is the price: no ring on it
+    plain = alerts.pattern_chart(bars, record, live_price=live)
+    assert 'stroke-dasharray="3 3"' not in plain and 'r="4.5" fill="#34D399"' in plain
+
+
+def test_split_today_keeps_the_sessions_and_hands_over_todays_bar_so_far():
+    bars = pd.DataFrame({"timestamp": pd.to_datetime(["2031-01-01", "2031-01-02"]).tz_localize("America/New_York"),
+                         "open": [10.0, 11.0], "high": [12.0, 13.0], "low": [9.0, 10.5],
+                         "close": [11.0, 12.5], "volume": [1e6, 4e5]})
+    done, today = alerts.split_today(bars, date(2031, 1, 2))
+    assert len(done) == 1 and today == {"open": 11.0, "high": 13.0, "low": 10.5, "date": date(2031, 1, 2)}
+    done, today = alerts.split_today(bars, date(2031, 1, 3))   # before the open: no bar of today
+    assert len(done) == 2 and today is None

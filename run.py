@@ -1000,7 +1000,7 @@ def ci_live(settings, max_minutes: float) -> int:
                 bars = client.with_session(lambda session: alerts.fetch_bars(session, symbols, day))
             except (ScreenerError, OSError, TimeoutError, ExceptionGroup):
                 bars = {}
-            photos = alerts.crossing_photos(found, bars.get, at, tz, news)
+            photos = alerts.crossing_photos(found, bars.get, at, tz, news, day=day)
             try:
                 if len(photos) == len(found):       # each crossing with its pattern's chart
                     bot.send_album(photos)

@@ -37,7 +37,10 @@ ink that carries no information (Tufte's data-ink; NN/g "clutter charts").
 5. **Mark the breakout where it happened**: a ringed dot at (breakout bar, line value on
    that bar), and the breakout candle outlined. Not a floating tag 60 px away.
 6. **A live (intraday) crossing is never drawn as a breakout.** It is "חי" with the live
-   price, and the caption says it is not final until the close.
+   price, and the caption says it is not final until the close. But the session's candle
+   so far (open, high, low, live price) **is drawn**, right of the last bar, with a dashed
+   outline and room after it (owner, 2026-10-06: without the breaking candle "I do not see
+   the setup").
 7. **Lines end at the breakout bar.** A horizontal trigger line may continue to the last
    bar as a faint dashed "retest" line; sloped lines never run past the breakout.
 8. **The target is the measure rule, shown as a measure:** a vertical bracket for the
@@ -48,9 +51,12 @@ ink that carries no information (Tufte's data-ink; NN/g "clutter charts").
    (or the pattern's end) to the right edge, dotted, in the opposite direction's colour.
 10. **Busted / failed**: if price closed back through the line after the breakout, the
     picture shows it ("כשל" at that bar) and never shows a live target.
-11. **Window:** the pattern takes at least half the width; keep enough bars before it to
-    show the trend into it (flags need the whole pole, reversals need the prior trend).
-    Every drawn level is inside the price scale (no target cut off at the top).
+11. **Window:** a daily chart's zoom, at most `MAX_BARS` (100) daily candles (owner,
+    2026-10-06: 170 thin candles "look like weekly candles"). The pattern takes at least
+    half the width; keep enough bars before it to show the trend into it (flags need the
+    whole pole, reversals need the prior trend). A pattern longer than the window is shown
+    from where it fits: its last part, the trigger line and the breakout. Every drawn level
+    is inside the price scale (no target cut off at the top).
 
 ## 2. Clean-design rules (phone first)
 

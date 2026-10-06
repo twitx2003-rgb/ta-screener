@@ -565,21 +565,37 @@ def default_png(svg: str) -> bytes:
         return svg_to_png(path, Path(folder) / "chart.png").read_bytes()
 
 
-def pattern_chart(bars: pd.DataFrame, record: dict[str, Any], *, live_price: float | None = None) -> str:
+def pattern_chart(bars: pd.DataFrame, record: dict[str, Any], *, live_price: float | None = None,
+                  live_bar: dict[str, Any] | None = None) -> str:
     from .chart_svg import render
 
     drawings = CROSSING_DRAWINGS if live_price is not None else BREAKOUT_DRAWINGS
     symbol = str(record.get("symbol", ""))
-    return render(bars, record, drawings, "", seed=f"alert-{symbol}", title=symbol, live_price=live_price)
+    return render(bars, record, drawings, "", seed=f"alert-{symbol}", title=symbol, live_price=live_price,
+                  live_bar=live_bar)
+
+
+def split_today(bars: pd.DataFrame | None, day: date) -> tuple[pd.DataFrame | None, dict[str, Any] | None]:
+    """The finished sessions, and the session `day`'s bar so far (None if there is none):
+    the live picture draws that bar as the breaking candle, never as a close."""
+    if bars is None or bars.empty:
+        return bars, None
+    today = bars["timestamp"].dt.date == day
+    if not today.any():
+        return bars, None
+    row = bars.loc[today].iloc[-1]
+    return (bars.loc[~today].reset_index(drop=True),
+            {"open": float(row["open"]), "high": float(row["high"]), "low": float(row["low"]),
+             "date": day})
 
 
 def _photo(bars: pd.DataFrame | None, record: dict | None, caption: str, to_png: Callable[[str], bytes],
-           live_price: float | None = None) -> tuple[bytes, str] | None:
+           live_price: float | None = None, live_bar: dict | None = None) -> tuple[bytes, str] | None:
     """A chart and its caption; None if it cannot be drawn (the text still goes out)."""
     if bars is None or bars.empty or not record:
         return None
     try:
-        return to_png(pattern_chart(bars, record, live_price=live_price)), caption
+        return to_png(pattern_chart(bars, record, live_price=live_price, live_bar=live_bar)), caption
     except Exception as exc:                        # a picture is never worth a lost alert
         import logging
         logging.getLogger(__name__).warning("chart for %s failed: %s", record.get("symbol"),
@@ -618,20 +634,25 @@ def crossing_caption(c: dict[str, Any], at: datetime, market_tz: str,
 
 def crossing_photos(found: list[dict], bars_of: Callable[[str], pd.DataFrame | None], at: datetime,
                     market_tz: str, news: dict[str, dict] | None = None,
-                    to_png: Callable[[str], bytes] = default_png) -> list[tuple[bytes, str]]:
-    """Each live crossing's forming pattern, its breakout line and the live price."""
+                    to_png: Callable[[str], bytes] = default_png,
+                    day: date | None = None) -> list[tuple[bytes, str]]:
+    """Each live crossing's forming pattern, its breakout line, the session `day`'s candle so
+    far (when `bars_of` has it: `fetch_bars`; default: `at`'s day) and the live price."""
+    day = day or at.astimezone(ZoneInfo(market_tz)).date()
     photos = []
     for c in found:
         caption = crossing_caption(c, at, market_tz, (news or {}).get(c["symbol"]))
-        photo = _photo(bars_of(c["symbol"]), c.get("record"), caption, to_png, live_price=c["price"])
+        bars, live_bar = split_today(bars_of(c["symbol"]), day)
+        photo = _photo(bars, c.get("record"), caption, to_png, live_price=c["price"], live_bar=live_bar)
         if photo is not None:
             photos.append(photo)
     return photos
 
 
-async def fetch_bars(session: Any, symbols: list[str], before: date, count: int = 260) -> dict[str, pd.DataFrame]:
+async def fetch_bars(session: Any, symbols: list[str], day: date, count: int = 260) -> dict[str, pd.DataFrame]:
     """Daily bars for the live watch's charts (it restores no bars): each stock's last
-    `count` sessions before `before` (today's unfinished bar left out)."""
+    `count` sessions up to the session `day`, whose unfinished bar is kept for the picture's
+    breaking candle (`split_today`; nothing else reads these bars)."""
     from .tv.data import bars_frame
 
     out: dict[str, pd.DataFrame] = {}
@@ -641,7 +662,7 @@ async def fetch_bars(session: Any, symbols: list[str], before: date, count: int 
             bars = bars_frame(payload, symbol)
         except (ProviderError, OSError, TimeoutError, ValueError):
             continue
-        bars = bars.loc[bars["timestamp"].dt.date < before].reset_index(drop=True)
+        bars = bars.loc[bars["timestamp"].dt.date <= day].reset_index(drop=True)
         if len(bars):
             out[symbol] = bars
     return out

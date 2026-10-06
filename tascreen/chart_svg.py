@@ -1,7 +1,10 @@
 """A chart "screenshot" (SVG) of one detected pattern and its breakout.
 
 The chart has one fixed look, like a real screenshot, in the night-violet palette: daily
-candles around the pattern and plain volume bars. The annotations follow the
+candles around the pattern and plain volume bars, at most MAX_BARS of them (owner, 2026-10-06:
+170 thin candles looked like a weekly chart and hid the setup). A live crossing also shows the
+session's candle so far, the one that is breaking out (owner, 2026-10-06: without it "I do
+not see the setup"). The annotations follow the
 pattern-drawing skill (.claude/skills/pattern-drawing/SKILL.md; owner, 2026-10-01: "I
 cannot see what you are talking about"): the pattern's own structure with its area lightly
 shaded, a bold trigger line, a ringed dot on the breakout bar with the candle outlined, a
@@ -36,8 +39,9 @@ W, H = 760, 440
 LEFT, RIGHT, TOP, BOTTOM = 12, 74, 42, 26
 VOLUME_SHARE = 0.17
 # The window: the pattern takes at least half of it, after up to LEAD bars of the trend into
-# it. MAX_BARS gives way only to keep the pattern's first bar (a long cup's left rim).
-MAX_BARS, MIN_BARS, LEAD, MIN_LEAD = 170, 24, 25, 4
+# it; never more than MAX_BARS daily bars (about five months, a daily chart's zoom), so a
+# longer pattern (a long cup's left rim) is shown from where it fits.
+MAX_BARS, MIN_BARS, LEAD, MIN_LEAD = 100, 24, 25, 4
 TAG_BUDGET = 5                       # word tags in the price area (skill section 2)
 STRICT = 2                           # tags from this priority on never cover a candle
 TAG_H = 22
@@ -101,16 +105,16 @@ class _Frame:
 
 # ----------------------------------------------------------------- geometry helpers
 def _window(n: int, start_i: int, end_i: int) -> tuple[int, int]:
-    """First and last bar shown. `end_i` is where the pattern ends (its breakout bar when
-    it has one). The pattern gets at least half the width: the lead-in before it is at
-    most as long as the pattern minus the bars after it (and a few for the space right
-    of a fresh breakout). Only a breakout long ago leaves the pattern less than half."""
+    """First and last bar shown, at most MAX_BARS. `end_i` is where the pattern ends (its
+    breakout bar when it has one). The pattern gets at least half the width: the lead-in
+    before it is at most as long as the pattern minus the bars after it (and a few for the
+    space right of a fresh breakout). Only a breakout long ago leaves the pattern less than
+    half; a pattern longer than MAX_BARS loses its start (the breakout end is the setup)."""
     last = n - 1
     span = max(1, end_i - start_i + 1)
     lead = max(MIN_LEAD, min(LEAD, span - (last - end_i) - 3))
     first = min(start_i - lead, last - MIN_BARS + 1)
-    first = min(max(first, last - MAX_BARS + 1), start_i - MIN_LEAD)
-    return max(0, first), last
+    return max(0, first, last - MAX_BARS + 1), last
 
 
 class _Seg:
@@ -411,8 +415,11 @@ def _emptiest_corner(win: pd.DataFrame, fr: _Frame, width: float, height: float)
 
 # ------------------------------------------------------------------------- render
 def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: str = "", *,
-           seed: str, title: str, live_price: float | None = None) -> str:
-    """The SVG markup for one chart post (`seed` names the chart)."""
+           seed: str, title: str, live_price: float | None = None,
+           live_bar: dict[str, Any] | None = None) -> str:
+    """The SVG markup for one chart post (`seed` names the chart). With `live_price`, the
+    session's candle so far is drawn right of the last bar when `live_bar` gives its open,
+    high and low (else only the live price's ring)."""
     days = bars["timestamp"].dt.strftime("%Y-%m-%d").tolist()
     index = {d: i for i, d in enumerate(days)}
     high, low = bars["high"].to_numpy(float), bars["low"].to_numpy(float)
@@ -424,6 +431,10 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
     direction = det.get("direction")
     bullish = direction == "bullish"
     live = _ok(live_price)
+    today = None                                   # the live session's candle: open, high, low
+    if live and live_bar and all(_ok(live_bar.get(k)) for k in ("open", "high", "low")):
+        today = (float(live_bar["open"]), max(float(live_bar["high"]), float(live_price)),
+                 min(float(live_bar["low"]), float(live_price)))
 
     start_i = index.get(_iso(det.get("start")) or "", max(0, last - 60))
     end_i = index.get(_iso(det.get("end")) or "", last)
@@ -461,6 +472,8 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
         levels.append(target)
     if live:
         levels.append(float(live_price))
+    if today is not None:
+        levels += [today[1], today[2]]
     if _ok(cancel):
         levels.append(cancel)
     hi = max([float(win["high"].max()), *levels])
@@ -475,6 +488,8 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
     if broken and (draw_target or _ok(cancel)):
         step = (W - RIGHT - LEFT) / (len(win) + (1 if live else 0))
         room = max(0, math.ceil(30 / step) - (last - brk_i))
+    if today is not None:
+        room = max(room, 3)                        # the breaking candle clear of the axis tags
     fr = _Frame(first, len(win) + (1 if live else 0) + room, lo - pad_lo, hi + pad_hi)
     tags = _Tags(fr)
     axis = _Axis(fr)
@@ -676,11 +691,26 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
                     f'L{x + 6:.1f},{y - 6:.1f}" stroke="{cancel_color}" stroke-width="2.6" stroke-linecap="round"/>')
         tags.mark(x, y, 8)
         tags.want(1, "כשל", cancel_color, x, y, "point", 1 if bullish else -1)
+    if today is not None:                           # the breaking candle, not final: a dashed outline
+        x, o, c = fr.x(last + 1), today[0], float(live_price)
+        color, body = (INK["up"] if c >= o else INK["down"]), max(1.0, fr.step * 0.62)
+        top, bot = fr.y(max(o, c)), fr.y(min(o, c))
+        half = max(3.0, fr.step * 0.31) + 2.5
+        over.append(f'<line class="ann" x1="{x:.1f}" x2="{x:.1f}" y1="{fr.y(today[1]):.1f}" '
+                    f'y2="{fr.y(today[2]):.1f}" stroke="{color}"/>'
+                    f'<rect class="ann" x="{x - body / 2:.1f}" y="{top:.1f}" width="{body:.1f}" '
+                    f'height="{max(1.0, bot - top):.1f}" fill="{color}"/>'
+                    f'<rect class="ann" x="{x - half:.1f}" y="{fr.y(today[1]) - 3:.1f}" width="{2 * half:.1f}" '
+                    f'height="{fr.y(today[2]) - fr.y(today[1]) + 6:.1f}" rx="2.5" fill="none" '
+                    f'stroke="{move}" stroke-width="1.6" stroke-dasharray="3 3"/>')
+        tags.candle(x, fr.y(today[1]), fr.y(today[2]), 8)
     if live:
         x, y = fr.x(last + 1), fr.y(float(live_price))
-        over.append(f'<circle class="ann" cx="{x:.1f}" cy="{y:.1f}" r="9" fill="{ANN["bull"]}" fill-opacity="0.22"/>'
-                    f'<circle class="ann" cx="{x:.1f}" cy="{y:.1f}" r="4.5" fill="{ANN["bull"]}"/>')
-        tags.mark(x, y, 9)
+        if today is None:                            # with the candle its close is the price
+            over.append(f'<circle class="ann" cx="{x:.1f}" cy="{y:.1f}" r="9" fill="{ANN["bull"]}" '
+                        f'fill-opacity="0.22"/><circle class="ann" cx="{x:.1f}" cy="{y:.1f}" r="4.5" '
+                        f'fill="{ANN["bull"]}"/>')
+            tags.mark(x, y, 9)
         axis.add(float(live_price), ANN["bull"], "חי")
 
     # ------------------------------------------------------------------- compose
@@ -690,6 +720,9 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
            f'height="{fr.y1 - fr.y0:.1f}"/></clipPath></defs>',
            f'<rect width="{W}" height="{H}" rx="12" fill="{INK["bg"]}"/>']
     rows = axis.layout()
+    shown = pd.Timestamp(days[last])               # the live session's day when its candle is drawn
+    if today is not None and live_bar.get("date") is not None:
+        shown = pd.Timestamp(live_bar["date"])
     for k in range(6):
         price = fr.lo + (fr.hi - fr.lo) * k / 5
         y = fr.y(price)
@@ -705,7 +738,7 @@ def render(bars: pd.DataFrame, det: dict[str, Any], drawings: list[str], note: s
     out.append(f'<text x="{fr.x0 + 4}" y="26" fill="{INK["title"]}" font-family="{MONO}" '
                f'font-size="14" font-weight="600">{_esc(title)}</text>')
     out.append(f'<text x="{fr.x1}" y="26" fill="{INK["axis"]}" font-family="{MONO}" font-size="12" '
-               f'text-anchor="end">1D · {pd.Timestamp(days[last]):%d/%m/%Y}</text>')
+               f'text-anchor="end">1D · {shown:%d/%m/%Y}</text>')
 
     if "zone" in wanted:
         p_lo = float(bars["low"].iloc[start_i:end_i + 1].min())

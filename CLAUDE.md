@@ -161,8 +161,9 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   `.claude/skills/pattern-drawing/SKILL.md` (agents: breakout-drawing-auditor,
   pattern-chart-designer, analysis-visual-editor). Flags: lines on the extremes, only
   pole-direction breaks; high-tight flag gets a pole-height target; doubles, triples and
-  H&S must break out within their own length (`max_breakout_wait_share`). Next: the same
-  drawing and a shorter text in the `$SYMBOL` analysis.
+  H&S must break out within their own length (`max_breakout_wait_share`). 2026-10-06: at
+  most 100 daily candles (170 looked weekly), and a live crossing draws the session's breaking
+  candle (`alerts.split_today`). Next: the same drawing and a shorter text in the `$SYMBOL` analysis.
 - Support tests (2026-10-05, `analyst/support.py`, `knowledge/support.md`): the 20/150-day
   averages as support (holds, breaks, strength with the bounce's volume not weak), the latest
   close across each, and retests after pattern/zone/150-day breakouts. A program-written
