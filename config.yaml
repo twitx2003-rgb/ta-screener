@@ -45,6 +45,10 @@ universe:
   # report and research, the live crossings, the pre-market movers and the setups list;
   # not for an analysis the owner asks for or his own watchlist.
   min_avg_volume: 1.0e6
+  # Owner, 2026-10-06: foreign companies too. TradingView types them "dr" (depositary
+  # receipts: TSM, ASML, ARM, BABA), which the "stock" query never returned; they come by a
+  # query of their own, under the same floors. If it fails, the stocks go on alone that day.
+  depositary_receipts: true
 
 bars:
   history: 600               # daily bars on first fetch (~2.4 years)
@@ -232,3 +236,7 @@ setups_list:
   fill_sessions: 5
   pool_size: 30
   open_after_minutes: 15
+  # Owner, 2026-10-06: scan the stocks on his own TradingView lists too (all but this one):
+  # the US-listed ones, under the same volume floor, even if the universe does not have them.
+  owner_lists: true
+  list_exchanges: ["NASDAQ", "NYSE", "AMEX"]

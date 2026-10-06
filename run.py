@@ -638,13 +638,15 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
     state = setups_list.read(store.root)
     if state.get("id") != cfg.id:
         state = {}
+    client = client or make_tradingview(settings)
     if state.get("day") != target.isoformat() or state.get("version") != setups_list.VERSION:
         view = ScanRepository(store, load_rules()).current()
         if view is None or view.day != target:
             return {"status": "no scan of the session yet"}
-        found, counts = setups_list.find_setups(store.root, list(view.stocks["symbol"]), cfg)
-        log.info("setups list: %s", counts)
-        state = setups_list.refresh(state, found, view, store.read_bars, cfg,
+        extra, list_counts = _owner_list_stocks(settings, client, store, view) if cfg.owner_lists else ([], {})
+        found, counts = setups_list.find_setups(store.root, list(view.stocks["symbol"]) + extra, cfg)
+        log.info("setups list: %s; the owner's lists: %s", counts, list_counts)
+        state = setups_list.refresh(state, found, view, store.read_bars, cfg, extra=extra,
                                     break_atr=float(analyst_rules()["support_break_atr"]))
         setups_list.write(store.root, state)
         text = setups_list.message(state)
@@ -654,7 +656,6 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
     out = {"entries": len(state["entries"]), "changes": len(state.get("events") or [])}
     if state.get("synced"):
         return {**out, "status": "kept"}
-    client = client or make_tradingview(settings)
     wanted = [e["symbol"] for e in state["entries"]]
 
     async def work():
@@ -1017,6 +1018,35 @@ def ci_live(settings, max_minutes: float) -> int:
         clock.sleep(max(0.0, min(wait, limit.total_seconds())))
 
 
+def _owner_list_stocks(settings, client, store, view) -> tuple[list[str], dict]:
+    """The stocks on the owner's own TradingView lists that the scan does not cover (owner,
+    2026-10-06: "research all the stocks on all my watchlists"): US-listed, their bars brought
+    up to date (kept with the others), and only those trading at least the universe's volume
+    floor. The symbols stay private: counts only in the log."""
+    from tascreen import setups_list
+    from tascreen.bars import BarsJob
+    from tascreen.tv.data import fetch_in_session
+
+    cfg, delays = settings.setups_list, settings.tradingview.rate_limit_delays
+    try:
+        payload = client.with_session(lambda session: fetch_in_session(session, setups_list.LISTS, {}, delays=delays))
+        symbols = setups_list.owner_symbols(payload, exclude={cfg.id}, exchanges=cfg.list_exchanges)
+    except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("the owner's lists were not read: %s", type(exc).__name__)
+        return [], {"status": f"not read: {type(exc).__name__}"}
+    covered = set(view.stocks["symbol"])
+    extra = [s for s in symbols if s not in covered]
+    job = BarsJob(store=store, bars=settings.bars, market=settings.market, delays=delays)
+    try:
+        results = client.with_session(lambda session: job.run_batch(session, extra)) if extra else []
+    except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("the owner's stocks' bars were not updated: %s", type(exc).__name__)
+        results = []
+    liquid = [s for s in extra if setups_list.liquid(store.read_bars(s), settings.universe.min_avg_volume, view.day)]
+    return liquid, {"on_lists": len(symbols), "not_in_scan": len(extra), "liquid": len(liquid),
+                    "bars_failed": sum(r.status == "failed" for r in results)}
+
+
 def _setups_open(settings, client, store, day, owner) -> dict:
     """The setups list at the open (tascreen/setups_list.py open_review; owner, 2026-10-06):
     once a session, the prices of the list and of last night's pool, the entries already
@@ -1029,8 +1059,8 @@ def _setups_open(settings, client, store, day, owner) -> dict:
     state = setups_list.read(store.root)
     if not cfg.id or cfg.id == settings.watchlist.id or state.get("id") != cfg.id:
         return {"status": "no list"}
-    if state.get("version") != setups_list.VERSION or state.get("open_day") == day.isoformat():
-        return {"status": "not due"}
+    if (state.get("version") or 0) < 2 or state.get("open_day") == day.isoformat():
+        return {"status": "not due"}                   # 2 on: entries carry `watch` and `atr`
     symbols = sorted({e["symbol"] for e in state.get("entries") or []} | {c["symbol"] for c in state.get("pool") or []})
     try:
         got = client.with_session(lambda session: alerts.fetch_live_prices(

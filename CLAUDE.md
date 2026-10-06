@@ -176,6 +176,11 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   without renewal, or a stock no longer followed. At least 10 (2026-10-06: filled on volume
   that is not weak, up to 5 sessions back); 15 minutes after the open the live watch takes
   out what opened under its level and refills from last night's pool. Private chat.
+  Also scanned (2026-10-06): the US stocks and funds on the owner's own TradingView lists
+  (`owner_lists`, under the volume floor; entries marked `from_lists`).
+- Foreign companies (2026-10-06): TradingView types ADRs "dr" (TSM, ASML, ARM), which the
+  "stock" query never returned; `universe.depositary_receipts` fetches them by a query of
+  their own (fail-safe: the stocks go on alone if it fails).
 - Open: pattern quality in the scanner (triangle touches, cup depth: discuss first, it
   changes every alert), earnings dates, relative strength, gaps; the hosting keepalive
   before about 2026-11-23.

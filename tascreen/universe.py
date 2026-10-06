@@ -22,6 +22,12 @@ the exchange is the symbol's prefix. Any value may be null.
 
 OTC symbols and preferred issues (`universe.drop_exchanges`, `drop_subtypes`)
 are dropped only after the completeness check, which counts them.
+
+Foreign companies traded in the US as depositary receipts (TSM, ASML, ARM, BABA, ...) are
+type "dr", not "stock" (live, `search-symbols`, 2026-10-06), so the "stock" query never had
+them. With `universe.depositary_receipts` they are fetched by a second query of their own,
+with the same bands and checks; if it fails, the stocks go on alone that day (owner,
+2026-10-06: "add foreign companies to the scanner").
 """
 from __future__ import annotations
 
@@ -51,10 +57,11 @@ MAX_SPLITS = 12          # a band this deep in splits means the data is not what
 _TOO_BIG = re.compile(r"Result size \d+ exceeds limit")
 
 
-def screener_arguments(cfg: UniverseSettings, lo: float, hi: float | None, limit: int) -> dict:
+def screener_arguments(cfg: UniverseSettings, lo: float, hi: float | None, limit: int,
+                       types: tuple[str, ...] = ("stock",)) -> dict:
     return {
         "market": cfg.market,
-        "symbol_types": ["stock"],
+        "symbol_types": list(types),
         "filters": {"market_cap_basic": [lo, hi]},
         "sort_by": "market_cap_basic",
         "sort_order": "desc",
@@ -73,15 +80,16 @@ def parse_screener(payload: dict[str, Any], context: str) -> tuple[list[dict], i
     return rows, total
 
 
-def universe_row(row: dict[str, Any], context: str) -> dict[str, Any]:
+def universe_row(row: dict[str, Any], context: str, kinds: tuple[str, ...] = ("stock",)) -> dict[str, Any]:
     """One screener row -> one UNIVERSE record. Missing keys fail; nulls are kept
     only where a gap is legitimate (a stock with no RSI yet, no earnings date)."""
     symbol = pick(row, ["symbol"], context=context)
     if not isinstance(symbol, str) or symbol.count(":") != 1:
         raise ProviderError(f"{context}: symbol {symbol!r} is not EXCHANGE:TICKER")
     kind = pick(row, ["type"], context=context)
-    if kind != "stock":
-        raise ProviderError(f"{context}: {symbol} has type {kind!r}; asked for stocks only")
+    if kind not in kinds:
+        asked = "stocks" if kinds == ("stock",) else "/".join(kinds)
+        raise ProviderError(f"{context}: {symbol} has type {kind!r}; asked for {asked} only")
     market_cap = pick(row, ["market_cap_basic"], context=context)
 
     def number(key: str) -> float:
@@ -119,12 +127,13 @@ def _label(lo: float, hi: float | None) -> str:
 
 
 async def _fetch_once(session, cfg: UniverseSettings, delays, row=None,
-                      context: str = f"{SCREENER_TOOL} universe") -> tuple[list[dict], dict]:
-    """Every row above the floor, band by band. `row` maps one screener row to a
+                      context: str = f"{SCREENER_TOOL} universe",
+                      types: tuple[str, ...] = ("stock",)) -> tuple[list[dict], dict]:
+    """Every row of `types` above the floor, band by band. `row` maps one screener row to a
     record carrying at least symbol and market_cap (default: universe_row)."""
-    row = row or universe_row
+    row = row or (lambda raw, where: universe_row(raw, where, kinds=types))
     payload = await fetch_in_session(session, SCREENER_TOOL,
-                                     screener_arguments(cfg, cfg.min_market_cap, None, 1),
+                                     screener_arguments(cfg, cfg.min_market_cap, None, 1, types),
                                      delays=delays)
     _, total = parse_screener(payload, context)
 
@@ -140,7 +149,7 @@ async def _fetch_once(session, cfg: UniverseSettings, delays, row=None,
         calls += 1
         try:
             payload = await fetch_in_session(session, SCREENER_TOOL,
-                                             screener_arguments(cfg, lo, hi, cfg.row_cap),
+                                             screener_arguments(cfg, lo, hi, cfg.row_cap, types),
                                              delays=delays)
         except ToolFailed as exc:
             if not _TOO_BIG.search(str(exc)):
@@ -180,19 +189,36 @@ async def _fetch_once(session, cfg: UniverseSettings, delays, row=None,
     return list(records.values()), {"total": total, "bands": bands, "calls": calls}
 
 
-async def fetch_universe(session, cfg: UniverseSettings, *, delays,
-                         now: datetime | None = None) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """The complete universe, OTC dropped, with a summary of how it was fetched."""
+async def _complete(session, cfg: UniverseSettings, delays, types: tuple[str, ...]) -> tuple[list[dict], dict]:
+    """`_fetch_once` for `types`, accepted only when it is provably complete (once more if not)."""
     for attempt in (1, 2):
-        records, info = await _fetch_once(session, cfg, delays)
+        records, info = await _fetch_once(session, cfg, delays, types=types,
+                                          context=f"{SCREENER_TOOL} universe {'/'.join(types)}")
         if len(records) == info["total"]:
-            break
-        message = (f"universe incomplete: {len(records)} distinct symbols across the bands, "
-                   f"but the unsplit query counts {info['total']}")
+            return records, info
+        message = (f"universe incomplete ({'/'.join(types)}): {len(records)} distinct symbols across "
+                   f"the bands, but the unsplit query counts {info['total']}")
         if attempt == 2:
             raise ProviderError(message + " (twice). Market caps may be moving across band "
                                 "edges during the session; try again after the close.")
         log.warning("%s; fetching again", message)
+    raise AssertionError("unreachable")
+
+
+async def fetch_universe(session, cfg: UniverseSettings, *, delays,
+                         now: datetime | None = None) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """The complete universe, OTC dropped, with a summary of how it was fetched."""
+    records, info = await _complete(session, cfg, delays, ("stock",))
+    receipts: int | str = "off"
+    if cfg.depositary_receipts:
+        try:
+            more, _ = await _complete(session, cfg, delays, ("dr",))
+            have = {r["symbol"] for r in records}
+            records += [r for r in more if r["symbol"] not in have]
+            receipts = len(more)
+        except ProviderError as exc:                # the stocks go on alone today
+            log.warning("depositary receipts not fetched: %s", type(exc).__name__)
+            receipts = f"failed: {type(exc).__name__}"
 
     frame = pd.DataFrame(records, columns=list(UNIVERSE.columns))
     by_exchange = frame["exchange"].isin(cfg.drop_exchanges)
@@ -206,6 +232,7 @@ async def fetch_universe(session, cfg: UniverseSettings, *, delays,
         "dropped": {**dict(Counter(frame.loc[by_exchange, "exchange"])),
                     **{f"subtype {k}": v for k, v in Counter(frame.loc[by_subtype, "subtype"]).items()}},
         "kept": int(len(kept)),
+        "depositary_receipts": receipts,
         "exchanges": dict(Counter(kept["exchange"])),
         "subtypes": dict(Counter(kept["subtype"].fillna("(none)"))),
         "bands": info["bands"],

@@ -163,6 +163,42 @@ def test_rate_limit_is_retried_then_raised():
         _run(screener, delays=(0,))
 
 
+class TypedScreener(FakeScreener):
+    """The fake screener, answering only the asked `symbol_types` (the live tool's filter)."""
+
+    async def call_tool(self, name, args):
+        every = self.rows
+        self.rows = [r for r in every if r["type"] in args["symbol_types"]]
+        try:
+            return await super().call_tool(name, args)
+        finally:
+            self.rows = every
+
+
+FOREIGN = _rows(6) + [stock_row(100 + i, (2 + i) * B, type="dr") for i in range(3)]
+
+
+def test_foreign_companies_come_by_a_query_of_their_own():
+    """Owner, 2026-10-06: TSM, ASML, ARM... are type "dr", which the stock query never had."""
+    frame, summary = _run(TypedScreener(FOREIGN), _cfg(depositary_receipts=True))
+    assert len(frame) == 9 and summary["depositary_receipts"] == 3
+    off, summary = _run(TypedScreener(FOREIGN))
+    assert len(off) == 6 and summary["depositary_receipts"] == "off"
+
+
+def test_when_the_foreign_query_fails_the_stocks_go_on_alone():
+    from fakes import LIMITED, result
+
+    class Failing(TypedScreener):
+        async def call_tool(self, name, args):
+            if args["symbol_types"] == ["dr"]:
+                return result(LIMITED)
+            return await super().call_tool(name, args)
+
+    frame, summary = _run(Failing(FOREIGN), _cfg(depositary_receipts=True))
+    assert len(frame) == 6 and summary["depositary_receipts"] == "failed: RateLimited"
+
+
 def test_band_edges_must_start_at_the_floor():
     from tascreen.errors import ConfigError
 

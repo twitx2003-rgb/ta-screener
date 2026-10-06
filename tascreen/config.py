@@ -86,6 +86,9 @@ class UniverseSettings:
     # 2026-10-05: "relatively large volume, not a few tens of thousands"). Applied when
     # the universe is read, so a saved one obeys it too.
     min_avg_volume: float = 0.0
+    # Foreign companies traded as depositary receipts (type "dr": TSM, ASML, ARM, ...), fetched
+    # by a query of their own (owner, 2026-10-06); off keeps the "stock" query alone.
+    depositary_receipts: bool = False
 
     def __post_init__(self):
         # PyYAML (YAML 1.1) reads `1.0e9` without a sign as a *string*; sent as the
@@ -415,6 +418,8 @@ class SetupsListSettings:
     fill_sessions: int = 5           # ...decided up to this many sessions ago
     pool_size: int = 30              # next-best candidates kept for the open's refill
     open_after_minutes: int = 15     # the open's review, this long after the open (live watch)
+    owner_lists: bool = True         # the owner's own TradingView lists scanned too (2026-10-06)
+    list_exchanges: tuple[str, ...] = ("NASDAQ", "NYSE", "AMEX")   # ...their US-listed stocks and funds
 
     def __post_init__(self):
         object.__setattr__(self, "id", str(self.id or "").strip())
@@ -424,6 +429,7 @@ class SetupsListSettings:
         for name in ("min_bounce_volume", "min_breakout_volume", "fill_bounce_volume"):
             object.__setattr__(self, name, float(getattr(self, name)))
         object.__setattr__(self, "exclude_patterns", tuple(self.exclude_patterns))
+        object.__setattr__(self, "list_exchanges", tuple(self.list_exchanges))
         if self.id and not self.id.isdigit():
             raise ConfigError("setups_list.id must be the watchlist's number")
         if not 1 <= self.max_size <= 200:

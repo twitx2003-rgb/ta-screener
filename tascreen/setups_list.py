@@ -32,6 +32,11 @@ Once per session, after the evening report:
    (tv.mcp_client.OwnListSession).
 4. What changed goes to the owner's PRIVATE chat.
 
+The stocks scanned: the ones the scan covers, plus the US-listed stocks and funds on the
+owner's own TradingView lists (all but this one; `owner_lists`, owner 2026-10-06: "research
+all the stocks on all my watchlists") that trade at least the universe's volume floor. Their
+entries say so (`from_lists`).
+
 And `open_after_minutes` after the open (owner, 2026-10-06: "update at the open and the
 close"; the live watch runs it, without bars): an entry whose price is already more than
 `support_break_atr` ATRs under the level it was left with last night (`watch`, `atr`)
@@ -67,7 +72,10 @@ NAME = "הבוט: סטאפים ופריצות"        # the list's name in Tradi
 GET = "mcp-watchlist-get-watchlist"   # {"watchlist": {"id", "name", "symbols": [...]}} (live, 2026-10-02)
 ADD = "mcp-watchlist-add-to-watchlist"
 REMOVE = "mcp-watchlist-remove-from-watchlist"
-VERSION = 2                           # 2026-10-05: the owner's setups (1: the research team's picks)
+LISTS = "mcp-watchlist-list-watchlists"   # {"watchlists": [{"id", "name", "symbols", ...}]} (live, 2026-10-06)
+# 1: the research team's picks; 2 (2026-10-05): the owner's setups; 3 (2026-10-06): his own lists
+# and foreign companies scanned too. A new version rebuilds the list at once (run.py).
+VERSION = 3
 KINDS = ("retest", "ma150", "breakout", "ma20")   # one entry a stock: the first of these it shows
 
 KIND_HE = {"ma150": "ממוצע 150", "ma20": "ממוצע 20", "retest": "בדיקה אחרי פריצה", "breakout": "פריצה"}
@@ -98,6 +106,27 @@ def read(data_dir: Path) -> dict[str, Any]:
 
 def write(data_dir: Path, state: dict[str, Any]) -> None:
     _write_json(path(data_dir), state)
+
+
+# ------------------------------------------------------------------ the owner's lists
+def owner_symbols(payload: dict, *, exclude: set[str], exchanges: tuple[str, ...]) -> list[str]:
+    """Every symbol on the owner's TradingView lists but `exclude` (this list's id), on
+    `exchanges` only, section headers dropped; sorted, each once."""
+    out = set()
+    for wl in pick(payload, ["watchlists"], context=LISTS) or []:
+        if str(pick(wl, ["id"], context=LISTS)) in exclude:
+            continue
+        for s in pick(wl, ["symbols"], context=LISTS) or []:
+            if isinstance(s, str) and ":" in s and not s.startswith("###") and s.split(":")[0] in exchanges:
+                out.add(s)
+    return sorted(out)
+
+
+def liquid(bars: pd.DataFrame | None, floor: float, day: date) -> bool:
+    """Bars up to `day` whose last 10 sessions average at least `floor` shares a day."""
+    if bars is None or len(bars) < 10 or day_of(bars["timestamp"].iloc[-1]) != day:
+        return False
+    return float(bars["volume"].tail(10).mean()) >= floor
 
 
 # ------------------------------------------------------------------ the setups of one stock
@@ -270,11 +299,12 @@ def level_now(entry: dict[str, Any], bars: pd.DataFrame) -> float:
 
 
 def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr: float,
-           keep_sessions: int) -> tuple[list[dict], list[dict]]:
+           keep_sessions: int, extra: list[str] | tuple = ()) -> tuple[list[dict], list[dict]]:
     """(entries kept, events): each event is {"symbol", "kind", "what": "removed", "reason"}.
-    An entry without the session's close is kept as it is (a gap in the data)."""
+    `extra`: the owner's stocks followed beside the scan's. An entry without the session's
+    close is kept as it is (a gap in the data)."""
     kept, events = [], []
-    followed = set(view.stocks["symbol"])
+    followed = set(view.stocks["symbol"]) | set(extra)
     for e in entries:
         def drop(reason: str) -> None:
             events.append({"symbol": e["symbol"], "kind": e.get("kind"), "what": "removed", "reason": reason})
@@ -283,6 +313,8 @@ def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr:
             drop("unfollowed")
             continue
         close, bars = _close(view, e["symbol"]), bars_of(e["symbol"])
+        if close is None and bars is not None and len(bars) and day_of(bars["timestamp"].iloc[-1]) == view.day:
+            close = float(bars["close"].iloc[-1])  # a stock of the owner's lists: not in the scan
         if close is None or bars is None or bars.empty:
             kept.append(e)
             continue
@@ -313,18 +345,21 @@ def cap(entries: list[dict], max_size: int) -> tuple[list[dict], list[dict]]:
 
 
 def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_of: Callable, cfg, *,
-            break_atr: float) -> dict[str, Any]:
+            break_atr: float, extra: list[str] | tuple = ()) -> dict[str, Any]:
     """The new state after the session: review, tonight's setups in (or renewing an entry),
     then the cap. `events` lists what changed (added / renewed / removed). A list from before
     the owner's setups (version 1) is replaced: its entries leave unless they show one now."""
     events: list[dict] = []
     entries = list(state.get("entries") or [])
-    adopt = state.get("version") != VERSION or bool(state.get("adopt"))
-    if state.get("version") != VERSION:
+    legacy = state.get("version") in (None, 1)       # the research team's picks: replaced
+    adopt = legacy or bool(state.get("adopt"))
+    if legacy:
         events += [{"symbol": e["symbol"], "kind": e.get("kind"), "what": "removed", "reason": "redefined"}
                    for e in entries if e["symbol"] not in found]
         entries = []
-    kept, gone = review(entries, view, bars_of, break_atr=break_atr, keep_sessions=cfg.keep_sessions)
+    kept, gone = review(entries, view, bars_of, break_atr=break_atr, keep_sessions=cfg.keep_sessions,
+                        extra=extra)
+    mine = set(extra)
     events += gone
     by = {e["symbol"]: e for e in kept}
     ranked = sorted(found.items(), key=lambda item: (rank(item[1]), item[0]))
@@ -332,22 +367,27 @@ def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_
         old = by.get(symbol)
         if not setup.get("strict", True) and old is None:
             continue                               # a filling candidate: only if the list is short
-        entry = {"symbol": symbol, **setup, "added": (old or {}).get("added", view.day.isoformat())}
+        entry = {"symbol": symbol, **setup, "added": (old or {}).get("added", view.day.isoformat()),
+                 "from_lists": symbol in mine}
         if old is None:
-            events.append({"symbol": symbol, "kind": setup["kind"], "what": "added", "text": setup["text"]})
+            events.append({"symbol": symbol, "kind": setup["kind"], "what": "added", "text": setup["text"],
+                           "from_lists": symbol in mine})
         elif (old.get("kind"), old.get("since")) != (setup["kind"], setup["since"]):
-            events.append({"symbol": symbol, "kind": setup["kind"], "what": "renewed", "text": setup["text"]})
+            events.append({"symbol": symbol, "kind": setup["kind"], "what": "renewed", "text": setup["text"],
+                           "from_lists": symbol in mine})
         by[symbol] = entry
     for symbol, setup in ranked:                   # at least min_size (owner, 2026-10-06)
         if len(by) >= cfg.min_size:
             break
         if symbol not in by:
-            by[symbol] = {"symbol": symbol, **setup, "added": view.day.isoformat(), "filled": True}
-            events.append({"symbol": symbol, "kind": setup["kind"], "what": "filled", "text": setup["text"]})
+            by[symbol] = {"symbol": symbol, **setup, "added": view.day.isoformat(), "filled": True,
+                          "from_lists": symbol in mine}
+            events.append({"symbol": symbol, "kind": setup["kind"], "what": "filled", "text": setup["text"],
+                           "from_lists": symbol in mine})
     entries, room = cap(list(by.values()), cfg.max_size)
     events += room
     added = {e["symbol"] for e in entries}
-    pool = [{"symbol": s, **c} for s, c in ranked if s not in added][: cfg.pool_size]
+    pool = [{"symbol": s, **c, "from_lists": s in mine} for s, c in ranked if s not in added][: cfg.pool_size]
     managed = sorted(set(state.get("managed") or []) | added)
     return {"version": VERSION, "id": cfg.id, "day": view.day.isoformat(), "entries": entries,
             "pool": pool, "managed": managed, "events": events, "synced": False, "adopt": adopt}
@@ -374,7 +414,8 @@ def open_review(state: dict[str, Any], prices: dict[str, float], cfg, *, break_a
                 and _finite(c.get("watch")) and float(price) >= float(c["watch"])):
             entries.append({**c, "added": day, "filled": True})
             have.add(c["symbol"])
-            events.append({"symbol": c["symbol"], "kind": c["kind"], "what": "filled", "text": c["text"]})
+            events.append({"symbol": c["symbol"], "kind": c["kind"], "what": "filled", "text": c["text"],
+                           "from_lists": bool(c.get("from_lists"))})
         elif c["symbol"] not in have:
             pool.append(c)
     return {**state, "entries": entries, "pool": pool, "events": events, "open_day": day, "synced": False,
@@ -422,7 +463,8 @@ def message(state: dict[str, Any], *, at_open: bool = False) -> str | None:
         part = [e for e in events if e["what"] == what]
         if part:
             lines += ["", f"<b>{head}</b>"]
-            lines += [f"• {_ticker(e['symbol'])} ({KIND_HE.get(e['kind'], '')}): {html.escape(e['text'])}" for e in part]
+            lines += [f"• {_ticker(e['symbol'])} ({KIND_HE.get(e['kind'], '')}"
+                      f"{' · מהרשימות שלך' if e.get('from_lists') else ''}): {html.escape(e['text'])}" for e in part]
     removed = [e for e in events if e["what"] == "removed"]
     if removed:
         lines += ["", "<b>יצאו:</b>"]

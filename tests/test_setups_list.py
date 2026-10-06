@@ -183,13 +183,47 @@ def test_a_stock_the_bot_no_longer_follows_leaves_and_a_data_gap_keeps():
     kept, events = _review([_ma_entry()], _view([_stock("NYSE:OTHER", 50.0)]), FLAT)
     assert kept == [] and events[0]["reason"] == "unfollowed"
     gap = _view([_stock("NYSE:AAA", 90.0, day=date.fromisoformat(D[-2]))])
-    assert _review([_ma_entry()], gap, FLAT) == ([_ma_entry()], [])
+    stale = FLAT.iloc[:-1]                                    # no bar of the session either
+    assert _review([_ma_entry()], gap, stale) == ([_ma_entry()], [])
 
 
 def test_the_oldest_leave_first_when_the_list_is_full():
     entries = [_ma_entry(since=d, symbol=s) for s, d in (("NYSE:A1", D[-9]), ("NYSE:A2", D[-3]), ("NYSE:A3", D[-6]))]
     kept, gone = setups_list.cap(entries, 2)
     assert [e["symbol"] for e in kept] == ["NYSE:A2", "NYSE:A3"] and gone[0]["reason"] == "room"
+
+
+# ------------------------------------------------------------------ the owner's lists
+def test_the_owners_lists_give_their_us_stocks_but_not_this_list():
+    payload = {"watchlists": [
+        {"id": 111, "name": "the bot's", "symbols": ["NYSE:BOT"]},
+        {"id": 5, "name": "mine", "symbols": ["###SECTION", "NASDAQ:AAA", "TVC:DXY", "BINANCE:BTCUSDT", "AMEX:ETF"]},
+        {"id": 6, "name": "more", "symbols": ["NASDAQ:AAA", "NYSE:BBB"]}]}
+    got = setups_list.owner_symbols(payload, exclude={"111"}, exchanges=("NASDAQ", "NYSE", "AMEX"))
+    assert got == ["AMEX:ETF", "NASDAQ:AAA", "NYSE:BBB"]
+
+
+def test_an_owners_stock_counts_only_with_enough_volume_and_a_bar_of_the_session():
+    busy = FLAT.assign(volume=1_500_000.0)
+    assert setups_list.liquid(busy, 1e6, DAY)
+    assert not setups_list.liquid(FLAT.assign(volume=400_000.0), 1e6, DAY)
+    assert not setups_list.liquid(busy.iloc[:-1], 1e6, DAY)                 # stale
+    assert not setups_list.liquid(None, 1e6, DAY)
+
+
+def test_an_owners_stock_is_followed_and_reviewed_from_its_own_bars():
+    view = _view([_stock("NYSE:SCAN", 50.0)])                 # the scan does not have NYSE:AAA
+    kept, events = setups_list.review([_ma_entry()], view, lambda s: FLAT, break_atr=0.5,
+                                      keep_sessions=10, extra=["NYSE:AAA"])
+    assert len(kept) == 1 and events == [] and kept[0]["watch"] == 100.0
+    falling = _bars([100.0] * 40 + [97.0])                    # its own bar closes through the average
+    kept, events = setups_list.review([_ma_entry()], view, lambda s: falling, break_atr=0.5,
+                                      keep_sessions=10, extra=["NYSE:AAA"])
+    assert events[0]["reason"] == "fell_ma"
+    state = setups_list.refresh({"version": setups_list.VERSION}, {"NYSE:AAA": _ma_entry(since=LAST)}, view,
+                                lambda s: FLAT, CFG, break_atr=0.5, extra=["NYSE:AAA"])
+    assert state["entries"][0]["from_lists"] and state["events"][0]["from_lists"]
+    assert "(ממוצע 20 · מהרשימות שלך)" in setups_list.message(state)
 
 
 # ------------------------------------------------------------------ one evening
@@ -251,6 +285,15 @@ def test_the_open_takes_out_what_opened_under_its_level_and_refills_from_the_poo
     text = setups_list.message(got, at_open=True)
     assert text.startswith("📋 <b>רשימת הסטאפים בטריידינגוויו עודכנה בפתיחת המסחר</b>")
     assert "• A: נפתחה מתחת לרמה שלה: התמיכה נשברה בפתיחה" in text
+
+
+def test_a_newer_version_keeps_the_entries_and_adds_the_new_ones():
+    view = _view([_stock("NYSE:AAA", 100.0), _stock("NYSE:NEW", 20.0)])
+    v2 = {"version": 2, "entries": [_ma_entry()], "managed": ["NYSE:AAA"]}
+    got = setups_list.refresh(v2, {"NYSE:NEW": _ma_entry(since=LAST, symbol="NYSE:NEW")}, view,
+                              lambda s: FLAT, CFG, break_atr=0.5)
+    assert [(e["symbol"], e["what"]) for e in got["events"]] == [("NYSE:NEW", "added")]
+    assert {e["symbol"] for e in got["entries"]} == {"NYSE:AAA", "NYSE:NEW"} and got["adopt"] is False
 
 
 def test_the_message_tells_what_changed():
