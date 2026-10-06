@@ -13,8 +13,9 @@ Every evening, after the setups list's refresh (tascreen/setups_list.py):
    what to improve (proposals for the owner, never applied by the program), and short notes
    for the chart analyst (data/setups/analyst_notes.md, added to the analyst's prompt:
    guidance with no numbers, since the analyst quotes only a stock's own facts).
-4. The owner's private chat: the coach's short Hebrew note when something left the list, and
-   every Saturday.
+4. The owner's private chat: the coach's short Hebrew note at the end of every trading day
+   (owner, 2026-10-06: "the checks agent should work at the end of every day"), and the
+   week's note with the proposals after Friday's session.
 """
 from __future__ import annotations
 
@@ -218,12 +219,12 @@ def read_lessons(data_dir: Path) -> str:
         return ""
 
 
-def message(result: dict[str, Any], left: list[dict], *, weekly: bool = False) -> str | None:
-    """The owner's private note: the coach's summary, why each exit fell, and on Saturdays the
-    proposals. None when there is nothing to say."""
-    if not (left or weekly) or not (result.get("summary_he") or result.get("why_he")):
-        return None
-    lines = ["🧠 <b>מאמן הסטאפים" + (" · סיכום שבועי" if weekly else "") + "</b>"]
+def message(result: dict[str, Any], left: list[dict], *, weekly: bool = False,
+            on_list: int | None = None, record: dict[str, Any] | None = None) -> str:
+    """The owner's private note at the end of every trading day: the coach's summary, why each
+    exit fell, and the program's own line on the list and its record; after Friday's session
+    the week's note with the proposals."""
+    lines = ["🧠 <b>מאמן הסטאפים · " + ("סיכום שבועי" if weekly else "סיכום יום") + "</b>"]
     if result.get("summary_he"):
         lines += ["", html.escape(result["summary_he"])]
     why = {w["symbol"]: w["text"] for w in result.get("why_he") or []}
@@ -237,4 +238,15 @@ def message(result: dict[str, Any], left: list[dict], *, weekly: bool = False) -
     if weekly and result.get("improve_he"):
         lines += ["", "<b>הצעות לשיפור (לאישורך, הבוט לא משנה לבד):</b>"]
         lines += [f"• {html.escape(x)}" for x in result["improve_he"]]
+    facts = []                                     # the program's words: never the model's numbers
+    if on_list is not None:
+        facts.append(f"ברשימה עכשיו {on_list} מניות")
+    if record and record.get("decided"):
+        part = record.get("all") or {}
+        up = f", {part['up_pct']:.0f}% מהן ברווח ביציאה" if _finite(part.get("up_pct")) else ""
+        facts.append(f"הוכרעו עד היום {record['decided']}{up}")
+    elif record is not None:
+        facts.append("עוד אין מניות שיצאו מאז שהיומן נפתח")
+    if facts:
+        lines += ["", html.escape("; ".join(facts)) + "."]
     return "\n".join(lines)

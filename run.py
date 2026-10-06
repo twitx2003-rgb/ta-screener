@@ -1085,7 +1085,8 @@ def _setups_coach(settings, store, target) -> dict:
         return {**out, "status": "failed", "error": type(exc).__name__}
     setups_coach.save(store.root, day, result)
     weekly = target.weekday() == 4                  # Friday's session: the week's note
-    text = setups_coach.message(result, user["left_today"], weekly=weekly)
+    text = setups_coach.message(result, user["left_today"], weekly=weekly, on_list=len(state.get("entries") or []),
+                                record=user["record"])          # every trading day (owner, 2026-10-06)
     owner = notify.owner_from_environment()
     if text and owner is not None:
         owner.send(text, html=True)

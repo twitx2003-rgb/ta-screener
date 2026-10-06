@@ -96,14 +96,19 @@ def test_the_coach_saves_its_lessons_and_the_analysts_notes(tmp_path):
     assert setups_coach.analyst_notes(tmp_path / "none") == ""
 
 
-def test_the_owners_note_says_why_each_exit_fell_and_the_proposals_on_fridays():
+def test_the_owners_note_comes_every_day_and_the_proposals_on_fridays():
     left = [{"symbol": "NYSE:AAA", "reason": "fell_ma", "ret_pct": -1.98}]
     result = {**_answer(), "why_he": [{"symbol": "NYSE:AAA", "text": "הקפיצה הייתה בנפח חלש."}]}
     text = setups_coach.message(result, left)
-    assert "• AAA: נסגרה מתחת לממוצע (-2.0%). הקפיצה הייתה בנפח חלש." in text and "הצעות" not in text
+    assert "סיכום יום" in text and "• AAA: נסגרה מתחת לממוצע (-2.0%). הקפיצה הייתה בנפח חלש." in text
+    assert "הצעות" not in text
     weekly = setups_coach.message(result, [], weekly=True)
     assert "סיכום שבועי" in weekly and "להעלות את סף המחזור" in weekly
-    assert setups_coach.message(result, []) is None                      # a quiet day: nothing
+    # a quiet day still gets its note (owner, 2026-10-06), with the program's own line
+    quiet = setups_coach.message({**result, "summary_he": ""}, [], on_list=12, record={"decided": 0})
+    assert "סיכום יום" in quiet and quiet.endswith("ברשימה עכשיו 12 מניות; עוד אין מניות שיצאו מאז שהיומן נפתח.")
+    decided = setups_coach.message(result, [], on_list=12, record={"decided": 4, "all": {"up_pct": 75.0}})
+    assert decided.endswith("ברשימה עכשיו 12 מניות; הוכרעו עד היום 4, 75% מהן ברווח ביציאה.")
 
 
 def test_the_analyst_writes_with_the_coachs_notes(tmp_path):

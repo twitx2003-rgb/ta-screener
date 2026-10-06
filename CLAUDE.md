@@ -184,7 +184,7 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   exits too), the history study (the same setups, no look-ahead, vs a baseline; rebuilt weekly),
   one model call: why exits fell, keep/improve (proposals only, never applied), notes for the
   chart analyst (data/setups/analyst_notes.md, added to the writer's prompt). Private chat:
-  when something left, and Friday's session.
+  a note at the end of every trading day; the week's note with proposals after Friday's.
 - Foreign companies (2026-10-06): TradingView types ADRs "dr" (TSM, ASML, ARM), which the
   "stock" query never returned; `universe.depositary_receipts` fetches them by a query of
   their own (fail-safe: the stocks go on alone if it fails).
