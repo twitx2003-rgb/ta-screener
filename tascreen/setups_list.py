@@ -319,6 +319,7 @@ def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_
     the owner's setups (version 1) is replaced: its entries leave unless they show one now."""
     events: list[dict] = []
     entries = list(state.get("entries") or [])
+    adopt = state.get("version") != VERSION or bool(state.get("adopt"))
     if state.get("version") != VERSION:
         events += [{"symbol": e["symbol"], "kind": e.get("kind"), "what": "removed", "reason": "redefined"}
                    for e in entries if e["symbol"] not in found]
@@ -349,7 +350,7 @@ def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_
     pool = [{"symbol": s, **c} for s, c in ranked if s not in added][: cfg.pool_size]
     managed = sorted(set(state.get("managed") or []) | added)
     return {"version": VERSION, "id": cfg.id, "day": view.day.isoformat(), "entries": entries,
-            "pool": pool, "managed": managed, "events": events, "synced": False}
+            "pool": pool, "managed": managed, "events": events, "synced": False, "adopt": adopt}
 
 
 def open_review(state: dict[str, Any], prices: dict[str, float], cfg, *, break_atr: float,
@@ -387,10 +388,15 @@ def symbols_of(payload: dict) -> list[str]:
     return [s for s in raw if isinstance(s, str) and ":" in s and not s.startswith("###")]
 
 
-async def sync(session, list_id: str, wanted: list[str], managed: list[str], delays) -> dict[str, int]:
+async def sync(session, list_id: str, wanted: list[str], managed: list[str], delays, *,
+               adopt: bool = False) -> dict[str, int]:
     """Make the TradingView list hold `wanted`: add what is missing, remove what this bot
-    added and no longer wants. A symbol the owner added by hand stays."""
+    added and no longer wants. A symbol the owner added by hand stays. With `adopt` (the first
+    sync of a new list version), everything already on the list counts as the bot's: on
+    2026-10-06 the list was rebuilt from the owner's computer before the cloud's first run."""
     current = symbols_of(await fetch_in_session(session, GET, {"watchlist_id": list_id}, delays=delays))
+    if adopt:
+        managed = sorted(set(managed) | set(current))
     add = [s for s in wanted if s not in current]
     remove = [s for s in current if s in set(managed) and s not in set(wanted)]
     if add:

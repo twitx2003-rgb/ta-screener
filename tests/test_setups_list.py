@@ -284,6 +284,17 @@ def test_sync_adds_what_is_missing_and_removes_only_its_own():
     assert session.calls[2] == (setups_list.REMOVE, {"watchlist_id": "111", "symbols": ["NYSE:GONE"]})
 
 
+def test_the_first_sync_of_a_new_version_adopts_what_is_on_the_list():
+    session = FakeSession(["NYSE:KEEP", "NYSE:PUT_BY_HAND_EARLIER"])
+    counts = asyncio.run(setups_list.sync(session, "111", ["NYSE:KEEP"], [], delays=(), adopt=True))
+    assert counts == {"added": 0, "removed": 1}
+    assert session.calls[1] == (setups_list.REMOVE, {"watchlist_id": "111", "symbols": ["NYSE:PUT_BY_HAND_EARLIER"]})
+    view = _view([_stock("NYSE:KEEP", 100.0)])
+    first = setups_list.refresh({"version": 1}, {}, view, lambda s: FLAT, CFG, break_atr=0.5)
+    again = setups_list.refresh({**first, "adopt": False}, {}, view, lambda s: FLAT, CFG, break_atr=0.5)
+    assert first["adopt"] is True and again["adopt"] is False
+
+
 def test_only_the_bots_own_list_can_be_edited():
     assert own_list_edit("mcp-watchlist-add-to-watchlist", {"watchlist_id": "111"}, "111", "n")
     assert own_list_edit("mcp-watchlist-remove-from-watchlist", {"watchlist_id": 111}, "111", "n")

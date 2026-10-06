@@ -660,7 +660,7 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
     async def work():
         async with client.own_list_session(cfg.id, setups_list.NAME) as session:
             return await setups_list.sync(session, cfg.id, wanted, state.get("managed") or [],
-                                          settings.tradingview.rate_limit_delays)
+                                          settings.tradingview.rate_limit_delays, adopt=bool(state.get("adopt")))
     try:
         from tascreen.tv.mcp_client import _run
 
@@ -668,7 +668,7 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
     except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
         log.warning("the setups list was not synced: %s", type(exc).__name__)
         return {**out, "status": "not synced", "error": type(exc).__name__}
-    setups_list.write(store.root, {**state, "synced": True})
+    setups_list.write(store.root, {**state, "synced": True, "adopt": False})
     return {**out, **counts, "status": "synced"}
 
 
