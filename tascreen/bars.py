@@ -70,7 +70,7 @@ def merge_bars(stored: pd.DataFrame, fresh: pd.DataFrame,
 @dataclass
 class SymbolResult:
     symbol: str
-    status: str                  # new | updated | refetched | up_to_date | stale | failed | deferred
+    status: str                  # new | updated | refetched | up_to_date | stale | gone | failed | deferred
     last_date: str | None = None
     rows: int = 0
     calls: int = 0
@@ -144,7 +144,11 @@ class BarsJob:
                     f"newest bar {result.last_date} is older than {target.isoformat()}"
                 result.status = "stale"
         except (ProviderError, ContractError) as exc:
-            result.status, result.note = "failed", str(exc)[:500]
+            # TradingView no longer knows the symbol (2026-10-07: three in a saved universe
+            # while the screener answered 429): a delisting or a new ticker, not worth a
+            # retry, so it is "gone" and does not leave the update incomplete
+            gone = "symbol_error" in str(exc) and "invalid symbol" in str(exc)
+            result.status, result.note = ("gone" if gone else "failed"), str(exc)[:500]
             log.warning("%s: %s", symbol, result.note)
         return result
 
@@ -222,6 +226,7 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
         "seconds_per_call": round(elapsed / calls, 2) if calls else None,
         "counts": counts,
         "failed": {r.symbol: r.note for r in results if r.status == "failed"},
+        "gone": {r.symbol: r.note for r in results if r.status == "gone"},
         "stale": {r.symbol: r.note for r in results if r.status == "stale"},
         "refetched": {r.symbol: r.note for r in results if r.status == "refetched"},
         "deferred": sum(r.status == "deferred" for r in results),

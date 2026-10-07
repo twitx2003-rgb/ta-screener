@@ -59,8 +59,8 @@ def test_runs_since_asks_for_runs_created_after_the_close():
 def test_the_nightly_run_is_started_only_when_due_and_no_run_succeeded(monkeypatch, capsys):
     import run
 
-    started = []
-    monkeypatch.setattr(github, "dispatch", lambda wf, inputs: started.append(wf) or 204)
+    started, given = [], []
+    monkeypatch.setattr(github, "dispatch", lambda wf, inputs: given.append(inputs) or started.append(wf) or 204)
     settings = run.load_settings()
     monday_1700_ny = datetime(2026, 1, 5, 22, 0, tzinfo=timezone.utc)      # the scheduled time's turn
     monday_night = datetime(2026, 1, 6, 6, 0, tzinfo=timezone.utc)         # 01:00 New York
@@ -82,6 +82,7 @@ def test_the_nightly_run_is_started_only_when_due_and_no_run_succeeded(monkeypat
     seen = []
     monkeypatch.setattr(github, "runs_since", lambda wf, since: seen.append(since) or [failed])
     assert run.ensure_nightly(settings, now=monday_night) == 0 and started == ["run.yml"]
+    assert given == [{"save": "true"}]                    # else the run keeps only the token and logs
     assert seen[0] == datetime(2026, 1, 5, 21, 15, tzinfo=timezone.utc)   # 16:15 New York in winter
     assert capsys.readouterr().out.strip() == "ensure-nightly: started (204, 1 failed before)"
     friday_night = datetime(2026, 1, 10, 4, 0, tzinfo=timezone.utc)        # 23:00 New York, Friday

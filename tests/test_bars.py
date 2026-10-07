@@ -92,6 +92,14 @@ def test_one_failing_symbol_does_not_stop_the_run(tmp_path):
     assert job.store.read_bars("NYSE:BAD") is None
 
 
+def test_a_symbol_tradingview_no_longer_knows_is_gone_not_failed(tmp_path):
+    job, source = _job(tmp_path), FakeOhlcv(DAY)
+    source.gone.add("NYSE:OLD")
+    report, _ = _run(job, source, ["NASDAQ:AAA", "NYSE:OLD"])
+    assert report["counts"] == {"new": 1, "gone": 1}
+    assert report["failed"] == {} and "invalid symbol" in report["gone"]["NYSE:OLD"]
+
+
 def test_a_symbol_that_stopped_trading_is_kept_but_flagged_stale(tmp_path):
     job, source = _job(tmp_path), FakeOhlcv(date(2026, 9, 16))   # halted after the 16th
     report, _ = _run(job, source, ["NASDAQ:OLD"])

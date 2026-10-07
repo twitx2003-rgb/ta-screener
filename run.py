@@ -336,7 +336,7 @@ def bars(settings, limit: int | None, stop_at=None) -> int:
           f"({report['seconds_per_call']} s/call): {report['counts']}")
     if report["deferred"]:
         print(f"  deferred to the next run (deadline {stop_at}): {report['deferred']}")
-    for kind in ("failed", "stale", "refetched"):
+    for kind in ("failed", "gone", "stale", "refetched"):
         if report[kind]:
             print(f"  {kind} ({len(report[kind])}):")
             for symbol, note in list(report[kind].items())[:15]:
@@ -1376,7 +1376,7 @@ def ensure_nightly(settings, now=None) -> int:
     if failed >= NIGHTLY_TRIES:
         print(f"ensure-nightly: gave up ({failed} runs failed)")
         return 0
-    status = github.dispatch("run.yml", {})
+    status = github.dispatch("run.yml", {"save": "true"})       # a dispatch saves only when asked
     print(f"ensure-nightly: started ({status}, {failed} failed before)")
     return 0 if status == 204 else 1
 

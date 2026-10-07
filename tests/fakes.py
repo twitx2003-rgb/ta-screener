@@ -100,6 +100,7 @@ class FakeOhlcv:
         self.days = days
         self.scale: dict[str, float] = {}
         self.missing: set[str] = set()
+        self.gone: set[str] = set()          # TradingView's answer for a symbol it no longer knows
         self.calls = []
 
     def bars_for(self, symbol: str) -> list[dict]:
@@ -118,6 +119,9 @@ class FakeOhlcv:
         symbol = args["symbol"]
         if symbol in self.missing:
             return result({"success": False, "error": f"no data for {symbol}"})
+        if symbol in self.gone:
+            return result({"success": False, "error": "failed to fetch bars: tvws: symbol_error "
+                                                      "[cs_test sds_sym_1 invalid symbol]"})
         bars = self.bars_for(symbol)[-args["count"]:]
         return result({"success": True, "symbol": symbol, "interval": "1D",
                        "count": len(bars), "bars": bars})
