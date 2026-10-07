@@ -138,6 +138,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ensure-live", action="store_true",
                         help="GitHub Actions (xnews.yml): start live.yml if it should be running "
                              "(a trading day, 07:20-15:50 New York) and is not")
+    parser.add_argument("--ensure-nightly", action="store_true",
+                        help="GitHub Actions (xnews.yml): start run.yml if no run of it since the "
+                             "session's close succeeded (18:30-07:00 New York; at most 3 failures)")
     parser.add_argument("--ci-premarket", action="store_true",
                         help="GitHub Actions (premarket.yml): the pre-market report when a slot "
                              "(07:30, 08:30, 09:15 New York) is due; one status line")
@@ -1331,6 +1334,53 @@ def ensure_live(settings, now=None) -> int:
     return 0 if status == 204 else 1
 
 
+NIGHTLY_FROM = 135        # minutes after the close (16:15 New York): the 21:40 UTC slot had its chance
+NIGHTLY_UNTIL = (7, 0)    # New York, the next morning: before the live watch (07:20) reads the scan
+NIGHTLY_TRIES = 3         # failed runs a night before the guard stops (each one tells the owner)
+
+
+def ensure_nightly(settings, now=None) -> int:
+    """GitHub's schedule is not reliable (2026-10-06: of the nightly's three times only the
+    01:10 UTC one fired, and it failed, so no scan, evening report or setups list that night).
+    The X news loop checks every pass, from NIGHTLY_FROM after a session's close until
+    NIGHTLY_UNTIL the next morning, that a run of run.yml since the close succeeded, and
+    starts one when none did and none is waiting or running. A run with nothing due is a
+    no-op (--ci-tick), so a late scheduled run after this one costs nothing. One status line."""
+    from datetime import datetime, time as clock_time, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    from tascreen import github
+    from tascreen.market_hours import last_completed_session
+
+    now = now or datetime.now(timezone.utc)
+    tz = ZoneInfo(settings.market.timezone)
+    session = last_completed_session(now, market_tz=settings.market.timezone,
+                                     session_close=settings.market.session_close)
+    close_h, close_m = (int(part) for part in settings.market.session_close.split(":"))
+    closed = datetime.combine(session, clock_time(close_h, close_m), tz)
+    until = datetime.combine(session + timedelta(days=1), clock_time(*NIGHTLY_UNTIL), tz)
+    if not closed + timedelta(minutes=NIGHTLY_FROM) <= now < until:
+        print("ensure-nightly: not needed now")
+        return 0
+    runs = github.runs_since("run.yml", closed)
+    if runs is None:
+        print("ensure-nightly: unknown (no key or no answer)")
+        return 0
+    if any(r["status"] != "completed" for r in runs):
+        print("ensure-nightly: running")
+        return 0
+    if any(r["conclusion"] == "success" for r in runs):
+        print("ensure-nightly: done")
+        return 0
+    failed = sum(r["conclusion"] == "failure" for r in runs)
+    if failed >= NIGHTLY_TRIES:
+        print(f"ensure-nightly: gave up ({failed} runs failed)")
+        return 0
+    status = github.dispatch("run.yml", {})
+    print(f"ensure-nightly: started ({status}, {failed} failed before)")
+    return 0 if status == 204 else 1
+
+
 def _explain(settings, moment: str, indexes: dict, movers: list, now) -> str | None:
     """The market explainer's sentences (tascreen/explain.py), or None: off, no Claude here
     (inside Claude Code), or an answer that broke a rule. Never stops a report."""
@@ -1815,6 +1865,7 @@ def main(argv: list[str] | None = None) -> int:
                                        to_telegram=args.telegram)),
         (args.ci_premarket, lambda: ci_premarket(settings)),
         (args.ensure_live, lambda: ensure_live(settings)),
+        (args.ensure_nightly, lambda: ensure_nightly(settings)),
         (args.digest, lambda: digest(settings)),
         (args.digest_now, lambda: digest(settings, force=True)),
         (args.digest_trial, lambda: digest(settings, trial=True)),

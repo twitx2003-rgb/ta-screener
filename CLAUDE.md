@@ -124,8 +124,9 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
     `tascreen/premarket.py`, with the market explainer `tascreen/explain.py`), then breakout
     crossings and sharp index moves during the session (Telegram);
   - `xnews.yml`: one looping run (5.5 h, then it dispatches its continuation; GitHub cron is
-    unreliable): X news every 10 min 04-24 UTC (20 on weekends), and `--ensure-live`
-    starts live.yml if it is missing (`tascreen/xnews.py`;
+    unreliable): X news every 10 min 04-24 UTC (20 on weekends), `--ensure-live`
+    starts live.yml if it is missing, and `--ensure-nightly` starts run.yml when no run since
+    the close succeeded (18:30-07:00 New York, at most 3 failures; 2026-10-07) (`tascreen/xnews.py`;
     own group `xnews`, seen ids on the state repo's `xnews` branch);
   - `analyst.yml`: one analysis on request (the Telegram bot dispatches it);
   - the evening report is the research team's (`tascreen/research.py`, `--research-dry` to try;

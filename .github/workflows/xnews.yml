@@ -92,6 +92,7 @@ jobs:
               bash .github/xnews.sh keep > /dev/null || echo "xnews state: could not keep"
             fi
             python -u run.py --ensure-live 2> /dev/null | grep -h '^ensure-live: ' || true
+            python -u run.py --ensure-nightly 2> /dev/null | grep -h '^ensure-nightly: ' || true
             # the morning digest at 10:00 Israel time (tascreen/digest.py): a no-op when not due
             if python -u run.py --digest 2> "$RUNNER_TEMP/digest.log" | grep -h '^digest: ' | grep -v 'not due'; then
               bash .github/xnews.sh keep > /dev/null || echo "xnews state: could not keep"
