@@ -84,8 +84,14 @@ def test_a_number_containing_429_is_not_a_rate_limit():
 
 
 def test_mcp_level_error_is_a_failure():
-    with pytest.raises(ToolFailed, match="boom"):
+    with pytest.raises(ToolFailed, match="boom") as info:
         tool_payload(result(None, is_error=True, text="boom"), "t")
+    assert not isinstance(info.value, RateLimited)
+
+
+def test_a_429_as_an_mcp_level_error_is_a_rate_limit_too():
+    with pytest.raises(RateLimited):                  # the nightly update's shape on 2026-10-07
+        tool_payload(result(None, is_error=True, text=json.dumps(LIMITED)), "t")
 
 
 def test_text_json_is_used_when_there_is_no_structured_content():

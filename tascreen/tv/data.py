@@ -43,6 +43,7 @@ NEWS_TOOL = "mcp-tv-get-news"      # {symbol, lang, limit, offset}; Hebrew retur
 SCREENER_TOOL = "mcp-tv-run-screener"
 COLUMNS_TOOL = "mcp-tv-get-screener-columns"
 RATE_LIMIT_DELAYS = (5.0, 15.0, 45.0)
+TOO_MANY = re.compile(r"(?<!\d)429(?!\d)")    # TradingView's 429, not a number containing it
 
 
 class ToolFailed(ProviderError):
@@ -63,10 +64,13 @@ def tool_payload(result: Any, tool: str) -> dict[str, Any]:
 
     Prefers `structured_content`; falls back to the text blocks when they are
     JSON. Refuses anything that is not an object, and any payload that says
-    `success: false`.
+    `success: false`. A 429 is RateLimited in both shapes: the payload's `error`, or (since
+    2026-10-07, when the nightly update failed on it) an MCP-level error whose text holds
+    the same JSON.
     """
     if result.is_error:
-        raise ToolFailed(f"{tool}: tool error: {_text(result)[:300]}")
+        text = _text(result)
+        raise (RateLimited if TOO_MANY.search(text) else ToolFailed)(f"{tool}: tool error: {text[:300]}")
 
     payload = result.structured_content
     if payload is None:
@@ -79,7 +83,7 @@ def tool_payload(result: Any, tool: str) -> dict[str, Any]:
 
     if payload.get("success") is False:
         error = str(payload.get("error") or "(no error text)")
-        kind = RateLimited if re.search(r"(?<!\d)429(?!\d)", error) else ToolFailed
+        kind = RateLimited if TOO_MANY.search(error) else ToolFailed
         raise kind(f"{tool}: {error}")
     return payload
 
