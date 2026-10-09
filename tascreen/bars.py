@@ -81,7 +81,10 @@ class SymbolResult:
                 "calls": self.calls, "note": self.note}
 
 
-MAX_BROKEN_SESSIONS = 3        # then the rest of the run is deferred to the next one
+MAX_BROKEN_SESSIONS = 3        # in a row; then the rest of the run is deferred to the next one
+# Before the 2nd and 3rd try of a batch whose session broke (2026-10-08: TradingView answered
+# 502/503 for hours, and three sessions failing back to back gave the run up within 30 s).
+BROKEN_PAUSES_S = (120, 600)
 
 
 @dataclass
@@ -168,7 +171,8 @@ class BarsJob:
 
 
 def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
-               progress: Callable[[str], None] = print) -> dict[str, Any]:
+               progress: Callable[[str], None] = print,
+               wait: Callable[[float], None] = time.sleep) -> dict[str, Any]:
     """Update every symbol, one MCP session per batch. Saves status after each batch."""
     symbols = list(symbols)
     status = job.store.read_status()
@@ -176,31 +180,46 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
     started = time.monotonic()
     calls = 0
     broken = 0                   # sessions in a row that failed to open or died
+
+    def late(seconds: float = 0) -> bool:
+        return job.stop_at is not None and \
+            datetime.now(timezone.utc) + timedelta(seconds=seconds) >= job.stop_at
+
     for start in range(0, len(symbols), job.bars.session_batch):
         batch = symbols[start:start + job.bars.session_batch]
-        done, need = [], []
-        for symbol in batch:
-            last, rows = _stored_tail(job, symbol)
-            if last is not None and date.fromisoformat(last) >= job.target:
-                done.append(SymbolResult(symbol, "up_to_date", last, rows))
-            else:
-                need.append(symbol)
-        if need and job.stop_at is not None and datetime.now(timezone.utc) >= job.stop_at:
-            done += [SymbolResult(s, "deferred", note="stopped at the deadline") for s in need]
-        elif need and broken >= MAX_BROKEN_SESSIONS:
-            done += [SymbolResult(s, "deferred", note="TradingView sessions kept failing")
-                     for s in need]
-        elif need:
-            # A session that cannot open, or dies mid-batch (seen from GitHub's runners),
-            # costs this batch only; the symbols are fetched by the next run.
-            try:
-                done += client.with_session(lambda session, need=need: job.run_batch(session, need))
-                broken = 0
-            except (ProviderError, OSError, TimeoutError, ExceptionGroup) as exc:
-                broken += 1
-                note = f"session failed: {type(exc).__name__}: {str(exc)[:200]}"
-                log.warning("bars for %s..%s: %s", need[0], need[-1], note)
-                done += [SymbolResult(s, "failed", note=note) for s in need]
+        while True:
+            # sorted again on a retry: a session that died mid-batch kept what it fetched
+            done, need = [], []
+            for symbol in batch:
+                last, rows = _stored_tail(job, symbol)
+                if last is not None and date.fromisoformat(last) >= job.target:
+                    done.append(SymbolResult(symbol, "up_to_date", last, rows))
+                else:
+                    need.append(symbol)
+            if need and late():
+                done += [SymbolResult(s, "deferred", note="stopped at the deadline") for s in need]
+            elif need and broken >= MAX_BROKEN_SESSIONS:
+                done += [SymbolResult(s, "deferred", note="TradingView sessions kept failing")
+                         for s in need]
+            elif need:
+                # A session that cannot open, or dies mid-batch (seen from GitHub's runners),
+                # is tried again after a pause; past the tries it costs this batch only, and
+                # the symbols are fetched by the next run.
+                try:
+                    done += client.with_session(lambda session, need=need: job.run_batch(session, need))
+                    broken = 0
+                except (ProviderError, OSError, TimeoutError, ExceptionGroup) as exc:
+                    broken += 1
+                    note = f"session failed: {type(exc).__name__}: {str(exc)[:200]}"
+                    log.warning("bars for %s..%s: %s", need[0], need[-1], note)
+                    pause = BROKEN_PAUSES_S[min(broken, len(BROKEN_PAUSES_S)) - 1]
+                    if broken < MAX_BROKEN_SESSIONS and not late(pause):
+                        progress(f"  TradingView session failed; the same {len(need)} symbols "
+                                 f"again in {pause / 60:.0f} min")
+                        wait(pause)
+                        continue
+                    done += [SymbolResult(s, "failed", note=note) for s in need]
+            break
         checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         for r in done:
             status[r.symbol] = {**r.as_dict(), "checked_at": checked_at}

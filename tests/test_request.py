@@ -29,10 +29,11 @@ def _answer(system, user, schema):
 
 class _Bot(Telegram):
     def __init__(self):
-        self.sent = []
+        self.sent, self.captions = [], []
         super().__init__("123456:" + "x" * 30, 42,
                          post=lambda m, p: self.sent.append((m, p.get("text"))) or {"ok": True},
-                         upload=lambda m, p, f: self.sent.append((m, f[1])) or {"ok": True})
+                         upload=lambda m, p, f: self.sent.append((m, f[1])) or
+                         self.captions.append(p.get("caption")) or {"ok": True})
 
 
 def _png(svg, png):
@@ -76,10 +77,13 @@ def test_the_png_waits_for_the_tools_installed_in_the_background(tmp_path, monke
     assert wait_for_tools(0)                                                       # not on a runner
 
 
-def test_a_request_sends_chart_text_and_script_and_keeps_the_files(tmp_path):
+def test_a_request_sends_one_chart_with_a_short_line_and_keeps_the_files(tmp_path):
     status, bot, llm = _request(tmp_path, "syn")
     assert status == "sent NYSE:SYN" and len(llm.calls) == 1
-    assert [m for m, _ in bot.sent] == ["sendPhoto", "sendMessage"]            # no Pine Script
+    assert [m for m, _ in bot.sent] == ["sendPhoto"]            # no long text, no Pine Script
+    caption = bot.captions[0].splitlines()
+    assert len(caption) == 3 and "SYN" in caption[0]                # name, the line, the footer
+    assert "בדיקה." in caption[1] and caption[2].lstrip("‏").startswith("<i>")
     folder = tmp_path / "analyses" / "2026-03-20" / "210507-NYSE_SYN"
     kept = sorted(p.suffix for p in folder.iterdir())
     assert kept == [".html", ".json", ".json", ".pine", ".png", ".svg"]

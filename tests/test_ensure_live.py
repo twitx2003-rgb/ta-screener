@@ -46,11 +46,12 @@ def test_runs_since_asks_for_runs_created_after_the_close():
 
     def get(url, headers):
         asked.append(url)
-        return {"workflow_runs": [{"status": "completed", "conclusion": "failure", "id": 1}]}
+        return {"workflow_runs": [{"status": "completed", "conclusion": "failure", "id": 1,
+                                   "updated_at": "2026-01-05T22:00:00Z"}]}
 
     since = datetime(2026, 1, 5, 21, 15, tzinfo=timezone.utc)
     assert github.runs_since("run.yml", since, token="t", get=get) == [
-        {"status": "completed", "conclusion": "failure"}]
+        {"status": "completed", "conclusion": "failure", "updated_at": "2026-01-05T22:00:00Z"}]
     assert "created=%3E%3D2026-01-05T21%3A15%3A00Z" in asked[0]
     assert github.runs_since("run.yml", since, token="t", get=lambda u, h: None) is None
     assert github.runs_since("run.yml", since, token="") is None
@@ -89,3 +90,18 @@ def test_the_nightly_run_is_started_only_when_due_and_no_run_succeeded(monkeypat
     monkeypatch.setattr(github, "runs_since", lambda wf, since: [])
     run.ensure_nightly(settings, now=friday_night)
     assert started == ["run.yml", "run.yml"]
+
+
+def test_a_failed_nightly_run_is_tried_again_only_after_a_gap(monkeypatch, capsys):
+    import run
+
+    started = []
+    monkeypatch.setattr(github, "dispatch", lambda wf, inputs: started.append(wf) or 204)
+    settings = run.load_settings()
+    monday_night = datetime(2026, 1, 6, 6, 0, tzinfo=timezone.utc)         # 01:00 New York
+    for ended, expected in (("2026-01-06T05:40:00Z", []), ("2026-01-06T04:55:00Z", ["run.yml"])):
+        failed = {"status": "completed", "conclusion": "failure", "updated_at": ended}
+        monkeypatch.setattr(github, "runs_since", lambda wf, since, failed=failed: [failed])
+        run.ensure_nightly(settings, now=monday_night)
+        assert started == expected
+    assert capsys.readouterr().out.splitlines()[0] == "ensure-nightly: waiting (1 failed, the last 20 min ago)"

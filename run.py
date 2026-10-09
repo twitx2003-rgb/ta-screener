@@ -1337,6 +1337,9 @@ def ensure_live(settings, now=None) -> int:
 NIGHTLY_FROM = 135        # minutes after the close (16:15 New York): the 21:40 UTC slot had its chance
 NIGHTLY_UNTIL = (7, 0)    # New York, the next morning: before the live watch (07:20) reads the scan
 NIGHTLY_TRIES = 3         # failed runs a night before the guard stops (each one tells the owner)
+# After a failed run, the next one waits this long (2026-10-08: the three tries came ten minutes
+# apart, all inside one TradingView outage, and the night was lost)
+NIGHTLY_GAP = 60          # minutes
 
 
 def ensure_nightly(settings, now=None) -> int:
@@ -1375,6 +1378,12 @@ def ensure_nightly(settings, now=None) -> int:
     failed = sum(r["conclusion"] == "failure" for r in runs)
     if failed >= NIGHTLY_TRIES:
         print(f"ensure-nightly: gave up ({failed} runs failed)")
+        return 0
+    ended = [datetime.fromisoformat(r["updated_at"]) for r in runs
+             if r["conclusion"] == "failure" and r.get("updated_at")]
+    if ended and now - max(ended) < timedelta(minutes=NIGHTLY_GAP):
+        print(f"ensure-nightly: waiting ({failed} failed, the last "
+              f"{(now - max(ended)).total_seconds() / 60:.0f} min ago)")
         return 0
     status = github.dispatch("run.yml", {"save": "true"})       # a dispatch saves only when asked
     print(f"ensure-nightly: started ({status}, {failed} failed before)")

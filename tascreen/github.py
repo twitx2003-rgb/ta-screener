@@ -66,7 +66,7 @@ def active_runs(workflow: str, *, token: str | None = None, repo: str = REPO,
 def runs_since(workflow: str, since: datetime, *, token: str | None = None, repo: str = REPO,
                get: Callable[[str, dict[str, str]], dict | None] = _get) -> list[dict[str, str]] | None:
     """The runs of `workflow` created at or after `since`, newest first, each with its
-    `status` and `conclusion` (None while it runs); None if unknown."""
+    `status`, `conclusion` (None while it runs) and `updated_at` (ISO, UTC); None if unknown."""
     token = (token if token is not None else os.environ.get("GH_DISPATCH_TOKEN", "")).strip()
     if not token:
         return None
@@ -75,7 +75,8 @@ def runs_since(workflow: str, since: datetime, *, token: str | None = None, repo
                  f"&created={urllib.parse.quote('>=' + after)}", _headers(token))
     if not isinstance(answer, dict) or not isinstance(answer.get("workflow_runs"), list):
         return None
-    return [{"status": str(r.get("status")), "conclusion": r.get("conclusion")}
+    return [{"status": str(r.get("status")), "conclusion": r.get("conclusion"),
+             "updated_at": r.get("updated_at")}
             for r in answer["workflow_runs"] if isinstance(r, dict)]
 
 

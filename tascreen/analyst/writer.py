@@ -638,9 +638,7 @@ def telegram_html(written: dict[str, Any]) -> str:
             lines.append("")                     # a blank line between sections
             text = html.escape(part["text"])
             if part["part"] == "headline":
-                lead, colon, rest = text.partition(":")
-                lines.append(f"{light}\u200f <b>{lead}:</b>{rest}" if colon and len(lead) <= 45
-                             else f"{light}\u200f <b>{text}</b>")
+                lines.append(_headline_html(part))
             else:
                 lines.append(f"{light}\u200f <b>{html.escape(part['title'])}:</b> {text}".strip())
         lines.append("")
@@ -651,6 +649,28 @@ def telegram_html(written: dict[str, Any]) -> str:
         if len(message) <= TELEGRAM_LIMIT or not optional:
             return message
         parts.remove(optional[-1])
+
+
+def _headline_html(part: dict[str, Any]) -> str:
+    """The headline with only its lead in bold (review round 3)."""
+    light = LIGHTS.get(part.get("signal"), "")
+    text = html.escape(part["text"])
+    lead, colon, rest = text.partition(":")
+    return (f"{light}\u200f <b>{lead}:</b>{rest}" if colon and len(lead) <= 45
+            else f"{light}\u200f <b>{text}</b>")
+
+
+def telegram_caption(written: dict[str, Any] | None, analysis: Analysis) -> str:
+    """What is sent (owner, 2026-10-09: "only the analysis with the picture and a short line
+    on what the stock is doing"): the chart with the headline as its caption, no sections or
+    scenarios (they stay in the archived analysis, and the chart still draws what they cite).
+    The chart's header already shows the close and the day's change. Without a headline,
+    the levels caption. Telegram HTML, under the 1024-character caption limit."""
+    ticker = analysis.symbol.split(":")[-1]
+    headline = next((p for p in (written or {}).get("parts", []) if p["part"] == "headline"), None)
+    line = _headline_html(headline) if headline else html.escape(photo_caption(analysis))
+    return "\n".join([f"<b>{html.escape(f'📊 ניתוח טכני · {ticker}')}</b>", line,
+                      f"<i>{html.escape(DISCLAIMER)}</i>"])
 
 
 def photo_caption(analysis: Analysis) -> str:

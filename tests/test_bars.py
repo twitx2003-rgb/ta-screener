@@ -184,17 +184,34 @@ class _FlakyClient(FakeClient):
         return asyncio.run(work(self.session))
 
 
-def test_a_failed_session_costs_its_batch_only(tmp_path):
+def test_a_failed_session_is_tried_again_after_a_pause(tmp_path):
     job = _job(tmp_path, session_batch=2)
     client = _FlakyClient(FakeOhlcv(DAY), broken={2})
-    report = update_all(client, job, ["A:1", "A:2", "A:3", "A:4", "A:5"], progress=lambda l: None)
-    assert report["counts"] == {"new": 3, "failed": 2}
+    waits = []
+    report = update_all(client, job, ["A:1", "A:2", "A:3", "A:4", "A:5"], progress=lambda l: None,
+                        wait=waits.append)
+    assert report["counts"] == {"new": 5}
+    assert waits == [120] and client.sessions_opened == 4
+
+
+def test_no_pause_runs_past_the_deadline(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    job = _job(tmp_path, session_batch=2)
+    job.stop_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+    client = _FlakyClient(FakeOhlcv(DAY), broken={2})
+    waits = []
+    report = update_all(client, job, ["A:1", "A:2", "A:3", "A:4", "A:5"], progress=lambda l: None,
+                        wait=waits.append)
+    assert report["counts"] == {"new": 3, "failed": 2} and waits == []
     assert "session failed" in report["failed"]["A:3"]
 
 
 def test_sessions_that_keep_failing_defer_the_rest(tmp_path):
     job = _job(tmp_path, session_batch=1)
     client = _FlakyClient(FakeOhlcv(DAY), broken={1, 2, 3, 4, 5})
-    report = update_all(client, job, [f"A:{i}" for i in range(6)], progress=lambda l: None)
-    assert report["counts"] == {"failed": 3, "deferred": 3}
-    assert client.sessions_opened == 3                        # no more knocking after three
+    waits = []
+    report = update_all(client, job, [f"A:{i}" for i in range(6)], progress=lambda l: None,
+                        wait=waits.append)
+    assert report["counts"] == {"failed": 1, "deferred": 5}
+    assert client.sessions_opened == 3 and waits == [120, 600]   # no more knocking after three

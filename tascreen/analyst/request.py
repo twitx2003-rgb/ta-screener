@@ -75,10 +75,10 @@ def produce(symbol: str, bars: pd.DataFrame, folder: Path, *, llm: LLM | None = 
         if to_png is None:
             from .png import svg_to_png as to_png
         png = to_png(svg, folder / f"{stem}.png")
-        bot.send_photo(png.read_bytes(), writer.photo_caption(analysis), f"{stem}.png")
-        if message:
-            bot.send(message, html=True)
-        # the Pine Script is kept with the analysis, not sent (owner, 2026-09-29: not needed)
+        # one message: the chart and a short line (owner, 2026-10-09); the full text is kept
+        # with the analysis, and so is the Pine Script (owner, 2026-09-29: not needed)
+        bot.send_photo(png.read_bytes(), writer.telegram_caption(written, analysis), f"{stem}.png",
+                       html=True)
     return {"symbol": symbol, "last_day": analysis.last_day, "stem": stem, "folder": folder,
             "analysis": analysis, "written": written}
 

@@ -164,7 +164,12 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   pole-direction breaks; high-tight flag gets a pole-height target; doubles, triples and
   H&S must break out within their own length (`max_breakout_wait_share`). 2026-10-06: at
   most 100 daily candles (170 looked weekly), and a live crossing draws the session's breaking
-  candle (`alerts.split_today`). Next: the same drawing and a shorter text in the `$SYMBOL` analysis.
+  candle (`alerts.split_today`). 2026-10-09: the `$SYMBOL` analysis is one message, the chart
+  with the headline as its caption (`writer.telegram_caption`; the full text stays archived).
+  Next: the same drawing (`chart_svg.py` style) in that chart.
+- TradingView outages (2026-10-08: 502/503 and timeouts all night): a broken bars session
+  is retried after 2 and 10 min (`bars.BROKEN_PAUSES_S`), and `--ensure-nightly` waits
+  60 min after a failed run (`NIGHTLY_GAP`).
 - Support tests (2026-10-05, `analyst/support.py`, `knowledge/support.md`): the 20/150-day
   averages as support (holds, breaks, strength with the bounce's volume not weak), the latest
   close across each, and retests after pattern/zone/150-day breakouts. A program-written
