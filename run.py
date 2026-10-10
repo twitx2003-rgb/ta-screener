@@ -1812,6 +1812,10 @@ def xnews_pass(settings) -> int:
         llm_factory=lambda: ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s),
         send=lambda text: bot.send(text, html=True),
         send_photo=lambda url, caption: bot.send_photo_url(url, caption, html=True),
+        # a story without a photo of its own gets a drawn one (owner, 2026-10-10)
+        picture=lambda post, pick: xnews.card_png(post, pick, data_dir=settings.data_dir, now=now),
+        send_png=lambda png, caption: bot.send_photo(png, caption, "news.png", html=True),
+        send_album=bot.send_album,
         state_path=state_path, now=now,
         min_importance=cfg.min_importance, daily_read_cap=cfg.daily_read_cap,
         weekend_min_importance=cfg.weekend_min_importance,

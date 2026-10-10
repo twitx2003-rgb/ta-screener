@@ -4,10 +4,16 @@
   `zone_merge_atr` ATRs of each other are one zone; a zone tested at least
   `zone_min_touches` times is kept, the nearest `zones_each_side` above and below the
   last close. Above the close it is resistance, below it support.
-- Trendlines: through two turning points of the same kind (lows for support, highs for
-  resistance), confirmed by a third within `trendline_touch_atr` ATRs, never closed
-  through by more than `trendline_break_atr` ATRs since the first point, last touched
-  within `trendline_recent_sessions`. The best one per kind: most touches, then longest.
+- Trendlines: along the edge of the wicks, the way one is drawn by hand: from a turning
+  point of the kind (a low for support, a high for resistance), each edge of the lows'
+  (highs') convex hull from it to a few sessions ago is a line through two wicks that no
+  wick goes through. A touch is a wick that is a local extreme within `trendline_touch_atr`
+  ATRs of the line (bars this close together count once); at least `trendline_min_touches`.
+  The last FRESH_TEST sessions may test it with a wick, not close more than
+  `trendline_break_atr` ATRs through it. Last touched within `trendline_recent_sessions`.
+  The best one per kind: most touches, then longest. (Owner, 2026-10-10: lines "that do
+  not hit the candles exactly": through two turning points, a third touch could sit a third
+  of an ATR off the line and candles crossed it.)
 - Fibonacci: the last completed major swing (pivots at `major_pivot_atr`): retracement
   levels back from its end, extensions beyond it.
 """
@@ -20,6 +26,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ..patterns.chart import edge_lines
 from ..patterns.pivots import Pivot, zigzag
 
 
@@ -106,39 +113,56 @@ def sr_zones(bars: pd.DataFrame, piv: list[Pivot], atr_now: float, rules: dict[s
     return keep
 
 
+TOUCH_GAP = 3                  # wicks this many bars apart or closer are one touch
+FRESH_TEST = 3                 # the last sessions may be testing the line with a wick
+
+
+def _local_extremes(values: np.ndarray, low: bool, reach: int = 2) -> np.ndarray:
+    """Bars whose low (high) is the lowest (highest) within `reach` bars on each side."""
+    n = len(values)
+    out = np.zeros(n, bool)
+    for i in range(n):
+        window = values[max(0, i - reach):min(n, i + reach + 1)]
+        out[i] = values[i] == (np.nanmin(window) if low else np.nanmax(window))
+    return out
+
+
 def _best_line(bars: pd.DataFrame, points: list[Pivot], atr: np.ndarray, kind: str,
                rules: dict[str, Any]) -> Trendline | None:
+    support = kind == "support"
     closes = bars["close"].to_numpy(float)
+    tips = bars["low" if support else "high"].to_numpy(float)
+    extreme = _local_extremes(tips, support)
     last = len(bars) - 1
+    settled = last - FRESH_TEST
+    unit = np.nan_to_num(atr, nan=float(np.nanmedian(atr)))
+    tried: set[tuple[float, float]] = set()
     best = None
-    for x in range(len(points)):
-        for y in range(x + 1, len(points)):
-            p, q = points[x], points[y]
-            if q.i == p.i:
+    for p in points:
+        if p.i >= settled:
+            continue
+        for a, b in edge_lines(tips, p.i, settled, upper=not support):
+            if (round(a, 6), round(b, 9)) in tried:
                 continue
-            b = (q.price - p.price) / (q.i - p.i)
-            a = p.price - b * p.i
-            idx = np.arange(p.i, last + 1)
-            line = a + b * idx
-            tol = rules["trendline_break_atr"] * np.nan_to_num(atr[p.i:last + 1], nan=np.nanmedian(atr))
-            beyond = closes[p.i:] < line - tol if kind == "support" else closes[p.i:] > line + tol
-            if beyond.any():
-                continue                        # closed through: not a live line
-            touch = rules["trendline_touch_atr"]
-            touching = [r for r in points if r.i >= p.i
-                        and abs(r.price - (a + b * r.i)) <= touch * (atr[r.i] if math.isfinite(atr[r.i]) else 0)]
+            tried.add((round(a, 6), round(b, 9)))
+            line = a + b * np.arange(p.i, last + 1)
+            gap = np.abs(tips[p.i:] - line) / unit[p.i:]
+            near = np.flatnonzero(extreme[p.i:] & (gap <= rules["trendline_touch_atr"])) + p.i
+            touching = [int(i) for k, i in enumerate(near) if k == 0 or i - near[k - 1] > TOUCH_GAP]
             if len(touching) < rules["trendline_min_touches"]:
                 continue
-            last_touch = max(r.i for r in touching)
+            through = ((line - closes[p.i:]) if support else (closes[p.i:] - line)) / unit[p.i:]
+            if (through[settled - p.i + 1:] > rules["trendline_break_atr"]).any():
+                continue                        # closed through lately: not a live line
+            last_touch = int(near[-1])
             if last - last_touch > rules["trendline_recent_sessions"]:
                 continue
-            now_atr = atr[last] if math.isfinite(atr[last]) else np.nanmedian(atr)
-            if abs(a + b * last - closes[last]) > rules["trendline_max_distance_atr"] * now_atr:
+            if abs(a + b * last - closes[last]) > rules["trendline_max_distance_atr"] * unit[last]:
                 continue
-            key = (len(touching), last_touch - p.i)
+            key = (len(touching), last_touch - touching[0])
             if best is None or key > best[0]:
-                best = (key, Trendline("", kind, p.i, q.i, a, b, len(touching), last_touch,
-                                        _day(bars, p.i), _day(bars, q.i)))
+                best = (key, Trendline("", kind, touching[0], touching[1], a, b, len(touching), last_touch,
+                                        _day(bars, touching[0]), _day(bars, touching[1])))
     return best[1] if best else None
 
 

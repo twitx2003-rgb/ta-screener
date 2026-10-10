@@ -51,7 +51,10 @@ class ToolFailed(ProviderError):
 
 
 class RateLimited(ToolFailed):
-    """The failure is a 429 from TradingView's backend; worth retrying."""
+    """The failure is a 429 from TradingView's backend; worth retrying. `retry_after` is
+    the wait the server asked for (an HTTP 429 from the MCP endpoint: 60 s), else 0."""
+
+    retry_after: float = 0.0
 
 
 class ShapeNotMapped(ProviderError):
@@ -155,6 +158,7 @@ class TradingViewData:
                 if delay is None:
                     raise RateLimited(f"{exc} (still rate limited after "
                                       f"{len(self.delays) + 1} attempts)") from None
+                delay = max(delay, exc.retry_after)
                 log.warning("%s rate limited by TradingView; retrying in %.0fs", tool, delay)
                 self.sleep(delay)
         raise AssertionError("unreachable")
@@ -175,6 +179,7 @@ async def fetch_in_session(session: Any, tool: str, arguments: dict[str, Any], *
             if delay is None:
                 raise RateLimited(f"{exc} (still rate limited after "
                                   f"{len(delays) + 1} attempts)") from None
+            delay = max(delay, exc.retry_after)
             log.warning("%s rate limited by TradingView; retrying in %.0fs", tool, delay)
             await sleep(delay)
     raise AssertionError("unreachable")

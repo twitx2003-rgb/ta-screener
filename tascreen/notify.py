@@ -166,19 +166,28 @@ class Telegram:
 
     ALBUM = 10                          # Telegram: 2..10 photos in one media group
 
-    def send_album(self, photos: list[tuple[bytes, str]]) -> None:
-        """Photos with their HTML captions (each under 1024 characters), in albums of up
-        to ten; a lone photo goes as a plain photo (an album needs two)."""
+    def send_album(self, photos: list[tuple[bytes | str, str]]) -> None:
+        """Photos (PNG bytes, or an address Telegram fetches itself) with their HTML captions
+        (each under 1024 characters), in albums of up to ten; a lone photo goes as a plain
+        photo (an album needs two)."""
         for start in range(0, len(photos), self.ALBUM):
             batch = photos[start:start + self.ALBUM]
             if len(batch) == 1:
-                self.send_photo(batch[0][0], batch[0][1], html=True)
+                content, text = batch[0]
+                if isinstance(content, str):
+                    self.send_photo_url(content, text, html=True)
+                else:
+                    self.send_photo(content, text, html=True)
                 continue
-            media = [{"type": "photo", "media": f"attach://p{n}", "caption": _caption_of(caption),
-                      "parse_mode": "HTML"} for n, (_, caption) in enumerate(batch)]
-            files = [(f"p{n}", f"p{n}.png", content, "image/png") for n, (content, _) in enumerate(batch)]
+            media = [{"type": "photo", "media": content if isinstance(content, str) else f"attach://p{n}",
+                      "caption": _caption_of(text), "parse_mode": "HTML"} for n, (content, text) in enumerate(batch)]
+            files = [(f"p{n}", f"p{n}.png", content, "image/png") for n, (content, _) in enumerate(batch)
+                     if not isinstance(content, str)]
             params = {"chat_id": self._chat(), "media": json.dumps(media, ensure_ascii=False)}
-            self._answer("sendMediaGroup", self._upload("sendMediaGroup", params, files))
+            if files:
+                self._answer("sendMediaGroup", self._upload("sendMediaGroup", params, files))
+            else:
+                self.call("sendMediaGroup", **params)
 
     def send_document(self, content: bytes, filename: str, caption: str = "") -> None:
         params = {"chat_id": self._chat(), "caption": _caption_of(caption)}

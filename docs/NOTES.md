@@ -284,7 +284,9 @@ read the section you need here.
 - A failed call has `is_error: false` and a payload of `{"success": false, "error": ...}`.
 - Scanner-backed tools answer 429 for hours at a time: `run-screener`,
   `get-symbol-data(-batch)`, `get-earnings-calendar` and `get-financials`. `get-ohlcv`
-  has not been rate limited.
+  was not rate limited until the evening of 2026-10-07 (897 calls in 9 min that morning); since then the MCP endpoint itself
+  limits every call: `x-ratelimit-limit: 20` per server behind the balancer (about 60 calls
+  a minute in all), then HTTP 429 with `retry-after: 60` (`mcp_client.CALL_SPACING_S`).
 - `get-ohlcv` returns bars `[{t,o,h,l,c,v}]`, oldest first, with `t` in unix seconds at
   the session open. The newest bar can be today's live session.
 - `run-screener` arguments:

@@ -87,6 +87,18 @@ def test_charts_go_in_albums_of_ten():
     assert uploads[2][1]["parse_mode"] == "HTML" and uploads[2][2][0] == "photo"
 
 
+def test_an_album_may_hold_addresses_telegram_fetches_itself():
+    uploads, posts = [], []
+    bot = Telegram("123456:" + "x" * 30, 42, post=lambda m, p: posts.append((m, p)) or {"ok": True},
+                   upload=lambda m, p, f: uploads.append((m, p, f)) or {"ok": True})
+    bot.send_album([("https://pbs.twimg.com/media/synthetic.jpg", "a"), (b"PNG", "")])
+    media = json.loads(uploads[0][1]["media"])
+    assert media[0]["media"] == "https://pbs.twimg.com/media/synthetic.jpg" and media[1]["media"] == "attach://p1"
+    assert [f[0] for f in uploads[0][2]] == ["p1"]
+    bot.send_album([("https://pbs.twimg.com/media/a.jpg", "a"), ("https://pbs.twimg.com/media/b.jpg", "")])
+    assert posts[-1][0] == "sendMediaGroup" and len(uploads) == 1        # no file: a plain call
+
+
 def test_several_files_in_one_multipart_body():
     captured = {}
     bot = Telegram("123456:" + "x" * 30, 42)

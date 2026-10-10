@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import os
 import re
 import urllib.error
@@ -37,6 +38,8 @@ from .analyst.text_rules import banned, style_warnings
 from . import watchlist
 from .fields import pick
 from .llm import UsageLimit
+
+log = logging.getLogger(__name__)
 
 API = "https://api.twitterapi.io"
 CREDENTIALS = Path("~/.ta-screener/x.json")
@@ -473,30 +476,114 @@ def message(picks: list[tuple[Post, dict]]) -> str:
     return parts[0][:3900]
 
 
-def deliver(picks: list[tuple[Post, dict]], send: Callable[[str], None],
-            send_photo: Callable[[str, str], None] | None) -> int:
-    """A round's picks in one message (owner, 2026-10-01: "two stories in a round go in one
-    message, not two"): with two or more, every pick is text, a photo's place taken by the
-    line that says what it shows (the link opens the post with it). A lone pick with a photo
-    goes as the photo, its line as the caption (under Telegram's 1024); a photo Telegram
-    cannot fetch goes as text instead. Returns how many went with a photo."""
-    if len(picks) > 1:
-        text = "\n\n".join(item(post, pick_, with_image=True) for post, pick_ in picks)
-        send(text if len(text) <= 4000 else message(picks))
-        return 0
-    with_photo = [(p, k) for p, k in picks
-                  if p.photo and send_photo is not None and len(item(p, k, with_image=True)) <= 1024]
-    plain = [(p, k) for p, k in picks if (p, k) not in with_photo]
-    if plain:
-        send(message(plain))
-    photos = 0
-    for post, pick_ in with_photo:
+CAPTION_MAX = 1024           # Telegram's limit for a photo's caption
+
+
+def story_symbol(pick_: dict, bars_dir: Path) -> str | None:
+    """The first stock the story names that has stored bars ("NVDA" -> "NASDAQ:NVDA")."""
+    from .analyst import find_symbol
+    from .errors import ConfigError
+
+    for ticker in TICKER.findall(str(pick_.get("summary_he", ""))):
+        if ticker in NOT_COMPANIES:
+            continue
         try:
-            send_photo(post.photo, item(post, pick_, with_image=True))
-            photos += 1
-        except ProviderError:
-            send(message([(post, pick_)]))
-    return photos
+            return find_symbol(bars_dir, ticker)
+        except ConfigError:
+            continue
+    return None
+
+
+def card_png(post: Post, pick_: dict, *, data_dir: Path, now: datetime,
+             tz: str = "Asia/Jerusalem") -> bytes:
+    """A picture drawn for a story that came without one (tascreen/news_card.py), with the
+    named stock's recent candles when its bars are stored."""
+    import tempfile
+
+    from . import news_card
+    from .store import Store
+
+    chart = None
+    symbol = story_symbol(pick_, data_dir / "bars") if (data_dir / "bars").exists() else None
+    if symbol:
+        bars = Store(data_dir).read_bars(symbol)
+        chart = news_card.stock_chart(bars, symbol) if bars is not None else None
+    when = now.astimezone(ZoneInfo(tz)).strftime("%H:%M · %d/%m")
+    with tempfile.TemporaryDirectory(prefix="news-card-", ignore_cleanup_errors=True) as folder:
+        png = news_card.to_png(Path(folder), f"news-{post.id}", headline=pick_["summary_he"],
+                               why=pick_.get("analysis_he", ""), author=post.author,
+                               importance=int(pick_["importance"]), when=when, chart=chart)
+        return png.read_bytes()
+
+
+def deliver(picks: list[tuple[Post, dict]], send: Callable[[str], None],
+            send_photo: Callable[[str, str], None] | None, *,
+            picture: Callable[[Post, dict], bytes | None] | None = None,
+            send_png: Callable[[bytes, str], None] | None = None,
+            send_album: Callable[[list[tuple[bytes | str, str]]], None] | None = None) -> int:
+    """A round's picks in one message (owner, 2026-10-01: "two stories in a round go in one
+    message, not two"), each with a picture where possible (owner, 2026-10-10): the post's
+    own photo, else one drawn for it (`picture`, tascreen/news_card.py). A lone pick goes
+    as its picture with its text as the caption; two or more go as one album whose first
+    picture carries the whole text (or each its own, when the whole is over Telegram's 1024).
+    A photo Telegram cannot fetch is replaced by a drawn one; with no picture at all the text
+    goes alone. Returns how many pictures went."""
+    def drawn(post: Post, pick_: dict) -> bytes | None:
+        if picture is None:
+            return None
+        try:
+            return picture(post, pick_)
+        except Exception as exc:  # noqa: BLE001 — a card never blocks the news
+            log.warning("news card for %s failed: %s", post.id, type(exc).__name__)
+            return None
+
+    texts = [item(post, pick_, with_image=True) for post, pick_ in picks]
+    if len(picks) == 1:
+        (post, pick_), text = picks[0], texts[0]
+        if len(text) <= CAPTION_MAX:
+            if post.photo and send_photo is not None:
+                try:
+                    send_photo(post.photo, text)
+                    return 1
+                except ProviderError:
+                    pass                     # Telegram could not fetch it: a drawn one instead
+            png = drawn(post, pick_) if send_png is not None else None
+            if png is not None:
+                try:
+                    send_png(png, text)
+                    return 1
+                except ProviderError:
+                    pass
+        send(message(picks))
+        return 0
+    whole = "\n\n".join(texts)
+    if send_album is not None:
+        def album(own_only: bool) -> list[tuple[bytes | str, str]] | None:
+            shots = []
+            for (post, pick_), text in zip(picks, texts):
+                shot = post.photo if post.photo and send_photo is not None and not own_only else drawn(post, pick_)
+                if shot is not None:
+                    shots.append((shot, text))
+            if not shots:
+                return None
+            if len(whole) <= CAPTION_MAX:
+                return [(shots[0][0], whole)] + [(shot, "") for shot, _ in shots[1:]]
+            if len(shots) == len(picks) and all(len(text) <= CAPTION_MAX for _, text in shots):
+                return shots
+            return None
+
+        first = album(own_only=False)
+        fetched = first is not None and any(isinstance(shot, str) for shot, _ in first)
+        for shots in [first] + ([album(own_only=True)] if fetched else []):
+            if not shots:
+                continue
+            try:
+                send_album(shots)
+                return len(shots)
+            except ProviderError:
+                continue                     # a photo Telegram could not fetch: drawn ones
+    send(whole if len(whole) <= 4000 else message(picks))
+    return 0
 
 
 # --- one run ------------------------------------------------------------------------------
@@ -547,6 +634,9 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
              max_per_round: int = 2, daily_max: int = 12, low_balance_usd: float = 0.0,
              holdings: list[str] | tuple = (), send_private: Callable[[str], None] | None = None,
              send_photo: Callable[[str, str], None] | None = None,
+             picture: Callable[[Post, dict], bytes | None] | None = None,
+             send_png: Callable[[bytes, str], None] | None = None,
+             send_album: Callable[[list[tuple[bytes | str, str]]], None] | None = None,
              fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
              first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
     """Read, pick, send, remember. Returns counts only (safe for the public log).
@@ -649,7 +739,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             send_private(watchlist.NEWS_HEAD + "\n\n" + message(mine))
             summary["holding_news"] = len(mine)
         if picks:
-            summary["photos"] = deliver(picks, send, send_photo)
+            summary["photos"] = deliver(picks, send, send_photo, picture=picture, send_png=send_png,
+                                        send_album=send_album)
             sent_recent += [{"at": stamp, "author": p.author, "summary_he": k["summary_he"]}
                             for p, k in picks]
         summary["sent"] = len(picks)

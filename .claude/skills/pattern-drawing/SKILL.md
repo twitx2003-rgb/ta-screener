@@ -30,7 +30,9 @@ ink that carries no information (Tufte's data-ink; NN/g "clutter charts").
    its low. A marker floating off the candle is a bug.
 3. **A line passes through its touches.** A touch is within the tolerance in
    `rules.yaml` (`general`); a close beyond a line before the breakout means the pattern
-   is invalid, not that the line should be bent.
+   is invalid, not that the line should be bent. A sloped line lies on the wicks: it is an
+   edge of the hull of the pattern's highs (lows), through two wicks with none beyond it
+   (`patterns.chart.edge_lines`; owner, 2026-10-10), never a fit that runs between them.
 4. **The breakout is a close, not a wick**, on a finished session (after 16:15 New York,
    `market_hours`). It is the first such close beyond the line. For a sloped line, the
    line's value is evaluated **on the breakout bar**, not at its last touch.

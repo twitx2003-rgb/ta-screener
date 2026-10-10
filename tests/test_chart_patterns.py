@@ -243,3 +243,51 @@ def test_a_breakout_later_than_the_pattern_is_long_confirms_nothing():
             pts = [dates.index(p["date"][:10]) for p in json.loads(d.row()["points_json"])]
             wait = dates.index(str(d.breakout_date)[:10]) - max(pts)
             assert wait <= max(pts) - min(pts)
+
+
+# ------------------------------------------------- lines on the candles' tips
+def _wicks_off_their_lines(bars, det):
+    """How far (in price) the pattern's sloped lines miss the tips they claim: the largest
+    wick beyond a line from its start to its last pivot, and the number of wicks exactly on it."""
+    days = bars["timestamp"].dt.strftime("%Y-%m-%d").tolist()
+    end = days.index(str(det.end)[:10])
+    out = []
+    for ln in json.loads(det.row()["lines_json"]):
+        if ln["label"] not in ("קו עליון", "קו תחתון"):
+            continue
+        upper = ln["label"] == "קו עליון"
+        i1, i2 = days.index(ln["x1"][:10]), days.index(ln["x2"][:10])
+        slope = (ln["y2"] - ln["y1"]) / (i2 - i1)
+        tips = bars["high" if upper else "low"].to_numpy(float)
+        beyond = [(tips[i] - (ln["y1"] + slope * (i - i1))) * (1 if upper else -1) for i in range(i1, end + 1)]
+        out.append((max(beyond), sum(abs(b) < 1e-6 for b in beyond)))
+    return out
+
+
+def test_every_sloped_line_runs_through_two_wicks_and_no_wick_crosses_it():
+    from tascreen.patterns.chart import edge_lines
+
+    rng = np.random.default_rng(5)
+    highs = 100 + rng.normal(0, 2, 60)
+    for upper in (True, False):
+        for a, b in edge_lines(highs, 5, 50, upper):
+            line = a + b * np.arange(5, 51)
+            beyond = (highs[5:51] - line) * (1 if upper else -1)
+            assert beyond.max() <= 1e-9 and (np.abs(beyond) < 1e-9).sum() >= 2
+    knots = [(0, 50), (60, 50), (66, 60), (68, 58.2), (70, 59.4), (72, 57.6), (74, 58.8),
+             (76, 57.2), (78, 62), (79, 62.5)]
+    bars = from_knots(knots, noise=0.02, wiggle=0.15)
+    for det in detect(bars):
+        for worst, exact in _wicks_off_their_lines(bars, det):
+            assert worst <= 1e-6 and exact >= 2
+
+
+def test_a_flag_pole_ends_on_its_highest_bar():
+    knots = [(0, 50), (60, 50), (66, 60), (68, 58.2), (70, 59.4), (72, 57.6), (74, 58.8),
+             (76, 57.2), (78, 62), (79, 62.5)]
+    bars = from_knots(knots, noise=0.02, wiggle=0.15)
+    days = bars["timestamp"].dt.strftime("%Y-%m-%d").tolist()
+    for det in detect(bars):
+        if det.pattern in ("flag", "pennant"):
+            start, top = (days.index(str(p["date"])[:10]) for p in det.points)
+            assert bars["high"].iloc[top] == bars["high"].iloc[start:top + 1].max()

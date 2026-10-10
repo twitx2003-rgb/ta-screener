@@ -54,6 +54,39 @@ def test_rising_lows_make_a_support_line_until_a_close_breaks_it():
     assert not [t for t in lines if t.kind == "support" and t.i1 < 60]
 
 
+def test_a_trendline_sits_on_the_wicks_and_no_candle_crosses_it():
+    # rising lows with one deep wick between two of them: the line rests on that wick or
+    # under it, never through it (owner, 2026-10-10)
+    bars = from_knots(RISING)
+    bars.loc[50, "low"] = bars["low"].iloc[50] - 3.0
+    atr = _atr(bars)
+    for line in trendlines(bars, pivots(bars, atr, RULES["minor_pivot_atr"]), atr, RULES):
+        tips = bars["low" if line.kind == "support" else "high"].to_numpy(float)
+        idx = np.arange(line.i1, len(bars) - 3)
+        beyond = (line.at(idx) - tips[idx]) if line.kind == "support" else (tips[idx] - line.at(idx))
+        assert beyond.max() <= 1e-9
+        assert abs(tips[line.i1] - line.at(line.i1)) <= 1e-9 and abs(tips[line.i2] - line.at(line.i2)) <= 1e-9
+
+
+def test_a_trendline_from_before_the_window_is_cut_at_the_price_panel():
+    import re
+
+    from tascreen.analyst.chart import BOTTOM, H, TOP, VOLUME_SHARE
+
+    bars = from_knots([(0, 40), (400, 140)])
+    analysis = analyse(bars, "TEST:SYN")
+    days = bars["timestamp"].dt.strftime("%Y-%m-%d").tolist()
+    # a support line from the first bar, far under every price the window shows
+    analysis.drawings["tl_9"] = {"type": "line", "kind": "support", "day1": days[0], "price1": 0.0,
+                                 "day2": days[-1], "price2": 135.0, "touches": 3}
+    svg = render(bars, analysis, ["tl_9"])
+    panel_bottom = TOP + (H - TOP - BOTTOM) * (1 - VOLUME_SHARE) - 6
+    drawn = re.findall(r'<line class="ann" x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="([\d.]+)"', svg)
+    assert drawn
+    for y1, y2 in drawn:
+        assert TOP - 0.5 <= min(float(y1), float(y2)) and max(float(y1), float(y2)) <= panel_bottom + 0.5
+
+
 def test_fibonacci_of_the_last_major_swing():
     bars = from_knots([(0, 110), (20, 100), (60, 150), (75, 130)], noise=0.0, wiggle=0.0)
     atr = _atr(bars)

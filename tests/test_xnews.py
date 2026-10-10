@@ -544,3 +544,75 @@ def test_within_one_importance_a_company_story_goes_first():
                                  max_per_round=4, daily_max=30)
     assert [k["summary_he"] for _, k in sent] == ["הפד הוריד ריבית", "מניית ZQX זינקה"] and held == 1
     assert xnews.names_company({"summary_he": "ISM ו-PCE"}) is False
+
+
+# ------------------------------------------------- a picture for every story
+def _post(post_id, photo=""):
+    return xnews.Post(id=post_id, author="NewsDesk", text="t", url=f"https://x.com/NewsDesk/status/{post_id}",
+                      created_at="", is_reply=False, photo=photo)
+
+
+def _pick(summary="חדשה", importance=4):
+    return {"importance": importance, "summary_he": summary, "analysis_he": "", "sources": []}
+
+
+def test_a_lone_story_without_a_photo_goes_with_a_drawn_one():
+    sent, pngs = [], []
+    shown = xnews.deliver([(_post("201"), _pick())], sent.append, lambda u, c: None,
+                          picture=lambda post, pick: b"PNG", send_png=lambda png, c: pngs.append((png, c)))
+    assert shown == 1 and sent == [] and pngs[0][0] == b"PNG" and "status/201" in pngs[0][1]
+
+
+def test_two_stories_go_as_one_album_with_the_whole_text_on_the_first_picture():
+    albums = []
+    picks = [(_post("202", photo="https://pbs.twimg.com/media/synthetic.jpg"), _pick("ראשונה")),
+             (_post("203"), _pick("שנייה"))]
+    shown = xnews.deliver(picks, lambda t: pytest.fail("no text"), lambda u, c: None,
+                          picture=lambda post, pick: b"PNG", send_album=albums.append)
+    (album,) = albums
+    assert shown == 2 and album[0][0] == "https://pbs.twimg.com/media/synthetic.jpg" and album[1] == (b"PNG", "")
+    assert "ראשונה" in album[0][1] and "שנייה" in album[0][1]
+
+
+def test_an_album_whose_photo_telegram_refuses_goes_with_drawn_pictures():
+    albums = []
+
+    def album(shots):
+        albums.append(shots)
+        if any(isinstance(shot, str) for shot, _ in shots):
+            raise ProviderError("Telegram sendMediaGroup: failed to get HTTP URL content")
+
+    picks = [(_post("204", photo="https://pbs.twimg.com/media/synthetic.jpg"), _pick()), (_post("205"), _pick())]
+    assert xnews.deliver(picks, lambda t: None, lambda u, c: None, picture=lambda post, pick: b"PNG",
+                         send_album=album) == 2
+    assert [shot for shot, _ in albums[-1]] == [b"PNG", b"PNG"]
+
+
+def test_a_card_that_cannot_be_drawn_leaves_the_text():
+    sent = []
+
+    def broken(post, pick):
+        raise ProviderError("no browser")
+
+    assert xnews.deliver([(_post("206"), _pick())], sent.append, None, picture=broken,
+                         send_png=lambda png, c: pytest.fail("no picture")) == 0
+    assert len(sent) == 1 and "status/206" in sent[0]
+
+
+def test_the_card_names_the_stock_the_story_names(tmp_path):
+    bars = tmp_path / "bars"
+    bars.mkdir()
+    (bars / "NASDAQ_SYNT.parquet").write_bytes(b"")
+    assert xnews.story_symbol({"summary_he": "דוח CPI חם, ו-SYNT קפצה"}, bars) == "NASDAQ:SYNT"
+    assert xnews.story_symbol({"summary_he": "הפד: FOMC בלי שינוי"}, bars) is None
+
+
+def test_the_card_page_holds_the_story_and_the_candles():
+    from synth import from_knots
+    from tascreen import news_card
+
+    chart = news_card.stock_chart(from_knots([(0, 50), (40, 60), (80, 55)]), "NASDAQ:SYNT")
+    page, width, height = news_card.render_html(headline="חדשה <חשובה>", why="כי", author="NewsDesk",
+                                                importance=5, when="10:00 · 01/01", chart=chart)
+    assert (width, height) == (1080, 608) and "חדשה &lt;חשובה&gt;" in page and "מבזק" in page
+    assert page.count("<rect") == news_card.CHART_SESSIONS and "SYNT" in page

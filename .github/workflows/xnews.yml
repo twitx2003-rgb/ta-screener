@@ -59,6 +59,11 @@ jobs:
       - name: Get what was seen
         run: bash .github/xnews.sh restore
 
+      # a story without a photo gets a drawn picture, with the named stock's candles
+      # (owner, 2026-10-10); without the bars the picture goes without a chart
+      - name: Get the stored bars
+        run: bash .github/xnews.sh bars
+
       - name: Read, pick, send (a pass every 10 minutes for 5.5 hours)
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}

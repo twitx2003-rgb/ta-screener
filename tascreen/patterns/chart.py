@@ -318,9 +318,34 @@ def _head_shoulders(s: Series, top: bool) -> list[tuple[Detection, frozenset]]:
     return out
 
 
-# ------------------------------------------------ triangles, rectangles, wedges
+# ------------------------------------------------ lines on the candles' tips
+def edge_lines(values: np.ndarray, a: int, b: int, upper: bool) -> list[tuple[float, float]]:
+    """Every line (intercept, slope in bar units) along the edge of the bars a..b: the
+    edges of the convex hull of their highs (`upper`) or lows. Each passes through two
+    wicks and has no wick of a..b beyond it, the way a trendline is drawn by hand (owner,
+    2026-10-10: "lines that do not hit the candles exactly, and the analysis misses")."""
+    hull: list[tuple[int, float]] = []
+    for i in range(a, b + 1):
+        y = float(values[i])
+        if not math.isfinite(y):
+            continue
+        while len(hull) >= 2:
+            (x0, y0), (x1, y1) = hull[-2], hull[-1]
+            turn = (x1 - x0) * (y - y0) - (y1 - y0) * (i - x0)
+            if (turn >= 0) if upper else (turn <= 0):
+                hull.pop()
+            else:
+                break
+        hull.append((i, y))
+    lines = []
+    for (x0, y0), (x1, y1) in zip(hull, hull[1:]):
+        slope = (y1 - y0) / (x1 - x0)
+        lines.append((y0 - slope * x0, slope))
+    return lines
+
+
 def _fit(points: list[Pivot]) -> tuple[float, float]:
-    """Least-squares line y = a + b*i through the points."""
+    """Least-squares line y = a + b*i through the points (only a slope hint now)."""
     x = np.array([p.i for p in points], float)
     y = np.array([p.price for p in points], float)
     if len(points) == 2:
@@ -328,6 +353,22 @@ def _fit(points: list[Pivot]) -> tuple[float, float]:
         return y[0] - b * x[0], b
     b, a = np.polyfit(x, y, 1)
     return a, b
+
+
+def _edge_fit(s: Series, points: list[Pivot], a: int, b: int, upper: bool,
+              tol: float) -> tuple[float, float] | None:
+    """The line on the tips of bars a..b that the points lie on: of the edge lines, the one
+    with the most points within `tol`, then the one closest in slope to their least-squares
+    fit (which ran between the tips: no point on it, wicks through it; audit 2026-10-10)."""
+    lines = edge_lines(s.h if upper else s.l, a, b, upper)
+    if not lines:
+        return None
+    hint = _fit(points)[1]
+    return max(lines, key=lambda ln: (sum(abs(p.price - (ln[0] + ln[1] * p.i)) <= tol for p in points),
+                                      -abs(ln[1] - hint)))
+
+
+# ------------------------------------------------ triangles, rectangles, wedges
 
 
 def _classify(top_flat, bot_flat, b_top, b_bot) -> str | None:
@@ -355,16 +396,18 @@ def _trendline_candidate(s: Series, seq: list[Pivot]) -> tuple[Detection, frozen
     if len(highs) < 2 or len(lows) < 2:
         return None
     i0, i1 = seq[0].i, seq[-1].i
-    a_t, b_t = _fit(highs)
-    a_b, b_b = _fit(lows)
-    top = lambda i: a_t + b_t * i            # noqa: E731
-    bot = lambda i: a_b + b_b * i            # noqa: E731
-    if top(i0) <= bot(i0) or top(i1) <= bot(i1):
-        return None
     height = float(s.h[i0:i1 + 1].max() - s.l[i0:i1 + 1].min())
     tol = min(r.g("touch_tolerance_atr") * float(np.nanmedian(s.atr[i0:i1 + 1])),
               r.g("touch_tolerance_height") * height)
     if not height or math.isnan(tol):
+        return None
+    upper_line, lower_line = _edge_fit(s, highs, i0, i1, True, tol), _edge_fit(s, lows, i0, i1, False, tol)
+    if upper_line is None or lower_line is None:
+        return None
+    (a_t, b_t), (a_b, b_b) = upper_line, lower_line
+    top = lambda i: a_t + b_t * i            # noqa: E731
+    bot = lambda i: a_b + b_b * i            # noqa: E731
+    if top(i0) <= bot(i0) or top(i1) <= bot(i1):
         return None
     drift = r.g("flat_line_max_drift")
     top_flat = abs(top(i1) - top(i0)) <= drift * height
@@ -456,15 +499,18 @@ def _trendline_patterns(s: Series) -> list[tuple[Detection, frozenset]]:
 
 # ------------------------------------------------------------ flags, pennants
 def _consolidation_lines(s: Series, a: int, b: int):
-    """Lines along the flag's edges: the fitted slopes, moved out to the outermost high
-    and low so each line touches a bar and no bar of the flag pokes through it. A fit
-    through the middle of the highs let closes cross it days before the "breakout"
-    (audit 2026-10-01: 65 of 75 flags)."""
+    """Lines along the flag's edges, each through two wicks with no bar of the flag poking
+    through it: of the edge lines, the one closest in slope to the fitted slope of the
+    highs (lows). A fit through the middle of the highs let closes cross it days before the
+    "breakout" (audit 2026-10-01: 65 of 75 flags); the fitted slope moved out to the
+    outermost bar touched one candle only (owner, 2026-10-10)."""
     x = np.arange(a, b + 1, dtype=float)
-    bt, at = np.polyfit(x, s.h[a:b + 1], 1)
-    bb, ab = np.polyfit(x, s.l[a:b + 1], 1)
-    at += float(np.max(s.h[a:b + 1] - (at + bt * x)))
-    ab += float(np.min(s.l[a:b + 1] - (ab + bb * x)))
+    hint_t = float(np.polyfit(x, s.h[a:b + 1], 1)[0])
+    hint_b = float(np.polyfit(x, s.l[a:b + 1], 1)[0])
+    at, bt = min(edge_lines(s.h, a, b, True) or [(float(np.max(s.h[a:b + 1])), 0.0)],
+                 key=lambda ln: abs(ln[1] - hint_t))
+    ab, bb = min(edge_lines(s.l, a, b, False) or [(float(np.min(s.l[a:b + 1])), 0.0)],
+                 key=lambda ln: abs(ln[1] - hint_b))
     return (lambda i: at + bt * i), (lambda i: ab + bb * i), bt, bb
 
 
@@ -483,6 +529,10 @@ def _flags(s: Series) -> list[tuple[Detection, frozenset]]:
                 ps = (p - pole_max + int(np.argmin(s.l[window]))) if bull else \
                      (p - pole_max + int(np.argmax(s.h[window])))
                 pole_len = p - ps
+                # the pole ends on its own extreme: a later, lower bar drew the pole through
+                # the top candle (owner, 2026-10-10)
+                if (s.h[p] < s.h[ps:p + 1].max()) if bull else (s.l[p] > s.l[ps:p + 1].min()):
+                    continue
                 move = (s.h[p] / s.l[ps] - 1) * 100 if bull else (1 - s.l[p] / s.h[ps]) * 100
                 if pole_len < 2 or move < spec.p("pole_min_move_pct"):
                     continue

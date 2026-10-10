@@ -167,9 +167,27 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   candle (`alerts.split_today`). 2026-10-09: the `$SYMBOL` analysis is one message, the chart
   with the headline as its caption (`writer.telegram_caption`; the full text stays archived).
   Next: the same drawing (`chart_svg.py` style) in that chart.
-- TradingView outages (2026-10-08: 502/503 and timeouts all night): a broken bars session
-  is retried after 2 and 10 min (`bars.BROKEN_PAUSES_S`), and `--ensure-nightly` waits
-  60 min after a failed run (`NIGHTLY_GAP`).
+- Lines on the candles' tips (owner, 2026-10-10: "lines that do not hit the candles exactly"):
+  sloped lines are edges of the convex hull of the highs/lows (`patterns.chart.edge_lines`):
+  through two wicks, no wick beyond. Triangles, wedges, rectangles take the edge with the most
+  pivot touches (was a least-squares fit between the tips); flags the edge closest to the fitted
+  slope (was one touch); a flag's pole ends on its own extreme. The analyst's trendlines are hull
+  edges from each pivot, touch within 0.15 ATR, the last 3 sessions may test with a wick; the
+  analysis chart widens to a line's first touch and clips lines to the price panel. On the local
+  bars: wedges about half, triangles about a third fewer, analyst lines -19%.
+- X news pictures (owner, 2026-10-10): every story goes with a picture: the post's photo, else a
+  drawn card (`news_card.py`: the digest's design, with the named stock's three months of candles;
+  `xnews.yml` downloads the bars). Two or more stories in a round: one album, the whole text on the
+  first picture.
+- TradingView's call limit (found 2026-10-09 in the runners' HTTP log; nights of 10-07 and
+  10-08 lost): every MCP answer carries `x-ratelimit-limit: 20` per server (about three behind
+  the balancer, so about 60 calls a minute); past it, HTTP 429 with `retry-after: 60`. The SDK
+  reported it as "Server returned an error response" and the session died. Now every call is
+  paced (`mcp_client.CALL_SPACING_S`, at most 40 a minute, all sessions of a process), a 429 is
+  `RateLimited` with the server's wait and the call is repeated in the same session, and
+  error answers are logged with their status (`_note_refusal`). For real outages (502/503) a
+  broken bars session is retried after 2 and 10 min (`bars.BROKEN_PAUSES_S`), and
+  `--ensure-nightly` waits 60 min after a failed run (`NIGHTLY_GAP`).
 - Support tests (2026-10-05, `analyst/support.py`, `knowledge/support.md`): the 20/150-day
   averages as support (holds, breaks, strength with the bounce's volume not weak), the latest
   close across each, and retests after pattern/zone/150-day breakouts. A program-written

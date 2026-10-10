@@ -584,3 +584,74 @@ def test_session_refuses_write_tools():
 
     with pytest.raises(ProviderError, match="refusing to call"):
         client.with_session(write)
+
+
+# ------------------------------------------------------------- the call limit
+def test_calls_start_at_least_the_spacing_apart():
+    from tascreen.tv.mcp_client import Pace
+
+    now, naps = [100.0], []
+
+    async def nap(seconds):
+        naps.append(seconds)
+        now[0] += seconds
+
+    pace = Pace(1.25, clock=lambda: now[0], sleep=nap)
+
+    async def three():
+        for _ in range(3):
+            await pace.wait()
+        now[0] += 5.0                     # a quiet spell: the next call goes at once
+        await pace.wait()
+
+    asyncio.run(three())
+    assert naps == [1.25, 1.25]
+
+
+class _Refused:
+    """A client whose call fails the way the SDK reports a non-2xx answer."""
+
+    def __init__(self, status, headers):
+        self.status, self.headers, self.calls = status, headers, 0
+
+    async def call_tool(self, name, arguments):
+        from tascreen.tv import mcp_client
+
+        self.calls += 1
+        mcp_client._refusal.update(status=self.status, at=time.monotonic(), headers=self.headers)
+        raise RuntimeError("Server returned an error response")
+
+
+def test_an_http_429_is_rate_limited_with_the_servers_wait():
+    from tascreen.tv.data import RateLimited
+    from tascreen.tv.mcp_client import paced_call
+
+    with pytest.raises(RateLimited) as caught:
+        asyncio.run(paced_call(_Refused(429, {"retry-after": "60"}), "mcp-tv-get-ohlcv", {}, None))
+    assert caught.value.retry_after == 60.0 and "HTTP 429" in str(caught.value)
+    with pytest.raises(RuntimeError):                       # any other answer stays an error
+        asyncio.run(paced_call(_Refused(503, {}), "mcp-tv-get-ohlcv", {}, None))
+
+
+def test_a_429_in_a_session_waits_as_long_as_the_server_asks_then_calls_again():
+    from tascreen.tv.data import fetch_in_session
+    from tascreen.tv.mcp_client import ReadOnlySession
+
+    class _Once(_Refused):
+        async def call_tool(self, name, arguments):
+            if self.calls == 0:
+                return await super().call_tool(name, arguments)
+            self.calls += 1
+            from types import SimpleNamespace
+
+            return SimpleNamespace(is_error=False, structured_content={"bars": []}, content=[])
+
+    naps = []
+
+    async def nap(seconds):
+        naps.append(seconds)
+
+    client = _Once(429, {"retry-after": "60"})
+    got = asyncio.run(fetch_in_session(ReadOnlySession(client), "mcp-tv-get-ohlcv", {},
+                                       delays=(5.0,), sleep=nap))
+    assert got == {"bars": []} and naps == [60.0] and client.calls == 2

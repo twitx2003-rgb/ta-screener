@@ -62,6 +62,15 @@ USER_AGENT = "ta-screener/0.1 (personal research)"
 _CALLBACK_PATH = "/callback"
 _SIGN_IN_TIMEOUT_S = 300
 _EXPIRY_MARGIN_S = 60.0     # refresh this long before the access token (900 s) expires
+# TradingView's MCP endpoint limits calls (seen 2026-10-08/09 in the runners' HTTP log): each
+# answer carries x-ratelimit-limit 20 and a remaining count that runs down per server behind
+# the balancer (about three counters, so about 60 calls a minute in all), and an exhausted
+# one answers HTTP 429 with retry-after 60. The nightly update sent up to 90 calls a minute,
+# and the SDK turned each 429 into a generic error that killed the whole session. Calls now
+# start at least this far apart (at most 40 a minute; a live check of 150 calls at 1.25 s
+# left one counter at 4), and a 429 is RateLimited with its wait.
+CALL_SPACING_S = 1.5
+RETRY_AFTER_DEFAULT_S = 60.0
 
 
 class AuthorizationRequired(ScreenerError):
@@ -281,15 +290,65 @@ class LocalCallback:
 
 
 # -------------------------------------------------------------------------- client
+class Pace:
+    """Call starts at least `spacing` seconds apart, across every session of the process
+    (a run opens one session per batch, the live watch one per pass). Slots are reserved
+    before the wait, so calls in flight at once still keep the spacing."""
+
+    def __init__(self, spacing: float, clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep):
+        self.spacing, self._clock, self._sleep = spacing, clock, sleep
+        self._next = 0.0
+
+    async def wait(self) -> None:
+        now = self._clock()
+        start = max(now, self._next)
+        self._next = start + self.spacing
+        if start > now:
+            await self._sleep(start - now)
+
+
+PACE = Pace(CALL_SPACING_S)
+
+
+async def paced_call(client: Any, name: str, arguments: dict[str, Any], pace: Pace | None) -> Any:
+    """One tool call, after its slot. An HTTP 429 (seen by `_note_refusal` while this call
+    was out) becomes RateLimited carrying the server's retry-after; the session stays open,
+    so the caller can wait and call again."""
+    if pace is not None:
+        await pace.wait()
+    started = time.monotonic()
+    try:
+        return await client.call_tool(name, arguments)
+    except Exception as exc:
+        refusal = dict(_refusal)
+        if refusal.get("status") != 429 or refusal.get("at", 0.0) < started:
+            raise
+        from .data import RateLimited
+
+        wait = _retry_after(refusal.get("headers") or {})
+        error = RateLimited(f"{name}: HTTP 429 from TradingView (retry after {wait:.0f} s)")
+        error.retry_after = wait
+        raise error from exc
+
+
+def _retry_after(headers: dict[str, str]) -> float:
+    value = next((v for k, v in headers.items() if k.lower() == "retry-after"), "")
+    try:
+        return min(max(float(value), 1.0), 300.0)
+    except ValueError:
+        return RETRY_AFTER_DEFAULT_S
+
+
 class ReadOnlySession:
     """One open MCP session that refuses every tool that could change the account."""
 
-    def __init__(self, client: Any):
-        self._client = client
+    def __init__(self, client: Any, pace: Pace | None = None):
+        self._client, self._pace = client, pace
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         refuse_writes(name)
-        return await self._client.call_tool(name, arguments or {})
+        return await paced_call(self._client, name, arguments or {}, self._pace)
 
 
 class OwnListSession(ReadOnlySession):
@@ -298,15 +357,15 @@ class OwnListSession(ReadOnlySession):
     id, and creating it under its own name, are the only writes; alerts, other lists,
     renames and deletes stay refused (`refuse_writes`)."""
 
-    def __init__(self, client: Any, own_list: str, own_name: str):
-        super().__init__(client)
+    def __init__(self, client: Any, own_list: str, own_name: str, pace: Pace | None = None):
+        super().__init__(client, pace)
         self.own_list, self.own_name = str(own_list or ""), own_name
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         arguments = arguments or {}
         if not own_list_edit(name, arguments, self.own_list, self.own_name):
             refuse_writes(name)
-        return await self._client.call_tool(name, arguments)
+        return await paced_call(self._client, name, arguments, self._pace)
 
 
 class TradingViewMCP:
@@ -327,6 +386,7 @@ class TradingViewMCP:
         self.storage = FileTokenStorage(Path(token_path))
         self.interactive = interactive
         self._server = server
+        self._pace = None if server is not None else PACE     # the network only, not tests
         self._open_browser = open_browser
         self._callback = LocalCallback(callback_host, callback_port)
         self._sign_in_timeout = sign_in_timeout
@@ -397,6 +457,7 @@ class TradingViewMCP:
             # Request hooks run on every send, including the OAuth flow's own
             # requests, which is the only way to reach those headers.
             http.event_hooks["request"].append(_identify_request)
+            http.event_hooks["response"].append(_note_refusal)
             async with http:
                 async with Client(streamable_http_client(self.url, http_client=http),
                                   cache=None) as client:
@@ -418,20 +479,20 @@ class TradingViewMCP:
     async def call_tool_async(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         refuse_writes(name)
         async with self._client() as client:
-            return await client.call_tool(name, arguments or {})
+            return await paced_call(client, name, arguments or {}, self._pace)
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[ReadOnlySession]:
         """One MCP session for many calls (a new session per call costs a
         connection, the OAuth check and a handshake each time)."""
         async with self._client() as client:
-            yield ReadOnlySession(client)
+            yield ReadOnlySession(client, self._pace)
 
     @asynccontextmanager
     async def own_list_session(self, own_list: str, own_name: str) -> AsyncIterator[OwnListSession]:
         """`session`, plus edits of the bot's own watchlist only (OwnListSession)."""
         async with self._client() as client:
-            yield OwnListSession(client, own_list, own_name)
+            yield OwnListSession(client, own_list, own_name, self._pace)
 
     # ----------------------------------------------------------------- sync API
     def list_tools(self) -> list[Any]:
@@ -572,6 +633,33 @@ async def _identify_request(request) -> None:
         request.headers["Accept"] = "application/json"
 
 
+# The newest error answer from TradingView (2026-10-09: the SDK turns every non-2xx answer
+# into "Server returned an error response", so a rate limit, an outage and a dropped
+# session read the same in the logs; _explain adds the status).
+_refusal: dict[str, Any] = {}
+
+
+async def _note_refusal(response) -> None:
+    """Response hook: an error answer's status, path, limit headers and the start of its
+    body go to the log (on a runner, the private one; no token is in them)."""
+    if response.status_code < 400:
+        return
+    try:
+        body = (await response.aread()).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — a body that cannot be read is left out
+        body = ""
+    headers = {k: v for k, v in response.headers.items()
+               if k.lower() == "retry-after" or "ratelimit" in k.lower()}
+    _refusal.update(status=response.status_code, at=time.monotonic(), headers=headers)
+    text = re.sub(r"\s+", " ", body).strip()[:200]
+    # 400 and 401 come with every session (the SDK offers a newer protocol version first;
+    # the OAuth flow's own check); a limit or an outage is a warning
+    log.log(logging.WARNING if response.status_code >= 429 else logging.INFO,
+            "TradingView answered HTTP %d to %s %s%s%s", response.status_code,
+            response.request.method, response.request.url.path,
+            f" {headers}" if headers else "", f": {text}" if text else "")
+
+
 def _run(coro):
     try:
         return asyncio.run(coro)
@@ -598,7 +686,11 @@ def _explain(exc: BaseException) -> ProviderError:
             f"({exc}). Its server may not allow dynamic registration. Run "
             "`python run.py --tradingview-diagnose` to see which sign-in routes it offers."
         )
-    return ProviderError(f"TradingView MCP: {type(exc).__name__}: {exc}")
+    message = str(exc)
+    if message == "Server returned an error response" and _refusal \
+            and time.monotonic() - _refusal["at"] < 120:
+        message += f" (HTTP {_refusal['status']})"
+    return ProviderError(f"TradingView MCP: {type(exc).__name__}: {message}")
 
 
 def _flatten(group: BaseException) -> list[BaseException]:

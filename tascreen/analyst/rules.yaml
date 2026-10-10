@@ -17,7 +17,7 @@ zones_each_side: {value: 3, origin: ours, note: "nearest zones above and below t
 
 # trendlines through turning points
 trendline_min_touches: {value: 3, origin: common, note: "two points make a line, the third confirms it"}
-trendline_touch_atr: {value: 0.35, origin: ours}
+trendline_touch_atr: {value: 0.15, origin: ours, note: "a wick this close to the line touches it (0.35 until 2026-10-10: a touch could sit visibly off the line)"}
 trendline_break_atr: {value: 0.5, origin: ours, note: "broken on a close this far beyond (not a wick)"}
 trendline_recent_sessions: {value: 40, origin: ours, note: "its last touch must be this recent"}
 trendline_max_distance_atr: {value: 6, origin: ours, note: "a line this far from the price today is not drawn"}

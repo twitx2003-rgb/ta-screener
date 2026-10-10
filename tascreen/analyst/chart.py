@@ -230,6 +230,10 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
     for item in items.values():                  # a pattern is shown whole (review round 2)
         if item.get("type") == "pattern" and item.get("family") == "chart" and item.get("start") in index:
             first = max(0, len(bars) - MAX_BARS, min(first, index[item["start"]] - 5))
+        # and a trendline from its first touch (owner, 2026-10-10: a line whose touches were
+        # left of the window came in from outside the prices and met one candle)
+        if item.get("type") == "line" and item.get("day1") in index:
+            first = max(0, len(bars) - MAX_BARS, min(first, index[item["day1"]] - 5))
     win = bars.iloc[first:]
     atr = float(fact("atr") or math.nan)
     close = float(bars["close"].iloc[-1])
@@ -397,8 +401,18 @@ def render(bars: pd.DataFrame, analysis: Analysis, drawings: list[str] | None = 
             i1 = index.get(item["day1"], first)
             a_i, b_i = max(i1, first), last + 2
             slope = (item["price2"] - item["price1"]) / max(1, last - i1)
-            ya = item["price1"] + slope * (a_i - i1)
-            yb = item["price1"] + slope * (b_i - i1)
+            at = lambda i, i1=i1, slope=slope, item=item: item["price1"] + slope * (i - i1)  # noqa: E731
+            # only inside the price panel: a line never runs into the axis or the volume
+            for bound in (plot.lo, plot.hi):
+                if slope and (at(a_i) - bound) * (at(b_i) - bound) < 0:
+                    cross = i1 + (bound - item["price1"]) / slope
+                    if not plot.inside(at(a_i)):
+                        a_i = cross
+                    else:
+                        b_i = cross
+            if not (plot.inside(at(a_i)) or plot.inside(at(b_i))):
+                continue
+            ya, yb = at(a_i), at(b_i)
             color = ZONE[item["kind"]]
             out.append(f'<line class="ann" x1="{plot.x(a_i):.1f}" y1="{plot.y(ya):.1f}" x2="{plot.x(b_i):.1f}" '
                        f'y2="{plot.y(yb):.1f}" stroke="{color}" stroke-width="2.2" stroke-linecap="round"/>')

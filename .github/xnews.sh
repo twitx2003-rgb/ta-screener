@@ -5,6 +5,7 @@
 #
 #   bash .github/xnews.sh restore   the branch into ./xnews-state, its state.json into data/xnews
 #   bash .github/xnews.sh keep      commit this run's state.json and push it
+#   bash .github/xnews.sh bars      the stored bars into data/bars (the news pictures' charts)
 #
 # Needs STATE_REPO and STATE_REPO_TOKEN, like analyst.sh.
 set -euo pipefail
@@ -38,8 +39,18 @@ keep)
     echo "xnews state: could not push"
     exit 1
     ;;
+bars)
+    export GH_TOKEN="$STATE_REPO_TOKEN"
+    tmp="${RUNNER_TEMP:-/tmp}"
+    if gh release download bars --repo "$STATE_REPO" --pattern bars.tar.zst --dir "$tmp" --clobber > /dev/null 2>&1 \
+            && mkdir -p data && tar --zstd -xf "$tmp/bars.tar.zst" -C data; then
+        echo "bars: $(find data/bars -name '*.parquet' | wc -l) files (the news pictures' charts)"
+    else
+        echo "bars: not downloaded (the news pictures go without a chart)"
+    fi
+    ;;
 *)
-    echo "usage: $0 restore|keep" >&2
+    echo "usage: $0 restore|keep|bars" >&2
     exit 2
     ;;
 esac
