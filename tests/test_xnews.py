@@ -227,8 +227,9 @@ def test_two_stories_in_a_round_go_in_one_message(tmp_path):
     sent, photos = [], []
     summary, _ = run(tmp_path, FakeReader(page), llm, sent, send_photo=lambda u, c: photos.append((u, c)))
     assert summary["sent"] == 2 and summary["photos"] == 0 and photos == []
-    assert sent == ['🔴 חדשה עם גרף <a href="https://x.com/NewsDesk/status/91">↗</a>\n\n'
-                    '🟠 חדשה בלי תמונה <a href="https://x.com/NewsDesk/status/92">↗</a>']   # no account name
+    # no account name; the headline in bold, each line opened with a right-to-left mark
+    assert sent == ['\u200f🔴 <b>חדשה עם גרף</b> <a href="https://x.com/NewsDesk/status/91">↗</a>\n\n'
+                    '\u200f🟠 <b>חדשה בלי תמונה</b> <a href="https://x.com/NewsDesk/status/92">↗</a>']
 
 
 def test_a_lone_story_with_a_photo_goes_as_the_photo(tmp_path):
@@ -238,7 +239,7 @@ def test_a_lone_story_with_a_photo_goes_as_the_photo(tmp_path):
                      send_photo=lambda u, c: photos.append((u, c)))
     assert summary["photos"] == 1 and sent == []
     assert photos == [("https://pbs.twimg.com/media/synthetic.jpg",
-                       '🔴 חדשה עם גרף <a href="https://x.com/NewsDesk/status/93">↗</a>')]
+                       '\u200f🔴 <b>חדשה עם גרף</b> <a href="https://x.com/NewsDesk/status/93">↗</a>')]
 
 
 def test_a_photo_telegram_cannot_fetch_goes_as_text(tmp_path):
@@ -277,7 +278,7 @@ def test_a_chart_gets_one_line_saying_what_it_shows(tmp_path):
                      fetch=lambda url: ("image/jpeg", b"synthetic"))
     assert summary["explained"] == 1 and llm.images == [2] and summary["claude_today"] == 2
     first, second = sent[0].split("\n\n")                               # one message for the round
-    assert first.endswith("\n📊 גרף של תשואת האג&quot;ח ל-10 שנים בשנה האחרונה")
+    assert first.endswith("\n\u200f📊 גרף של תשואת האג&quot;ח ל-10 שנים בשנה האחרונה")
     assert "📊" not in second                                           # not a chart: no line
 
 
@@ -306,7 +307,7 @@ def test_a_short_analysis_goes_under_the_news_unless_it_gives_advice(tmp_path):
     sent = []
     run(tmp_path, FakeReader({"tweets": [row("121"), row("122")], "has_next_page": False}), llm, sent)
     first, second = sent[0].split("\n\n")
-    assert first.endswith("↗</a>\n💡 העלאת תחזית מצביעה על ביקוש חזק; מניות הענף רגישות לזה")
+    assert first.endswith("↗</a>\n\u200f💡 העלאת תחזית מצביעה על ביקוש חזק; מניות הענף רגישות לזה")
     assert "💡" not in second and "למכור" not in second
 
 
@@ -345,7 +346,7 @@ def test_one_story_from_three_accounts_goes_out_once_with_its_sources(tmp_path):
     sent = []
     summary, _ = run(tmp_path, FakeReader(page), llm, sent)
     assert summary["sent"] == 1 and summary["merged"] == 2 and "כפול" not in sent[0]
-    assert sent[0].startswith("🔴 המדד עלה") and "DeItaone" not in sent[0].split("<a")[0]
+    assert sent[0].startswith("\u200f🔴 <b>המדד עלה</b>") and "DeItaone" not in sent[0].split("<a")[0]
     assert sent[0].count("↗") == 1                                     # the main post's link only
 
 
@@ -516,14 +517,36 @@ def test_the_screener_asks_for_new_context_or_nothing():
     assert "משפיע על המגזר" in text and "ומניות רגישות לריבית" in text
 
 
-def test_the_strategist_writes_with_the_same_hebrew_glossary():
+def test_every_hebrew_writer_shares_the_same_style_block():
     from tascreen import agents
 
     def glossary(name):
         text = agents.card(name)["prompt"]
         return " ".join(text[text.index("- Every sentence has a verb"):text.index("X = ציוץ.")].split())
 
-    assert glossary("chief-strategist") == glossary("news-screener")
+    block = glossary("news-screener")
+    for name in ("chief-strategist", "chart-reader", "digest-editor", "market-explainer"):
+        assert glossary(name) == block, name
+    assert "No semicolon" in block and "never first in a sentence" in block and "מינוס 2.6%" in block
+
+
+def test_the_screener_writes_its_line_like_a_news_desk():
+    from tascreen import agents
+    text = agents.card("news-screener")["prompt"]
+    assert "never the X account's name" in text and '"זנטריקה (ZQX)"' in text
+    assert '"לפי הציוץ"' in text and "Present tense" in text and "No teaser" in text
+
+
+def test_a_news_line_is_bold_escaped_and_right_to_left():
+    post = xnews.Post(id="1", author="NewsDesk", text="t", url="https://x.com/NewsDesk/status/1?a=1&b=2",
+                      created_at="", is_reply=False)
+    pick_ = {"importance": 3, "summary_he": "Zentrica <Labs> מעלה תחזית", "analysis_he": "לראשונה מאז 2019",
+             "image_he": "גרף ההכנסות"}
+    text = xnews.item(post, pick_, with_image=True)
+    assert text == ('\u200f🔵 <b>Zentrica &lt;Labs&gt; מעלה תחזית</b> '
+                    '<a href="https://x.com/NewsDesk/status/1?a=1&amp;b=2">↗</a>\n'
+                    '\u200f💡 לראשונה מאז 2019\n\u200f📊 גרף ההכנסות')
+    assert all(line.startswith(xnews.RLM) for line in text.split("\n"))
 
 
 def test_style_slips_are_counted_but_the_news_still_goes_out():

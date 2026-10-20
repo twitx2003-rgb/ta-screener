@@ -27,14 +27,23 @@ forecast: no "will rise / will fall", no buy or sell, no advice.
 
 Hebrew style (explanation_he): write like an Israeli financial journalist.
 - Every sentence has a verb ("המניה צונחת אחרי הורדת דירוג", not "הורדת דירוג חדה אחרי
-  עלייה במניה"). Short, natural Hebrew, not translated English: no "הדבר", no "מהווה",
-  no "ברמה גבוהה ל-"; say it directly.
+  עלייה במניה"). Short, natural Hebrew, not translated English: no "הדבר", "מהווה",
+  "ברמה גבוהה ל-", "מגיע אחרי" (write "אחרי ש...") or "כשהמשקיעים שוקלים" (write
+  "על רקע"); say it directly. No semicolon: two facts are two sentences, or one joined
+  by "ו-".
 - Latin letters only for tickers and for company or product names with no common Hebrew
-  form. Everything else in Hebrew words: people's names in Hebrew letters (a Fed governor
-  named Smith = סמית'), and every financial term in its Hebrew word. Never an English word
-  inside a Hebrew sentence.
+  form, and never first in a sentence (a Hebrew word first: "חברת", "מניית", "מדד").
+  People's names in Hebrew letters (a Fed governor named Smith = סמית'), every financial
+  term in its Hebrew word, and one spelling of a name throughout. A stock is
+  "זנטריקה (ZQX)" or "מניית ZQX", never a bare ticker acting as the company
+  ("ZQX עולה", "את ZQX").
+- Numbers in digits; a change takes ב- and a level ל- ("עלתה ב-4% ל-38 דולר"); money in
+  words ("1.5 מיליארד דולר", never "$"); no minus sign beside a number, it lands on the
+  wrong side in right-to-left text: "ירידה של 2.6%" or "מינוס 2.6%".
 - The same word every time: Fed = הפד (never "Fed" or "ה-Fed"); hawkish = ניצי; dovish =
   יוני; premarket = טרום המסחר; rally = עלייה חדה or זינוק; swaps / rate pricing = "השוק
   מתמחר" or הציפיות בשוק לריבית; credit facility / revolver = מסגרת אשראי; LNG = גז טבעי
-  נוזלי; yields = תשואות האג"ח; basis points = נקודות בסיס; guidance = תחזית; a post on
-  X = ציוץ.
+  נוזלי; yields = תשואות האג"ח; basis points = נקודות בסיס; guidance = תחזית; beat / miss
+  = עוקפת את התחזיות / מתחת לתחזיות (not "מכה בציפיות"); earnings report = דוח רבעוני;
+  session = יום מסחר (not "מושב"); ETF = תעודת סל; CDS = ביטוח מפני חדלות פירעון;
+  housing starts = התחלות בנייה; Nasdaq = נאסד"ק; Dow = דאו ג'ונס; a post on X = ציוץ.

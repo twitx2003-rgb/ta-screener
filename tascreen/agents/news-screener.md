@@ -35,11 +35,13 @@ Rate each picked post 1-5:
   snippets, "stocks to watch" lists, recaps of older news, research promotion, and
   anything only loosely related.
 
-For each pick write `summary_he`: ONE short sentence of plain Hebrew, at most about 15
-words, saying what happened and which tickers / market it touches. No preamble, no
-source name (it is shown separately), no filler. Use ONLY facts in the post: no numbers,
-names or causes that are not written there, no advice, no predictions. Tickers stay in
-Latin letters (see the style rules below). `post_id` must be copied exactly from the input.
+For each pick write `summary_he`: the news line, ONE headline sentence of Hebrew, about 8
+to 15 words, written as the news style below says: who did what, the number, and the
+stock or market it touches. Name every company the story is about with its ticker in
+brackets (a ticker you are sure of): the ticker is how the bot knows the story is about
+a company. No preamble, no filler, and never the X account's name (the reader does not
+see it). Use ONLY facts in the post: no numbers, names or causes that are not written
+there, no advice, no predictions. `post_id` must be copied exactly from the input.
 
 Then write `analysis_he`: a short analysis, 1-2 sentences of plain Hebrew (at most about
 35 words) that adds ONE thing the headline does not say. It must not restate
@@ -52,21 +54,59 @@ Answer one of these, using only what the post says:
   reason is filler.
 Never end with a stock phrase that fits any story. Forbidden endings: "משפיע על
 תשואות, הדולר ומניות רגישות לריבית" (and its variants), "משפיע על המגזר", "משפיע על
-מניות הטכנולוגיה", "חשוב למשקיעים", "כדאי לעקוב". If the post gives no context of
-this kind, leave `analysis_he` as an empty string "": no line is better than filler.
-Explain, do not forecast: no price targets, no "will rise / will fall", no buy or sell
-wording, no advice.
+מניות הטכנולוגיה", "חשוב למשקיעים", "כדאי לעקוב", "רלוונטי ל...", "...לקראת פתיחת
+המסחר", "ולכן התמונה מעורבת". Do not write about the investor or his holdings ("שבתיק
+המשקיע", "חשוב למחזיקי ZQX"): `investor_holdings` is for rating only. Do not point back at
+earlier messages ("שדווח קודם"): give the earlier figure and its time ("לעומת 3% בפתיחה").
+If the post gives no context of this kind, leave `analysis_he` as an empty string "": no
+line is better than filler. (Invented: not "ההחלטה עלולה להכביד על מניות התעופה, כמו ZQX",
+but "זו ההזמנה השלישית שזנטריקה מבטלת החודש".)
+Explain, do not forecast: no price targets, no "will rise / will fall", no "עלול",
+"עשוי" or "ילחץ על המניות" in your own voice, no buy or sell wording, no advice. A
+forecast is news only as someone's, named ("הבנק צופה ש...", "החברה מעריכה ש...").
+
+Hebrew news style for `summary_he`: write it the way an Israeli news desk writes a flash.
+- Who did what: the actor first, then the verb, the number and, in a short clause, the
+  cause. Present tense ("זנטריקה מודיעה", "המניה צונחת"); past tense only for a finished
+  event with its time ("ברבעון השני צמח", "ביום שישי נרשם").
+- The ticker in brackets right after the company's first mention: "זנטריקה (ZQX)",
+  "מניית זנטריקה (ZQX)". Never tickers stuck on the end ("; ZQX.", ", ל-ZQX."). More than
+  three companies: name the group ("מניות התעופה") and give the tickers of the main ones.
+- Who says it, once and in Hebrew: as the subject ("שר האוצר אומר ש...", "הבנק צופה
+  ש...") or at the end (", לפי רויטרס"). Never "לפי הציוץ" or "לפי הפוסט".
+- A colon only before a short direct quote (מנכ"לית זנטריקה: "הביקוש חזק מתמיד") and
+  after "עדכון" in a real update. No other label in front ("דיווח:", "טרום המסחר:",
+  "בשבוע הקרוב:"): write the sentence ("בטרום המסחר המניה...", "השבוע יפרסמו...").
+- No teaser ("אבל יש מלכוד"): say what the problem is, or leave it out.
+Before -> after (invented):
+- "Zentrica מכה בציפיות לרווח ברבעון השני; ZQX." -> "זנטריקה (ZQX) עוקפת את תחזיות
+  הרווח ברבעון השני"
+- "ZQX יורדת 4% כשהמשקיעים שוקלים את התחזית" -> "מניית זנטריקה (ZQX) יורדת ב-4% על רקע
+  התחזית החדשה"
+- "מנכ"ל ברוביק: ההזמנות יוכפלו בשנה הבאה; VXQ." -> "מנכ"ל ברוביק (VXQ) צופה שההזמנות
+  יוכפלו בשנה הבאה"
+- "ירידה של 12% בהכנסות זנטריקה ברבעון השני, החדה מאז 2019" -> "הכנסות זנטריקה (ZQX)
+  ירדו ב-12% ברבעון השני, הירידה החדה ביותר מאז 2019"
 
 Hebrew style (summary_he and analysis_he, when not empty): write like an Israeli financial journalist.
 - Every sentence has a verb ("המניה צונחת אחרי הורדת דירוג", not "הורדת דירוג חדה אחרי
-  עלייה במניה"). Short, natural Hebrew, not translated English: no "הדבר", no "מהווה",
-  no "ברמה גבוהה ל-"; say it directly.
+  עלייה במניה"). Short, natural Hebrew, not translated English: no "הדבר", "מהווה",
+  "ברמה גבוהה ל-", "מגיע אחרי" (write "אחרי ש...") or "כשהמשקיעים שוקלים" (write
+  "על רקע"); say it directly. No semicolon: two facts are two sentences, or one joined
+  by "ו-".
 - Latin letters only for tickers and for company or product names with no common Hebrew
-  form. Everything else in Hebrew words: people's names in Hebrew letters (a Fed governor
-  named Smith = סמית'), and every financial term in its Hebrew word. Never an English word
-  inside a Hebrew sentence.
+  form, and never first in a sentence (a Hebrew word first: "חברת", "מניית", "מדד").
+  People's names in Hebrew letters (a Fed governor named Smith = סמית'), every financial
+  term in its Hebrew word, and one spelling of a name throughout. A stock is
+  "זנטריקה (ZQX)" or "מניית ZQX", never a bare ticker acting as the company
+  ("ZQX עולה", "את ZQX").
+- Numbers in digits; a change takes ב- and a level ל- ("עלתה ב-4% ל-38 דולר"); money in
+  words ("1.5 מיליארד דולר", never "$"); no minus sign beside a number, it lands on the
+  wrong side in right-to-left text: "ירידה של 2.6%" or "מינוס 2.6%".
 - The same word every time: Fed = הפד (never "Fed" or "ה-Fed"); hawkish = ניצי; dovish =
   יוני; premarket = טרום המסחר; rally = עלייה חדה or זינוק; swaps / rate pricing = "השוק
   מתמחר" or הציפיות בשוק לריבית; credit facility / revolver = מסגרת אשראי; LNG = גז טבעי
-  נוזלי; yields = תשואות האג"ח; basis points = נקודות בסיס; guidance = תחזית; a post on
-  X = ציוץ.
+  נוזלי; yields = תשואות האג"ח; basis points = נקודות בסיס; guidance = תחזית; beat / miss
+  = עוקפת את התחזיות / מתחת לתחזיות (not "מכה בציפיות"); earnings report = דוח רבעוני;
+  session = יום מסחר (not "מושב"); ETF = תעודת סל; CDS = ביטוח מפני חדלות פירעון;
+  housing starts = התחלות בנייה; Nasdaq = נאסד"ק; Dow = דאו ג'ונס; a post on X = ציוץ.

@@ -52,12 +52,25 @@ def banned(text: str) -> list[str]:
 # are warnings to log, never a reason to drop a news item.
 ANGLICISMS = {"הוקישי", "הוקישית", "הוקישיים", "הוקישיות", "דובי", "דובית", "דוביים", "דוביות",
               "פרימרקט", "מרקט", "ראלי", "הדבר", "מהווה", "מהווים", "מהוות"}
+# News-desk style (hebrew-copy-editor, 2026-10-20, from a week of the channel's lines):
+# filler, pointers back at earlier messages, and phrases translated word for word.
+NEWS_SLIPS = ("לפי הציוץ", "לפי הפוסט", "שדווח קודם", "שדווחה קודם", "שדווחו קודם", "שנשלח קודם",
+              "מכה בציפיות", "מכה את הציפיות", "מכות בציפיות", "מכות את הציפיות",
+              "כשהסוחרים שוקלים", "כשהמשקיעים שוקלים", "פתיחות הבנייה",
+              "מגיע אחרי", "מגיעה אחרי", "מגיעים אחרי", "מגיעות אחרי")
+LATIN_OPENING = re.compile(r"[\s\"'(]*[A-Za-z]")
+TICKER_TAIL = re.compile(r"[;,]\s*(?:ל-)?[A-Z]{1,5}(?:(?:,\s*|\s+ו-)[A-Z]{1,5})*\.?\s*$")
+LOOSE_MINUS = re.compile(r"(?<![\w-])-\d|\d%?-(?=[\s,.;)]|$)")
 
 
 def style_warnings(text: str) -> list[str]:
     """Hebrew style slips a prompt asks the model to avoid: "Fed" in Latin letters (the
     channel writes הפד), a lowercase English word inside the Hebrew (tickers and company
-    names are capitalised, "swaps" is not), and anglicisms or translated phrasing."""
+    names are capitalised, "swaps" is not), anglicisms or translated phrasing, and the
+    news-desk slips: a sentence that opens with Latin letters (Telegram then sets the whole
+    line left to right), a semicolon, tickers stuck on the end ("; ZQX."), a minus sign
+    beside a number (it lands on the wrong side in right-to-left text), and the phrases in
+    NEWS_SLIPS. Check one text at a time: the opening and the ending are the text's own."""
     out = []
     for word in re.findall(r"[A-Za-z]+", text):
         if word.lower() == "fed":
@@ -72,4 +85,13 @@ def style_warnings(text: str) -> list[str]:
                 forms.add(word)
         if forms & ANGLICISMS:
             out.append(f"anglicism or translated phrasing '{token}'")
+    if LATIN_OPENING.match(text):
+        out.append("opens with Latin letters (put a Hebrew word first)")
+    if ";" in text:
+        out.append("semicolon (two sentences, or one joined by ו-)")
+    if TICKER_TAIL.search(text):
+        out.append("tickers stuck on the end (put each in brackets after its company)")
+    if LOOSE_MINUS.search(text):
+        out.append("minus sign beside a number (write ירידה של / מינוס)")
+    out += [f"news-style slip '{p}'" for p in NEWS_SLIPS if p in text]
     return out

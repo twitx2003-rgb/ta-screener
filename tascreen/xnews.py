@@ -359,7 +359,7 @@ def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
             picks[post_id] = {"importance": importance, "summary_he": summary[:SUMMARY_MAX],
                               "analysis_he": analysis[:ANALYSIS_MAX], "sources": []}
             if counts is not None:           # style slips are counted, never a reason to drop
-                slips = len(style_warnings(f"{summary} {analysis}"))
+                slips = len(style_warnings(summary)) + len(style_warnings(analysis))
                 counts["style_slips"] = counts.get("style_slips", 0) + slips
     merged = 0
     for dup, main in same.items():          # a chain (a -> b -> c) ends at its last main post
@@ -376,17 +376,23 @@ def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
     return [(p, picks[p.id]) for p in posts if p.id in picks], rejected
 
 
+RLM = "\u200f"   # right-to-left mark: Telegram sets a line's direction by its first letter
+
+
 def item(post: Post, pick_: dict, *, with_image: bool = False) -> str:
-    """One pick in Telegram HTML: mark, the sentence and a link to the post; then the short
-    analysis, and under a photo the line that says what the picture shows. No account name
-    (owner, 2026-10-20: the author is not shown; the link still leads to the post)."""
+    """One pick in Telegram HTML: mark, the sentence in bold (the headline) and a link to
+    the post; then the short analysis, and under a photo the line that says what the
+    picture shows. No account name (owner, 2026-10-20: the author is not shown; the link
+    still leads to the post). Each line opens with RLM, so a line whose first word is a
+    ticker or a Latin name still reads right to left (2026-10-20: six lines in a week
+    opened that way, and Telegram set them left to right)."""
     mark = {5: "🔴", 4: "🟠"}.get(pick_["importance"], "🔵")
     link = f'<a href="{html.escape(post.url, quote=True)}">↗</a>'
-    text = f"{mark} {html.escape(pick_['summary_he'])} {link}"
+    text = f"{RLM}{mark} <b>{html.escape(pick_['summary_he'])}</b> {link}"
     if pick_.get("analysis_he"):
-        text += f"\n💡 {html.escape(pick_['analysis_he'])}"
+        text += f"\n{RLM}💡 {html.escape(pick_['analysis_he'])}"
     if with_image and pick_.get("image_he"):
-        text += f"\n📊 {html.escape(pick_['image_he'])}"
+        text += f"\n{RLM}📊 {html.escape(pick_['image_he'])}"
     return text
 
 
