@@ -215,3 +215,60 @@ def test_sessions_that_keep_failing_defer_the_rest(tmp_path):
                         wait=waits.append)
     assert report["counts"] == {"failed": 1, "deferred": 5}
     assert client.sessions_opened == 3 and waits == [120, 600]   # no more knocking after three
+
+
+# ------------------------------------------------ the daily quota: batch rows
+PREV_CLOSE = datetime(2026, 9, 22, 22, 0, tzinfo=timezone.utc)      # Tuesday's session complete
+
+
+def _stored_until_tuesday(tmp_path, symbols):
+    from fakes import FakeBatch
+
+    update_all(FakeClient(FakeBatch(date(2026, 9, 22))), _job(tmp_path, now=PREV_CLOSE), symbols,
+               progress=lambda l: None)
+    return FakeBatch(DAY)
+
+
+def test_a_symbol_one_session_behind_gets_its_bar_from_a_batch_row(tmp_path):
+    symbols = [f"NASDAQ:S{n}" for n in range(60)]
+    source = _stored_until_tuesday(tmp_path, symbols)
+    job = _job(tmp_path)
+    report = update_all(FakeClient(source), job, symbols, progress=lambda l: None)
+    assert report["counts"] == {"updated": 60} and report["batch"]["symbols"] == 60
+    tools = [name for name, _ in source.calls]
+    assert tools.count("mcp-tv-get-symbol-data-batch") == 2 and tools.count("mcp-tv-get-ohlcv") == 3
+    stored = job.store.read_bars("NASDAQ:S7").iloc[-1]
+    expected = source.bars_for("NASDAQ:S7")[-1]
+    assert stored["timestamp"].date() == DAY
+    assert [stored[c] for c in ("open", "high", "low", "close", "volume")] == pytest.approx(
+        [expected[k] for k in ("o", "h", "l", "c", "v")])
+
+
+def test_a_split_since_the_last_bar_goes_the_ohlcv_way(tmp_path):
+    symbols = ["NASDAQ:AAA", "NASDAQ:BBB", "NASDAQ:CCC", "NASDAQ:DDD"]
+    source = _stored_until_tuesday(tmp_path, symbols)
+    source.scale["NASDAQ:DDD"] = 0.5                       # a 2-for-1 split: every past price halves
+    report = update_all(FakeClient(source), _job(tmp_path), symbols, progress=lambda l: None)
+    assert report["counts"] == {"updated": 3, "refetched": 1} and report["batch"]["previous_close_mismatch"] == 1
+
+
+def test_batch_rows_that_disagree_with_the_daily_bars_are_not_used(tmp_path):
+    symbols = ["NASDAQ:AAA", "NASDAQ:BBB", "NASDAQ:CCC"]
+    source = _stored_until_tuesday(tmp_path, symbols)
+    source.wrong = set(symbols)
+    report = update_all(FakeClient(source), _job(tmp_path), symbols, progress=lambda l: None)
+    assert report["batch"]["why"] == "cross-check failed" and report["counts"] == {"updated": 3}
+    tools = [name for name, _ in source.calls]
+    assert tools.count("mcp-tv-get-symbol-data-batch") == 1 and tools.count("mcp-tv-get-ohlcv") == 6
+
+
+def test_the_spent_daily_quota_defers_the_rest_without_another_call(tmp_path):
+    from fakes import FakeBatch
+    from tascreen.tv.data import quota_back
+
+    source = FakeBatch(DAY)
+    source.quota_after = 2
+    job = _job(tmp_path, session_batch=2)
+    report = update_all(FakeClient(source), job, [f"NASDAQ:S{n}" for n in range(6)], progress=lambda l: None)
+    assert report["counts"] == {"new": 2, "deferred": 4} and report["quota_spent"] and quota_back() is not None
+    assert len(source.calls) == 3                          # the one refused call, then none

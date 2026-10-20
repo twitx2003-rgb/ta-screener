@@ -299,6 +299,11 @@ read the section you need here.
   - the SDK forgets a stored token's expiry;
   - a refresh made before discovery guesses the token endpoint.
 - The access token lasts 900 s, and TradingView issues refresh tokens.
+- 2026-10-19: a daily tool-call quota per account (all clients), about 1000 calls a UTC day,
+  answered as a tool error "TOOL_QUOTA_EXCEEDED ... Daily tool-call quota for this user is
+  exhausted. It resets at 00:00 UTC"; a per-minute variant says "for the current minute.
+  Wait about N seconds". Not published by TradingView (their docs say daily caps may apply).
+  The answers carry no quota header (only x-ratelimit-* for the per-minute HTTP limit).
 ## Live `--discover` results (2026-09-23, this project's first run)
 
 - Sign-in with a separate OAuth client and tokens in `~/.ta-screener` worked on the

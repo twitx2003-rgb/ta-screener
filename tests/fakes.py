@@ -125,3 +125,36 @@ class FakeOhlcv:
         bars = self.bars_for(symbol)[-args["count"]:]
         return result({"success": True, "symbol": symbol, "interval": "1D",
                        "count": len(bars), "bars": bars})
+
+
+class FakeBatch(FakeOhlcv):
+    """FakeOhlcv that also answers get-symbol-data-batch the way the live server does
+    ({"data": {symbol: {column: value}}, "missing": [...]}), from the same synthetic bars.
+    `wrong` symbols get a high that disagrees with their daily bar; after `quota_after`
+    calls every call answers TradingView's daily-quota error."""
+
+    def __init__(self, last_day: date, days: int = 800):
+        super().__init__(last_day, days)
+        self.wrong: set[str] = set()
+        self.quota_after: int | None = None
+
+    async def call_tool(self, name, args):
+        if self.quota_after is not None and len(self.calls) >= self.quota_after:
+            self.calls.append((name, args))
+            return SimpleNamespace(is_error=True, structured_content=None, content=[SimpleNamespace(
+                text="tool_pre_invoke blocked by plugin ToolQuotaPlugin: TOOL_QUOTA_EXCEEDED - Tool call quota "
+                     "exceeded (Daily tool-call quota for this user is exhausted. It resets at 00:00 UTC, in "
+                     "about 3h 0m; do not retry before then.)")])
+        if name != "mcp-tv-get-symbol-data-batch":
+            return await super().call_tool(name, args)
+        self.calls.append((name, args))
+        data, missing = {}, []
+        for symbol in args["symbols"]:
+            if symbol in self.missing:
+                missing.append(symbol)
+                continue
+            prev, bar = self.bars_for(symbol)[-2:]
+            data[symbol] = {"close": bar["c"], "high": bar["h"] + (1.0 if symbol in self.wrong else 0.0),
+                            "low": bar["l"], "volume": bar["v"], "change_abs": bar["c"] - prev["c"],
+                            "change_from_open_abs": bar["c"] - bar["o"]}
+        return result({"success": True, "data": data, "missing": missing})

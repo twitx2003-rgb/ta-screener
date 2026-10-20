@@ -6,8 +6,9 @@ import json
 from datetime import date, datetime, timezone
 
 import pandas as pd
+import pytest
 
-from tascreen import github
+from tascreen import alerts, github
 from tascreen.alerts import (bullish_breakouts, evening_messages, evening_report, hit_rates,
                              on_the_verge, read_sent)
 from tascreen.config import AlertsSettings
@@ -326,3 +327,40 @@ def test_breakouts_of_the_last_sessions_count_while_they_hold():
         ("NYSE:BBB", "ascending_triangle", 0), ("NYSE:AAA", "double_bottom", 0), ("NYSE:AAA", "rectangle", 1)]
     view.stocks.loc[view.stocks["symbol"] == "NYSE:AAA", "close"] = 99.0    # fell back below its line
     assert all(b["sessions_ago"] == 0 for b in bullish_breakouts(view, lambda s: None, {}, days=3))
+
+
+# ------------------------------------------------- live prices within the daily quota
+def test_a_pass_prices_its_stocks_with_one_batch_call():
+    import asyncio
+    from datetime import date
+
+    from fakes import FakeBatch
+
+    day = date(2026, 9, 23)
+    source = FakeBatch(day)
+    symbols = [f"NASDAQ:S{n}" for n in range(28)]
+    got = alerts.fetch_live_prices(source, symbols, day, "America/New_York")
+    got = asyncio.run(got)
+    assert set(got["prices"]) == set(symbols) and [n for n, _ in source.calls] == ["mcp-tv-get-symbol-data-batch"]
+    prev, bar = source.bars_for("NASDAQ:S3")[-2:]
+    assert got["prices"]["NASDAQ:S3"] == bar["c"] and got["closes"]["NASDAQ:S3"] == pytest.approx(prev["c"])
+
+
+def test_a_pass_whose_batch_call_fails_prices_only_the_nearest_one_by_one():
+    import asyncio
+    from datetime import date
+
+    from fakes import FakeBatch
+    from tascreen.errors import ProviderError
+
+    class NoBatch(FakeBatch):
+        async def call_tool(self, name, args):
+            if name == "mcp-tv-get-symbol-data-batch":
+                self.calls.append((name, args))
+                raise ProviderError("scanner unavailable")
+            return await super().call_tool(name, args)
+
+    day = date(2026, 9, 23)
+    source = NoBatch(day)
+    got = asyncio.run(alerts.fetch_live_prices(source, [f"NASDAQ:S{n}" for n in range(28)], day, "America/New_York"))
+    assert len(source.calls) == 1 + alerts.FALLBACK_SYMBOLS and set(got["prices"]) == {f"NASDAQ:S{n}" for n in range(10)}

@@ -18,6 +18,15 @@ One symbol failing is recorded and the run goes on; a sign-in problem stops it.
 Calls go through one MCP session per `bars.session_batch` symbols (a session per
 call would pay a connection and handshake each time; access tokens last 900 s,
 so sessions are not kept open indefinitely).
+
+The daily quota (2026-10-19: about 1000 tool calls a day for the whole account, see
+tv/data.py) cannot pay one call per symbol every night, so a symbol one session behind
+gets its new bar from `get-symbol-data-batch`, `BATCH_SIZE` symbols a call (`bars.batch`),
+between the close and the next open: close, high, low and volume as they are, the open as
+close minus `change_from_open_abs`, and the previous close (close minus `change_abs`) must
+match the stored last close within `overlap_tolerance_pct`, or the symbol goes the
+`get-ohlcv` way (a split shows there). Every night `CROSS_CHECKS` of them are also fetched
+with `get-ohlcv`; if the two disagree, the batch rows are not used that night.
 """
 from __future__ import annotations
 
@@ -33,10 +42,11 @@ import pandas as pd
 from .config import BarsSettings, MarketSettings
 from .contracts import BARS
 from .errors import ContractError, ProviderError
-from .market_hours import (drop_incomplete_session, is_trading_day, last_completed_session,
-                           sessions_between)
+from .fields import pick
+from .market_hours import (drop_incomplete_session, is_trading_day, last_completed_session, live_session,
+                           session_bounds, sessions_between)
 from .store import Store
-from .tv.data import OHLCV_TOOL, bars_frame, fetch_in_session
+from .tv.data import OHLCV_TOOL, QuotaExhausted, bars_frame, fetch_in_session, quota_back
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +91,11 @@ class SymbolResult:
                 "calls": self.calls, "note": self.note}
 
 
+BATCH_TOOL = "mcp-tv-get-symbol-data-batch"
+BATCH_COLUMNS = ["close", "high", "low", "volume", "change_abs", "change_from_open_abs"]
+BATCH_SIZE = 50
+CROSS_CHECKS = 3
+VOLUME_TOLERANCE_PCT = 3.0      # late prints revise the volume after the close
 MAX_BROKEN_SESSIONS = 3        # in a row; then the rest of the run is deferred to the next one
 # Before the 2nd and 3rd try of a batch whose session broke (2026-10-08: TradingView answered
 # 502/503 for hours, and three sessions failing back to back gave the run up within 30 s).
@@ -146,6 +161,8 @@ class BarsJob:
                 result.note = (result.note + "; " if result.note else "") + \
                     f"newest bar {result.last_date} is older than {target.isoformat()}"
                 result.status = "stale"
+        except QuotaExhausted as exc:
+            result.status, result.note = "deferred", str(exc)[:200]
         except (ProviderError, ContractError) as exc:
             # TradingView no longer knows the symbol (2026-10-07: three in a saved universe
             # while the screener answered 429): a delisting or a new ticker, not worth a
@@ -162,12 +179,104 @@ class BarsJob:
             async with gate:
                 if self.stop_at is not None and datetime.now(timezone.utc) >= self.stop_at:
                     return SymbolResult(symbol, "deferred", note="stopped at the deadline")
+                if quota_back() is not None:
+                    return SymbolResult(symbol, "deferred", note="TradingView's daily quota is spent")
                 result = await self.update_symbol(session, symbol)
                 if result.calls and self.bars.min_interval_s:
                     await asyncio.sleep(self.bars.min_interval_s)
                 return result
 
         return list(await asyncio.gather(*(one(s) for s in symbols)))
+
+
+def batch_bar(row: dict[str, Any], symbol: str, day: date, market_tz: str) -> tuple[pd.DataFrame, float]:
+    """(the session's bar from a batch row, as a one-row frame in the BARS layout; the
+    previous close the row implies)."""
+    context = f"{BATCH_TOOL} {symbol}"
+    close, high, low, volume, change_abs, from_open = (
+        float(pick(row, [k], context=context)) for k in BATCH_COLUMNS)
+    opened = session_bounds(day, market_tz)[0]
+    bar = {"t": int(opened.timestamp()), "o": close - from_open, "h": high, "l": low, "c": close, "v": volume}
+    return bars_frame({"bars": [bar]}, symbol), close - change_abs
+
+
+async def batch_rows(session, symbols: list[str], delays: tuple[float, ...]) -> dict[str, dict]:
+    """symbol -> its batch row, `BATCH_SIZE` symbols a call ({"data": {symbol: {column:
+    value}}, "missing": [...]}, confirmed live 2026-09-28: tascreen/explain.py)."""
+    rows: dict[str, dict] = {}
+    for start in range(0, len(symbols), BATCH_SIZE):
+        chunk = symbols[start:start + BATCH_SIZE]
+        payload = await fetch_in_session(session, BATCH_TOOL, {"symbols": chunk, "columns": BATCH_COLUMNS},
+                                         delays=delays)
+        data = pick(payload, ["data"], context=BATCH_TOOL)
+        if isinstance(data, dict):
+            rows.update({s: r for s, r in data.items() if s in chunk and isinstance(r, dict)})
+    return rows
+
+
+def _agrees(a: pd.Series, b: pd.Series, tolerance_pct: float) -> bool:
+    prices = all(abs(a[c] - b[c]) <= tolerance_pct / 100 * abs(b[c]) for c in PRICE_COLUMNS)
+    return prices and abs(a["volume"] - b["volume"]) <= VOLUME_TOLERANCE_PCT / 100 * max(abs(b["volume"]), 1.0)
+
+
+def batch_update(client: Any, job: BarsJob, symbols: list[str]) -> tuple[dict[str, SymbolResult], dict]:
+    """The new session's bar for every symbol one session behind, from batch rows (see the
+    module's docstring). Returns (symbol -> result for the symbols written, a note for
+    the report). Any failure leaves the symbols to the `get-ohlcv` way."""
+    target, tz = job.target, job.market.timezone
+    if not job.bars.batch or live_session(job.now, market_tz=tz, after_close_minutes=15) is not None:
+        return {}, {"used": False, "why": "off, or a session is running"}
+    stored, behind = {}, []
+    for symbol in symbols:
+        frame = job.store.read_bars(symbol)
+        if frame is not None and len(frame) and sessions_between(frame["timestamp"].iloc[-1].date(), target) == 1:
+            stored[symbol] = frame
+            behind.append(symbol)
+    if not behind:
+        return {}, {"used": False, "why": "no symbol one session behind"}
+    checks = behind[:: max(1, len(behind) // CROSS_CHECKS)][:CROSS_CHECKS]
+
+    async def work(session):
+        rows = await batch_rows(session, behind, job.delays)
+        direct = {}
+        for symbol in checks:
+            fresh = await job._fetch(session, symbol, 2)
+            direct[symbol] = fresh[fresh["timestamp"].dt.date == target]
+        return rows, direct
+
+    try:
+        rows, direct = client.with_session(work)
+    except (ProviderError, ContractError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("batch bars not used: %s", type(exc).__name__)
+        return {}, {"used": False, "why": type(exc).__name__}
+    for symbol, frame in direct.items():
+        try:
+            bar = batch_bar(rows[symbol], symbol, target, tz)[0].iloc[0] if symbol in rows else None
+        except (ProviderError, ContractError, TypeError, ValueError):
+            bar = None
+        if bar is None or frame.empty or not _agrees(bar, frame.iloc[0], job.bars.overlap_tolerance_pct):
+            log.warning("batch bars not used: %s's batch row disagrees with its daily bar", symbol)
+            return {}, {"used": False, "why": "cross-check failed", "calls": len(direct)}
+    out: dict[str, SymbolResult] = {}
+    mismatched = 0
+    for symbol in behind:
+        if symbol not in rows:
+            continue
+        try:
+            frame, previous = batch_bar(rows[symbol], symbol, target, tz)
+            last = float(stored[symbol]["close"].iloc[-1])
+            if abs(previous - last) > job.bars.overlap_tolerance_pct / 100 * abs(last):
+                mismatched += 1                  # a split or a revised close: get-ohlcv decides
+                continue
+            merged = BARS.validate(pd.concat([stored[symbol], frame], ignore_index=True))
+        except (ProviderError, ContractError, TypeError, ValueError) as exc:
+            log.info("%s: batch row not used (%s)", symbol, type(exc).__name__)
+            continue
+        job.store.write_bars(symbol, merged)
+        out[symbol] = SymbolResult(symbol, "updated", merged["timestamp"].iloc[-1].date().isoformat(),
+                                   len(merged), note="batch")
+    calls = -(-len(behind) // BATCH_SIZE) + len(checks)
+    return out, {"used": True, "symbols": len(out), "previous_close_mismatch": mismatched, "calls": calls}
 
 
 def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
@@ -178,7 +287,8 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
     status = job.store.read_status()
     results: list[SymbolResult] = []
     started = time.monotonic()
-    calls = 0
+    by_batch, batch_note = batch_update(client, job, symbols)
+    calls = int(batch_note.get("calls", 0))
     broken = 0                   # sessions in a row that failed to open or died
 
     def late(seconds: float = 0) -> bool:
@@ -191,6 +301,9 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
             # sorted again on a retry: a session that died mid-batch kept what it fetched
             done, need = [], []
             for symbol in batch:
+                if symbol in by_batch:
+                    done.append(by_batch[symbol])
+                    continue
                 last, rows = _stored_tail(job, symbol)
                 if last is not None and date.fromisoformat(last) >= job.target:
                     done.append(SymbolResult(symbol, "up_to_date", last, rows))
@@ -198,6 +311,8 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
                     need.append(symbol)
             if need and late():
                 done += [SymbolResult(s, "deferred", note="stopped at the deadline") for s in need]
+            elif need and quota_back() is not None:
+                done += [SymbolResult(s, "deferred", note="TradingView's daily quota is spent") for s in need]
             elif need and broken >= MAX_BROKEN_SESSIONS:
                 done += [SymbolResult(s, "deferred", note="TradingView sessions kept failing")
                          for s in need]
@@ -249,6 +364,8 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
         "stale": {r.symbol: r.note for r in results if r.status == "stale"},
         "refetched": {r.symbol: r.note for r in results if r.status == "refetched"},
         "deferred": sum(r.status == "deferred" for r in results),
+        "batch": batch_note,
+        "quota_spent": quota_back() is not None,
     }
 
 

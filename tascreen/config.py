@@ -127,6 +127,9 @@ class BarsSettings:
     # Calls in flight at once inside a session, and a pause after each call.
     concurrency: int = 1
     min_interval_s: float = 0.0
+    # The new session's bar from batch rows, 50 symbols a call (tascreen/bars.py): the
+    # account's daily tool-call quota (2026-10-19, about 1000) cannot pay a call a symbol.
+    batch: bool = True
 
     def __post_init__(self):
         for name in ("history", "overlap", "session_batch", "concurrency"):

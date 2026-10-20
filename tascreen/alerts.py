@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import logging
 import math
 import time
 import urllib.parse
@@ -32,12 +33,15 @@ from .config import AlertsSettings
 from .errors import ProviderError
 from .fields import pick
 from .hebrew import NY_TIME, count_he
+from .market_hours import session_bounds
 from .outcomes import FINAL
 from .patterns.levels import invalidation
 from .quotes import crossings
 from .store import Store, _write_json
 from .tv.data import NEWS_TOOL, OHLCV_TOOL, fetch_in_session
 from .web.data import ScanView, detection_record
+
+log = logging.getLogger(__name__)
 
 MESSAGE_LIMIT = 4000                   # Telegram allows 4096; room for the escaping
 VERGE_SHOWN = 30
@@ -381,17 +385,50 @@ def live_price(payload: dict[str, Any], session_day: date, market_tz: str) -> fl
     return price if math.isfinite(price) and price > 0 else None
 
 
+FALLBACK_SYMBOLS = 10          # a pass whose batch call failed prices this many one by one
+
+
 async def fetch_live_prices(session: Any, symbols: list[str], session_day: date, market_tz: str, *,
-                            concurrency: int = 1, measure_delay: bool = False) -> dict[str, Any]:
-    """One pass: each watched stock's price from one get-ohlcv call (2 daily bars). With
-    `measure_delay`, one more call (the first stock's newest 1-minute bar) shows how
-    delayed TradingView's data is."""
+                            concurrency: int = 1, measure_delay: bool = False,
+                            batch: bool = True) -> dict[str, Any]:
+    """One pass: the watched stocks' prices. Once the session has opened, from batch rows
+    (`get-symbol-data-batch`, 50 symbols a call: during the session `close` is the live
+    price and close minus `change_abs` the previous close; owner's quota, 2026-10-20: one
+    call a stock a pass spent about 1300 of the account's ~1000 calls a day). Stocks the
+    batch did not answer, or every stock without `batch`, get one get-ohlcv call (2 daily
+    bars) each; when the batch call itself failed, only the first FALLBACK_SYMBOLS (the
+    nearest to their lines come first). With `measure_delay`, one more call (the first
+    stock's newest 1-minute bar) shows how delayed TradingView's data is."""
+    from .bars import batch_rows
+
     gate = asyncio.Semaphore(concurrency)
     prices: dict[str, float] = {}
     closes: dict[str, float] = {}
     seconds: list[float] = []
     failed = 0
     delay = None
+    one_by_one = list(symbols)
+    if batch and symbols and datetime.now(timezone.utc) >= session_bounds(session_day, market_tz)[0]:
+        started = time.monotonic()
+        try:
+            rows = await batch_rows(session, list(symbols), ())
+        except (ProviderError, OSError, TimeoutError, ValueError) as exc:
+            log.info("live batch prices failed: %s", type(exc).__name__)
+            one_by_one = list(symbols)[:FALLBACK_SYMBOLS]
+            failed += 1
+        else:
+            seconds.append(time.monotonic() - started)
+            for symbol, row in rows.items():
+                try:
+                    price = float(pick(row, ["close"], context=f"batch {symbol}"))
+                    change = float(pick(row, ["change_abs"], context=f"batch {symbol}"))
+                except (ProviderError, TypeError, ValueError):
+                    continue
+                if math.isfinite(price) and price > 0:
+                    prices[symbol] = price
+                    if math.isfinite(change) and price - change > 0:
+                        closes[symbol] = price - change
+            one_by_one = [s for s in symbols if s not in prices]
     if measure_delay and symbols:
         try:
             payload = await fetch_in_session(session, OHLCV_TOOL,
@@ -418,7 +455,7 @@ async def fetch_live_prices(session: Any, symbols: list[str], session_day: date,
                 if close is not None:
                     closes[symbol] = close
 
-    await asyncio.gather(*(one(s) for s in symbols))
+    await asyncio.gather(*(one(s) for s in one_by_one))
     return {"prices": prices, "closes": closes, "seconds": seconds, "failed": failed, "delay_min": delay}
 
 

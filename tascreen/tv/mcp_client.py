@@ -67,9 +67,11 @@ _EXPIRY_MARGIN_S = 60.0     # refresh this long before the access token (900 s) 
 # the balancer (about three counters, so about 60 calls a minute in all), and an exhausted
 # one answers HTTP 429 with retry-after 60. The nightly update sent up to 90 calls a minute,
 # and the SDK turned each 429 into a generic error that killed the whole session. Calls now
-# start at least this far apart (at most 40 a minute; a live check of 150 calls at 1.25 s
-# left one counter at 4), and a 429 is RateLimited with its wait.
-CALL_SPACING_S = 1.5
+# start at least this far apart, and a 429 is RateLimited with its wait. 2026-10-13 the limit
+# fell to 10 ("Maximum 10 requests per minute for MEDIUM tier endpoints", get-ohlcv), and
+# since 2026-10-19 the account has about 1000 calls a day (tv/data.py): the bars and the
+# live prices now come 50 symbols a call, so few calls are left to pace.
+CALL_SPACING_S = 6.0
 RETRY_AFTER_DEFAULT_S = 60.0
 
 

@@ -230,7 +230,6 @@ SENT_SHOWN_MAX = 30          # the newest this many go into the prompt (about 30
 SENT_RECENT_KEPT = 60        # rows kept in the state file (the explainer reads them too)
 RECENT_WINDOW_S = 3 * 3600   # posts kept this long for the market explainer (tascreen/explain.py)
 RECENT_MAX = 300
-SOURCES_SHOWN = 3
 # Every pick for the morning digest (owner, 2026-09-29): sent, held back by `ration`, and
 # the updates rated 2 that are never sent ("interesting, not necessarily sent"), from a
 # session's open to 10:00 the next day, and over a weekend from Friday's open to Monday
@@ -378,18 +377,12 @@ def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
 
 
 def item(post: Post, pick_: dict, *, with_image: bool = False) -> str:
-    """One pick in Telegram HTML: mark, account, the sentence and a link; then the short
-    analysis, and under a photo the line that says what the picture shows."""
+    """One pick in Telegram HTML: mark, the sentence and a link to the post; then the short
+    analysis, and under a photo the line that says what the picture shows. No account name
+    (owner, 2026-10-20: the author is not shown; the link still leads to the post)."""
     mark = {5: "🔴", 4: "🟠"}.get(pick_["importance"], "🔵")
-    sources = [(post.author, post.url)]
-    for author, url in pick_.get("sources") or []:
-        if author not in {a for a, _ in sources}:
-            sources.append((author, url))
-    names = " · ".join(f"<b>{html.escape(a)}</b>" for a, _ in sources[:SOURCES_SHOWN])
-    if len(sources) > SOURCES_SHOWN:
-        names += f" +{len(sources) - SOURCES_SHOWN}"
-    links = " ".join(f'<a href="{html.escape(u, quote=True)}">↗</a>' for _, u in sources[:SOURCES_SHOWN])
-    text = f"{mark} {names}: {html.escape(pick_['summary_he'])} {links}"
+    link = f'<a href="{html.escape(post.url, quote=True)}">↗</a>'
+    text = f"{mark} {html.escape(pick_['summary_he'])} {link}"
     if pick_.get("analysis_he"):
         text += f"\n💡 {html.escape(pick_['analysis_he'])}"
     if with_image and pick_.get("image_he"):
@@ -522,8 +515,9 @@ def deliver(picks: list[tuple[Post, dict]], send: Callable[[str], None],
             send_png: Callable[[bytes, str], None] | None = None,
             send_album: Callable[[list[tuple[bytes | str, str]]], None] | None = None) -> int:
     """A round's picks in one message (owner, 2026-10-01: "two stories in a round go in one
-    message, not two"), each with a picture where possible (owner, 2026-10-10): the post's
-    own photo, else one drawn for it (`picture`, tascreen/news_card.py). A lone pick goes
+    message, not two"), each with the post's own photo where it has one; `picture` (a card
+    drawn by tascreen/news_card.py) is optional and run.py no longer passes it (owner,
+    2026-10-20: a post without a photo goes without a picture). A lone pick goes
     as its picture with its text as the caption; two or more go as one album whose first
     picture carries the whole text (or each its own, when the whole is over Telegram's 1024).
     A photo Telegram cannot fetch is replaced by a drawn one; with no picture at all the text

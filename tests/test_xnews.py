@@ -227,8 +227,8 @@ def test_two_stories_in_a_round_go_in_one_message(tmp_path):
     sent, photos = [], []
     summary, _ = run(tmp_path, FakeReader(page), llm, sent, send_photo=lambda u, c: photos.append((u, c)))
     assert summary["sent"] == 2 and summary["photos"] == 0 and photos == []
-    assert sent == ['🔴 <b>NewsDesk</b>: חדשה עם גרף <a href="https://x.com/NewsDesk/status/91">↗</a>\n\n'
-                    '🟠 <b>NewsDesk</b>: חדשה בלי תמונה <a href="https://x.com/NewsDesk/status/92">↗</a>']
+    assert sent == ['🔴 חדשה עם גרף <a href="https://x.com/NewsDesk/status/91">↗</a>\n\n'
+                    '🟠 חדשה בלי תמונה <a href="https://x.com/NewsDesk/status/92">↗</a>']   # no account name
 
 
 def test_a_lone_story_with_a_photo_goes_as_the_photo(tmp_path):
@@ -238,7 +238,7 @@ def test_a_lone_story_with_a_photo_goes_as_the_photo(tmp_path):
                      send_photo=lambda u, c: photos.append((u, c)))
     assert summary["photos"] == 1 and sent == []
     assert photos == [("https://pbs.twimg.com/media/synthetic.jpg",
-                       '🔴 <b>NewsDesk</b>: חדשה עם גרף <a href="https://x.com/NewsDesk/status/93">↗</a>')]
+                       '🔴 חדשה עם גרף <a href="https://x.com/NewsDesk/status/93">↗</a>')]
 
 
 def test_a_photo_telegram_cannot_fetch_goes_as_text(tmp_path):
@@ -345,8 +345,8 @@ def test_one_story_from_three_accounts_goes_out_once_with_its_sources(tmp_path):
     sent = []
     summary, _ = run(tmp_path, FakeReader(page), llm, sent)
     assert summary["sent"] == 1 and summary["merged"] == 2 and "כפול" not in sent[0]
-    assert sent[0].startswith("🔴 <b>DeItaone</b> · <b>zerohedge</b> · <b>markets</b>: המדד עלה")
-    assert sent[0].count("↗") == 3
+    assert sent[0].startswith("🔴 המדד עלה") and "DeItaone" not in sent[0].split("<a")[0]
+    assert sent[0].count("↗") == 1                                     # the main post's link only
 
 
 def test_a_repeat_of_what_was_sent_is_dropped_and_the_sent_list_is_shown(tmp_path):

@@ -175,6 +175,16 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   edges from each pivot, touch within 0.15 ATR, the last 3 sessions may test with a wick; the
   analysis chart widens to a line's first touch and clips lines to the price panel. On the local
   bars: wedges about half, triangles about a third fewer, analyst lines -19%.
+- TradingView's daily tool-call quota (since 2026-10-19; nights of 10-19/20 lost): about 1000
+  calls a UTC day for the whole account (measured: ~998 calls from 00:00 UTC, then
+  TOOL_QUOTA_EXCEEDED until 00:00 UTC). We spent ~2300 (live ~1300: one get-ohlcv a stock a
+  pass; nightly ~1000: one a stock). Now: `tv.data.QuotaExhausted` stops every call until
+  00:00 UTC (the per-minute quota is a short RateLimited); the nightly bars come from
+  `get-symbol-data-batch`, 50 symbols a call (`bars.batch_update`: previous-close check, 3
+  get-ohlcv cross-checks a night, else the get-ohlcv way); live prices likewise (one call a
+  pass; the delay is measured hourly); the owner's lists' bars too; a run that meets the spent
+  quota waits for 00:00 UTC when that fits its deadline. Expected use: ~300 calls a day. The
+  market-research-pipeline project signs in to the same account: its calls count too.
 - X news pictures (owner, 2026-10-10): every story goes with a picture: the post's photo, else a
   drawn card (`news_card.py`: the digest's design, with the named stock's three months of candles;
   `xnews.yml` downloads the bars). Two or more stories in a round: one album, the whole text on the
@@ -183,7 +193,7 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   10-08 lost): every MCP answer carries `x-ratelimit-limit: 20` per server (about three behind
   the balancer, so about 60 calls a minute); past it, HTTP 429 with `retry-after: 60`. The SDK
   reported it as "Server returned an error response" and the session died. Now every call is
-  paced (`mcp_client.CALL_SPACING_S`, at most 40 a minute, all sessions of a process), a 429 is
+  paced (`mcp_client.CALL_SPACING_S`, 6 s since the limit fell to 10 a minute on 2026-10-13), a 429 is
   `RateLimited` with the server's wait and the call is repeated in the same session, and
   error answers are logged with their status (`_note_refusal`). For real outages (502/503) a
   broken bars session is retried after 2 and 10 min (`bars.BROKEN_PAUSES_S`), and

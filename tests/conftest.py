@@ -73,3 +73,14 @@ def _restore_root_logging():
             root.removeHandler(handler)
             handler.close()
     root.setLevel(level)
+
+
+@pytest.fixture(autouse=True)
+def _quota_not_spent():
+    """TradingView's daily quota (tascreen/tv/data.py) is remembered per process: a test that
+    spends it must not leave the next test without calls."""
+    from tascreen.tv.data import quota_spent
+
+    quota_spent(None)
+    yield
+    quota_spent(None)

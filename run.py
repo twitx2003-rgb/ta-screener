@@ -541,11 +541,25 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
         deadline = next_open(started, market_tz=settings.market.timezone) - timedelta(minutes=10)
         if max_minutes:
             deadline = min(deadline, started + timedelta(minutes=max_minutes))
-        try:
-            code = update(settings, limit, stop_at=deadline)
-        except ScreenerError as exc:
-            log.error("daily update failed: %s", exc)          # the private log only
-            code, summary["update_error"] = 1, type(exc).__name__
+        from tascreen.tv.data import quota_back, quota_spent
+
+        for attempt in (1, 2):
+            summary.pop("update_error", None)
+            try:
+                code = update(settings, limit, stop_at=deadline)
+            except ScreenerError as exc:
+                log.error("daily update failed: %s", exc)          # the private log only
+                code, summary["update_error"] = 1, type(exc).__name__
+            # TradingView's daily quota spent (2026-10-19: the evening run met it at 22:33 UTC,
+            # 87 minutes before 00:00 UTC): wait for it, when that fits, and finish the update
+            back = quota_back()
+            if back is None or attempt == 2 or back + timedelta(minutes=3) >= deadline:
+                break
+            wait = (back - datetime.now(timezone.utc)).total_seconds() + 120
+            log.warning("TradingView's daily quota is spent: waiting %.0f min until it is back", wait / 60)
+            summary["waited_for_quota_min"] = round(wait / 60)
+            time.sleep(max(0.0, wait))
+            quota_spent(None)
         last = _read_log_json(settings, "bars_last_run.json")
         summary["bars"] = last.get("counts", {})
         deferred = int(summary["bars"].get("deferred", 0))
@@ -978,7 +992,8 @@ def ci_live(settings, max_minutes: float) -> int:
         watch = near + (far if summary["passes"] % cfg.far_every == 0 else [])
         try:
             got = client.with_session(lambda session: alerts.fetch_live_prices(
-                session, watch, day, tz, concurrency=settings.bars.concurrency, measure_delay=True))
+                session, watch, day, tz, concurrency=settings.bars.concurrency,
+                measure_delay=summary["passes"] % DELAY_EVERY_PASSES == 0))
         except (ProviderError, OSError, TimeoutError, ExceptionGroup) as exc:
             log.warning("a price pass failed: %s", type(exc).__name__)
             summary["failed_passes"] += 1
@@ -1103,7 +1118,7 @@ def _owner_list_stocks(settings, client, store, view) -> tuple[list[str], dict]:
     up to date (kept with the others), and only those trading at least the universe's volume
     floor. The symbols stay private: counts only in the log."""
     from tascreen import setups_list
-    from tascreen.bars import BarsJob
+    from tascreen.bars import BarsJob, update_all
     from tascreen.tv.data import fetch_in_session
 
     cfg, delays = settings.setups_list, settings.tradingview.rate_limit_delays
@@ -1117,13 +1132,14 @@ def _owner_list_stocks(settings, client, store, view) -> tuple[list[str], dict]:
     extra = [s for s in symbols if s not in covered]
     job = BarsJob(store=store, bars=settings.bars, market=settings.market, delays=delays)
     try:
-        results = client.with_session(lambda session: job.run_batch(session, extra)) if extra else []
+        # batch rows first, like the universe's bars (the daily quota: ~160 calls a night before)
+        counts = update_all(client, job, extra, progress=lambda line: None)["counts"] if extra else {}
     except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
         log.warning("the owner's stocks' bars were not updated: %s", type(exc).__name__)
-        results = []
+        counts = {}
     liquid = [s for s in extra if setups_list.liquid(store.read_bars(s), settings.universe.min_avg_volume, view.day)]
     return liquid, {"on_lists": len(symbols), "not_in_scan": len(extra), "liquid": len(liquid),
-                    "bars_failed": sum(r.status == "failed" for r in results)}
+                    "bars_failed": int(counts.get("failed", 0))}
 
 
 def _setups_open(settings, client, store, day, owner) -> dict:
@@ -1304,6 +1320,9 @@ def premarket_until_open(settings, opens, sleep=None, now=None) -> list[str]:
             break
         sleep(max(1.0, (wake - now()).total_seconds() + 5))
     return statuses
+
+
+DELAY_EVERY_PASSES = 12   # the data delay is measured about hourly (a call each pass spent the daily quota)
 
 
 def ensure_live(settings, now=None) -> int:
@@ -1812,8 +1831,7 @@ def xnews_pass(settings) -> int:
         llm_factory=lambda: ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s),
         send=lambda text: bot.send(text, html=True),
         send_photo=lambda url, caption: bot.send_photo_url(url, caption, html=True),
-        # a story without a photo of its own gets a drawn one (owner, 2026-10-10)
-        picture=lambda post, pick: xnews.card_png(post, pick, data_dir=settings.data_dir, now=now),
+        # no drawn card for a post without a photo (owner, 2026-10-20; it was 2026-10-10's)
         send_png=lambda png, caption: bot.send_photo(png, caption, "news.png", html=True),
         send_album=bot.send_album,
         state_path=state_path, now=now,

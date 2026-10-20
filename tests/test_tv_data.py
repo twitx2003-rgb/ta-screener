@@ -196,3 +196,38 @@ def test_save_payload_writes_readable_json(tmp_path):
     saved = json.loads((tmp_path / "d" / "probe.json").read_text(encoding="utf-8"))
     assert saved["name"] == "שלום" and where.endswith("probe.json")
     assert save_payload(None, "x", {}) == "not saved"
+
+
+# ------------------------------------------------- TradingView's tool-call quota
+def test_the_spent_daily_quota_stops_every_call_until_midnight_utc():
+    from tascreen.tv.data import QuotaExhausted, quota_back
+
+    text = ("tool_pre_invoke blocked by plugin ToolQuotaPlugin: TOOL_QUOTA_EXCEEDED - Tool call quota exceeded "
+            "(Daily tool-call quota for this user is exhausted. It resets at 00:00 UTC, in about 1h 26m; "
+            "do not retry before then.)")
+    with pytest.raises(QuotaExhausted):
+        tool_payload(result(None, is_error=True, text=text), "mcp-tv-run-screener")
+    back = quota_back()
+    assert back is not None and back.hour == 0 and back.minute == 0
+
+    class Session:
+        calls = 0
+
+        async def call_tool(self, name, args):
+            Session.calls += 1
+
+    import asyncio
+    from tascreen.tv.data import fetch_in_session
+
+    with pytest.raises(QuotaExhausted):
+        asyncio.run(fetch_in_session(Session(), "mcp-tv-get-ohlcv", {}))
+    assert Session.calls == 0
+
+
+def test_the_per_minute_quota_is_a_short_wait():
+    text = ("tool_pre_invoke blocked by plugin ToolQuotaPlugin: TOOL_QUOTA_EXCEEDED - Tool call quota exceeded "
+            "(Tool-call quota for this user is exhausted for the current minute. Wait about 1 seconds before "
+            "retrying, and reduce the call frequency.)")
+    with pytest.raises(RateLimited) as caught:
+        tool_payload(result({"success": False, "error": text}), "mcp-tv-get-ohlcv")
+    assert caught.value.retry_after == 2.0
