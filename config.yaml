@@ -57,6 +57,7 @@ bars:
   session_batch: 100         # new MCP session every N symbols (tokens last 15 min)
   concurrency: 1             # calls in flight at once
   min_interval_s: 0.0        # pause after each call
+  batch: true                # the new bar from batch rows, 50 symbols a call (the daily quota)
 
 market:
   timezone: "America/New_York"
@@ -134,10 +135,15 @@ xnews:
   # RealVision, SchwabResearch, GoldmanSachs, JPMorgan, MorganStanley, BofA_Merrill, Citi,
   # UBS, Barclays, HSBC, Fidelity, Vanguard_Group, BlackRock, StateStreet, InvescoUS, PIMCO,
   # TrowePrice, JanusHenderson, ARKInvest, CathieDWood
+  # Added 2026-10-20 (owner, after a reliability check): markets (back), NickTimiraos (the
+  # Fed), EricBalchunas (fund flows), carlquintanilla (analyst notes in the session),
+  # TheStalwart (why the market moves). Reuters itself stays out: ReutersBiz is its business
+  # feed. 24 accounts: two search calls a pass.
   accounts: [
     unusual_whales, wallstengine, StockSavvyShay, bespokeinvest, MikeZaccardi, DeItaone,
     gurgavin, garyblack00, InvestingVisual, Mr_Derivatives, zerohedge, LizAnnSonders,
-    charliebilello, KobeissiLetter, TheChartReport, CNBC, WSJmarkets, FT, ReutersBiz]
+    charliebilello, KobeissiLetter, TheChartReport, CNBC, WSJmarkets, FT, ReutersBiz,
+    markets, NickTimiraos, EricBalchunas, carlquintanilla, TheStalwart]
   min_importance: 3          # 1-5: 5 = market-moving now, 4 = relevant to specific stocks today,
                              # 3 = a useful Wall Street update (owner, 2026-09-28: not only the dramatic)
   weekend_min_importance: 4  # Saturday and Sunday: only the dramatic, and what matters for the week
