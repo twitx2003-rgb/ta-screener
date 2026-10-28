@@ -474,6 +474,42 @@ class SetupsListSettings:
             raise ConfigError("setups_list: pool_size 0..100, open_after_minutes 0..120")
 
 
+
+@dataclass(frozen=True)
+class FlowSettings:
+    # Where the money flows (tascreen/flow.py; owner, 2026-10-28: "stocks fitted to where the
+    # money flows and where sentiment goes; an uptrend, not a long sideways drift"). The owner
+    # chose a strict filter: only stocks that pass go to the setups list, the evening research
+    # and the live watch; the map goes to the private chat once a week (after Friday's close).
+    enabled: bool = True
+    filter: bool = True              # off: the map only, nothing is filtered
+    benchmark: str = "AMEX:SPY"      # the market they are measured against (its bars kept nightly)
+    rs_min: float = 80.0             # relative strength rating 1..99: above this share of the stocks
+    steady_r2: float = 0.6           # the last `steady_sessions` closes fit a rising line this well
+    steady_sessions: int = 126       # about six months
+    ud_min: float = 1.0              # volume on up days over volume on down days, last `ud_sessions`
+    ud_sessions: int = 50
+    near_high_pct: float = 25.0      # trend template: within this % of the 52-week high
+    above_low_pct: float = 30.0      # ...and at least this % above the 52-week low
+    group_top_share: float = 0.4     # leading groups: this top share of the industries (sectors)
+    industry_min_members: int = 5    # a smaller industry is judged by its sector
+    weekly_top: int = 8              # stocks named in the weekly map
+
+    def __post_init__(self):
+        object.__setattr__(self, "benchmark", str(self.benchmark).strip())
+        for name in ("rs_min", "steady_r2", "ud_min", "near_high_pct", "above_low_pct", "group_top_share"):
+            object.__setattr__(self, name, float(getattr(self, name)))
+        for name in ("steady_sessions", "ud_sessions", "industry_min_members", "weekly_top"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        if not (1 <= self.rs_min <= 99 and 0 <= self.steady_r2 < 1 and 0 < self.ud_min <= 5):
+            raise ConfigError("flow: rs_min 1..99, steady_r2 0..1, ud_min 0..5")
+        if not (60 <= self.steady_sessions <= 252 and 20 <= self.ud_sessions <= 120):
+            raise ConfigError("flow: steady_sessions 60..252, ud_sessions 20..120")
+        if not (0 < self.group_top_share <= 1 and 2 <= self.industry_min_members <= 30 and 1 <= self.weekly_top <= 20):
+            raise ConfigError("flow: group_top_share 0..1, industry_min_members 2..30, weekly_top 1..20")
+        if ":" not in self.benchmark:
+            raise ConfigError("flow.benchmark must be EXCHANGE:TICKER")
+
 _SECTIONS = {
     "paths": PathSettings,
     "tradingview": TradingViewSettings,
@@ -489,6 +525,7 @@ _SECTIONS = {
     "research": ResearchSettings,
     "watchlist": WatchlistSettings,
     "setups_list": SetupsListSettings,
+    "flow": FlowSettings,
 }
 
 
@@ -509,6 +546,7 @@ class Settings:
     research: ResearchSettings = field(default_factory=ResearchSettings)
     watchlist: WatchlistSettings = field(default_factory=WatchlistSettings)
     setups_list: SetupsListSettings = field(default_factory=SetupsListSettings)
+    flow: FlowSettings = field(default_factory=FlowSettings)
 
     @property
     def data_dir(self) -> Path:

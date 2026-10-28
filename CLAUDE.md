@@ -185,6 +185,18 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   pass; the delay is measured hourly); the owner's lists' bars too; a run that meets the spent
   quota waits for 00:00 UTC when that fits its deadline. Expected use: ~300 calls a day. The
   market-research-pipeline project signs in to the same account: its calls count too.
+- Money flow (owner, 2026-10-28: "stocks fitted to where the money flows; an uptrend, not a long
+  sideways drift"; `tascreen/flow.py`, `flow:` in config): every night after the scan, from the
+  stored bars (no TradingView call; the benchmark AMEX:SPY's bars are kept with the others), a
+  map in data/flow/<day>.json: per stock a 1..99 relative-strength rating, the trend template,
+  six-month steadiness (R2 of the log-closes), up/down volume; per industry and sector the moves
+  against the S&P 500, the share in the template, the dollar-volume flow and a rotation quadrant.
+  The owner chose the STRICT filter: only stocks that pass all (template, steady, rating >= 80,
+  up/down >= 1, a leading group) reach the setups list, the evening research and the live watch;
+  a setups-list entry whose template broke leaves ("trend"). The weekly map goes to the private
+  chat after the week's last session. First night: of 39 entries, 21 would leave (template
+  broken). Next stages, after the owner's review: 3) learning (which conditions worked, in the
+  list's ledger and the history study), 4) news sentiment per sector from the X triage.
 - X news pictures (owner, 2026-10-10): every story goes with a picture: the post's photo, else a
   drawn card (`news_card.py`: the digest's design, with the named stock's three months of candles;
   `xnews.yml` downloads the bars). Two or more stories in a round: one album, the whole text on the

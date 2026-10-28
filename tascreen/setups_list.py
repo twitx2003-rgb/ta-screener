@@ -93,6 +93,7 @@ REASONS = {
     "unfollowed": "כבר לא ברשימת המניות של הבוט (מחזור מסחר או שווי)",
     "redefined": "לא עומדת בהגדרות החדשות של הרשימה",
     "opened_below": "נפתחה מתחת לרמה שלה: התמיכה נשברה בפתיחה",
+    "trend": "המגמה העולה נשברה (מתחת לממוצעים הארוכים או רחוק מהשיא)",
 }
 WEAK_MARKET_KINDS = ("ma150",)            # what may go in while the market is weak
 
@@ -320,10 +321,12 @@ def level_now(entry: dict[str, Any], bars: pd.DataFrame) -> float:
 
 def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr: float,
            keep_sessions: int, extra: list[str] | tuple = (),
-           qualify: Callable[[dict], bool] = lambda e: True) -> tuple[list[dict], list[dict]]:
+           qualify: Callable[[dict], bool] = lambda e: True,
+           trending: set[str] | None = None) -> tuple[list[dict], list[dict]]:
     """(entries kept, events): each event is {"symbol", "kind", "what": "removed", "reason"}.
-    `extra`: the owner's stocks followed beside the scan's. An entry without the session's
-    close is kept as it is (a gap in the data)."""
+    `extra`: the owner's stocks followed beside the scan's. `trending`: the stocks still in
+    the money-flow map's uptrend (tascreen/flow.py; None: not checked). An entry without the
+    session's close is kept as it is (a gap in the data)."""
     kept, events = [], []
     followed = set(view.stocks["symbol"]) | set(extra)
     for e in entries:
@@ -335,6 +338,9 @@ def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr:
             continue
         if not qualify(e):                                  # the rules tightened since it went in
             drop("redefined")
+            continue
+        if trending is not None and e["symbol"] not in trending:   # owner, 2026-10-28: uptrends only
+            drop("trend")
             continue
         close, bars = _close(view, e["symbol"]), bars_of(e["symbol"])
         if close is None and bars is not None and len(bars) and day_of(bars["timestamp"].iloc[-1]) == view.day:
@@ -369,7 +375,7 @@ def cap(entries: list[dict], max_size: int) -> tuple[list[dict], list[dict]]:
 
 
 def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_of: Callable, cfg, *,
-            break_atr: float, extra: list[str] | tuple = ()) -> dict[str, Any]:
+            break_atr: float, extra: list[str] | tuple = (), trending: set[str] | None = None) -> dict[str, Any]:
     """The new state after the session: review, tonight's setups in (or renewing an entry),
     then the cap. `events` lists what changed (added / renewed / removed). A list from before
     the owner's setups (version 1) is replaced: its entries leave unless they show one now."""
@@ -382,7 +388,7 @@ def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_
                    for e in entries if e["symbol"] not in found]
         entries = []
     kept, gone = review(entries, view, bars_of, break_atr=break_atr, keep_sessions=cfg.keep_sessions,
-                        extra=extra, qualify=lambda e: qualifies(e, cfg))
+                        extra=extra, qualify=lambda e: qualifies(e, cfg), trending=trending)
     mine = set(extra)
     events += gone
     by = {e["symbol"]: e for e in kept}

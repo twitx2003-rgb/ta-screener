@@ -265,3 +265,14 @@ setups_list:
   ma20_bounce_volume: 1.5
   ma20_needs_strong: false
   weak_market_pct: 40
+
+# Where the money flows (tascreen/flow.py; owner, 2026-10-28): a strict filter on the stocks
+# that come up (setups list, evening research, live watch) and a weekly map, private chat.
+flow:
+  enabled: true
+  filter: true
+  benchmark: "AMEX:SPY"
+  rs_min: 80                 # stronger than 80% of the stocks (3-12 month returns, weighted)
+  steady_r2: 0.6             # six months of closes on a rising line, not a sideways drift
+  ud_min: 1.0                # more volume on up days than on down days (50 sessions)
+  group_top_share: 0.4       # in an industry (sector) among the strongest 40%

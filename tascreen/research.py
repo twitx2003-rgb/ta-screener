@@ -382,14 +382,18 @@ def fill_picks(dossiers: list[dict], by_symbol: dict[str, dict], picks: list[dic
 def research(view: ScanView, store: Store, breakouts: list[dict], verge: list[dict], *, llm, verge_pct: float,
              shortlist_size: int, max_picks: int, news_of: Callable[[list[str]], dict[str, dict]] | None = None,
              market: dict[str, float] | None = None, analyse: Callable | None = None,
-             patterns: set[str] | None = None, min_picks: int = 0) -> dict[str, Any]:
+             patterns: set[str] | None = None, min_picks: int = 0,
+             allowed: set[str] | None = None) -> dict[str, Any]:
     """The whole evening: candidates -> shortlist -> dossiers -> team. Only `patterns` (the
-    proven ones, alerts.proven_patterns; None: all). status: "picked", "none" (the team
-    found nothing good enough) or "failed" (every pick broke a rule)."""
+    proven ones, alerts.proven_patterns; None: all) and only the `allowed` stocks (the money-flow
+    map's, tascreen/flow.py; None: all). status: "picked", "none" (the team found nothing good
+    enough) or "failed" (every pick broke a rule)."""
     stocks = {r["symbol"]: r for r in view.stocks.to_dict("records")}
     every = candidates(view, breakouts, verge)
-    cands = [c for c in every if patterns is None or c["pattern"] in patterns]
-    out: dict[str, Any] = {"candidates": len(cands), "unproven": len(every) - len(cands),
+    flowing = [c for c in every if allowed is None or c["symbol"] in allowed]
+    cands = [c for c in flowing if patterns is None or c["pattern"] in patterns]
+    out: dict[str, Any] = {"candidates": len(cands), "unproven": len(flowing) - len(cands),
+                           "outside_flow": len(every) - len(flowing),
                            "breakouts": len(breakouts), "verge": len(verge),
                            "shortlist": [], "picks": [], "dropped": []}
     if not cands:

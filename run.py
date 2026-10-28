@@ -325,6 +325,8 @@ def bars(settings, limit: int | None, stop_at=None) -> int:
         return 1
     day, frame = found
     symbols = frame["symbol"].tolist()[:limit] if limit else frame["symbol"].tolist()
+    if settings.flow.enabled and settings.flow.benchmark not in symbols:
+        symbols.append(settings.flow.benchmark)       # the market the flow map measures against
     job = BarsJob(Store(settings.data_dir), settings.bars, settings.market,
                   settings.tradingview.rate_limit_delays, stop_at=stop_at)
     print(f"\nBars for {len(symbols)} symbols (universe of {day}); "
@@ -574,6 +576,8 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
                                 "exit_code": code,
                                 "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         summary["complete"] = complete
+    if settings.flow.enabled:
+        summary["flow"] = _flow_map(settings, store, target)
     if settings.alerts.enabled:
         summary["alerts"] = _evening_alerts(settings, store, target)
     if settings.setups_list.enabled:
@@ -583,10 +587,69 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
     if settings.research.enabled:
         summary["research_weekly"] = _research_weekly(settings, store)
     summary["market"] = _market_snapshot(settings, store, target)
+    if settings.flow.enabled:
+        summary["flow_weekly"] = _flow_weekly(settings, store, target)
     summary["seconds"] = round((datetime.now(timezone.utc) - started).total_seconds())
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     (settings.log_dir / "ci_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return 0 if not due or summary.get("complete") else 1
+
+
+def _flow_allowed(settings, store, day) -> set[str] | None:
+    """The stocks that pass the money-flow filter on `day` (tascreen/flow.py), or None when
+    the filter is off or the night's map is missing (then nothing is filtered)."""
+    from tascreen import flow
+
+    if not (settings.flow.enabled and settings.flow.filter):
+        return None
+    snap = flow.read(store.root, day.isoformat())
+    if snap is None or snap.get("day") != day.isoformat():
+        log.warning("no money-flow map for %s: nothing filtered", day)
+        return None
+    return flow.passing(snap)
+
+
+def _flow_map(settings, store, target) -> dict:
+    """The night's money-flow map (tascreen/flow.py), once a session after the scan, before the
+    evening report (whose research it filters). Counts only: this goes to the public log."""
+    from tascreen import flow
+    from tascreen.patterns.rules import load_rules
+    from tascreen.web.data import ScanRepository
+
+    snap = flow.read(store.root, target.isoformat())
+    if snap is None or snap.get("day") != target.isoformat():
+        view = ScanRepository(store, load_rules()).current()
+        if view is None or view.day != target:
+            return {"status": "no scan of the session yet"}
+        snap = flow.snapshot(view.stocks, store.read_bars, store.read_bars(settings.flow.benchmark),
+                             settings.flow, target)
+        flow.save(store.root, snap)
+    return {"rated": len(snap["stocks"]), "passing": len(snap["passing"]),
+            "leading_industries": len(snap.get("leading_industries") or [])}
+
+
+def _flow_weekly(settings, store, target) -> str:
+    """After the week's last session, the weekly map to the owner's private chat, once (after
+    the evening report and the setups list, so it does not come first)."""
+    from datetime import timedelta
+
+    from tascreen import flow, notify
+    from tascreen.market_hours import next_sessions
+
+    if next_sessions(target, 1)[0].isocalendar()[1] == target.isocalendar()[1]:
+        return "not due"
+    snap = flow.read(store.root, target.isoformat())
+    if snap is None or snap.get("day") != target.isoformat() or not snap.get("stocks"):
+        return "no map"
+    if snap.get("weekly_sent"):
+        return "already sent"
+    owner = notify.owner_from_environment()
+    if owner is None:
+        return "no private chat"
+    previous = flow.read(store.root, (target - timedelta(days=7)).isoformat())
+    owner.send(flow.weekly_message(snap, previous, settings.flow.weekly_top), html=True)
+    flow.save(store.root, {**snap, "weekly_sent": True})
+    return "sent"
 
 
 def _evening_alerts(settings, store, target) -> dict:
@@ -668,11 +731,22 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
         above = pd.to_numeric(view.stocks.get("above_sma150"), errors="coerce") if "above_sma150" in view.stocks else None
         breadth = float(above.mean() * 100) if above is not None and above.notna().any() else None
         weak = breadth is not None and breadth < cfg.weak_market_pct
-        found, counts = setups_list.find_setups(store.root, list(view.stocks["symbol"]) + extra, cfg, weak_market=weak)
+        symbols, trending = list(view.stocks["symbol"]) + extra, None
+        allowed = _flow_allowed(settings, store, view.day)
+        if allowed is not None:                    # owner, 2026-10-28: only where the money flows
+            from tascreen import flow
+
+            snap = flow.read(store.root, view.day.isoformat())
+            ok_extra = {s for s in extra if flow.extra_passes(snap, store.read_bars(s), settings.flow)}
+            symbols = [s for s in symbols if s in allowed or s in ok_extra]
+            trending = {s for s, x in snap["stocks"].items() if "template" not in x["missing"]} | {
+                s for s in extra if (m := flow.stock_metrics(store.read_bars(s), settings.flow)) and m["template"]}
+            list_counts = {**list_counts, "flow_passing": len(symbols)}
+        found, counts = setups_list.find_setups(store.root, symbols, cfg, weak_market=weak)
         log.info("setups list: %s; the owner's lists: %s; breadth %s", counts, list_counts,
                  None if breadth is None else round(breadth, 1))
         state = setups_list.refresh(state, found, view, store.read_bars, cfg, extra=extra,
-                                    break_atr=float(analyst_rules()["support_break_atr"]))
+                                    break_atr=float(analyst_rules()["support_break_atr"]), trending=trending)
         setups_list.write(store.root, state)
         from tascreen import setups_coach
 
@@ -849,7 +923,7 @@ def _research_runner(settings, store, view):
                                         settings.alerts.min_success_pct)
         return research.research(view, store, breakouts, verge, llm=llm, verge_pct=settings.alerts.verge_pct,
                                  shortlist_size=cfg.shortlist, max_picks=cfg.max_picks, patterns=proven,
-                                 min_picks=cfg.min_picks,
+                                 min_picks=cfg.min_picks, allowed=_flow_allowed(settings, store, view.day),
                                  news_of=lambda symbols: _news(settings, symbols),
                                  market=_market_moves(settings), analyse=analyse)
     return run
@@ -973,6 +1047,9 @@ def ci_live(settings, max_minutes: float) -> int:
         return finish("no scan")
     proven = alerts.proven_patterns(store.read_ledger(), settings.outcomes.min_cases, cfg.min_success_pct)
     near, far = alerts.watch_tiers(view, cfg.verge_pct, cfg.watch_pct, cfg.live_max_symbols, proven)
+    allowed = _flow_allowed(settings, store, view.day)
+    if allowed is not None:                       # owner, 2026-10-28: only where the money flows
+        near, far = [s for s in near if s in allowed], [s for s in far if s in allowed]
     client = make_tradingview(settings)
     holdings = _holdings(settings, store, client, day)      # priced every pass
     near = near + [s for s in holdings if s not in near]
