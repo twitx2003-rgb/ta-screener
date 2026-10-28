@@ -92,3 +92,22 @@ def test_an_entry_whose_uptrend_broke_leaves_the_setups_list():
     assert [e["symbol"] for e in kept] == ["NASDAQ:AAA"]
     assert events == [{"symbol": "NASDAQ:BBB", "kind": "ma150", "what": "removed", "reason": "trend"}]
     assert setups_list.REASONS["trend"]
+
+
+def test_the_first_map_goes_to_the_group_at_once_then_weekly(tmp_path, monkeypatch):
+    import run
+    from tascreen import notify
+
+    sent = []
+    monkeypatch.setattr(notify, "from_environment", lambda: type("G", (), {"send": lambda self, t, html=False: sent.append(t)})())
+    settings = run.load_settings()
+    store = type("S", (), {"root": tmp_path})()
+    stocks, bars = _universe()
+    wednesday, friday = date(2026, 9, 2), date(2026, 9, 4)
+    for day in (wednesday, friday):
+        flow.save(tmp_path, flow.snapshot(stocks, bars.get, None, CFG, day))
+    assert run._flow_weekly(settings, store, wednesday) == "sent (first)" and "המפה הראשונה" in sent[0]
+    assert run._flow_weekly(settings, store, wednesday) == "not due"                 # sent once only
+    flow.save(tmp_path, flow.snapshot(stocks, bars.get, None, CFG, date(2026, 9, 3)))
+    assert run._flow_weekly(settings, store, date(2026, 9, 3)) == "not due"           # Thursday
+    assert run._flow_weekly(settings, store, friday) == "sent" and "השבוע שהסתיים" in sent[1]

@@ -267,7 +267,7 @@ setups_list:
   weak_market_pct: 40
 
 # Where the money flows (tascreen/flow.py; owner, 2026-10-28): a strict filter on the stocks
-# that come up (setups list, evening research, live watch) and a weekly map, private chat.
+# that come up (setups list, evening research, live watch) and a weekly map to the group.
 flow:
   enabled: true
   filter: true

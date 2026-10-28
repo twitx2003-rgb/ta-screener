@@ -193,8 +193,10 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   against the S&P 500, the share in the template, the dollar-volume flow and a rotation quadrant.
   The owner chose the STRICT filter: only stocks that pass all (template, steady, rating >= 80,
   up/down >= 1, a leading group) reach the setups list, the evening research and the live watch;
-  a setups-list entry whose template broke leaves ("trend"). The weekly map goes to the private
-  chat after the week's last session. First night: of 39 entries, 21 would leave (template
+  a setups-list entry whose template broke leaves ("trend"). The map goes to the GROUP (owner,
+  2026-10-28): the first on its first night, then after each week's last session. Since
+  2026-10-28 the owner's private chat answers 403 "bot was blocked by the user":
+  `notify.PrivateChat` logs it and the run goes on (setups-list and coach notes do not arrive). First night: of 39 entries, 21 would leave (template
   broken). Next stages, after the owner's review: 3) learning (which conditions worked, in the
   list's ledger and the history study), 4) news sentiment per sector from the X triage.
 - X news pictures (owner, 2026-10-10): every story goes with a picture: the post's photo, else a

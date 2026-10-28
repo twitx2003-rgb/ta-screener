@@ -480,7 +480,7 @@ class FlowSettings:
     # Where the money flows (tascreen/flow.py; owner, 2026-10-28: "stocks fitted to where the
     # money flows and where sentiment goes; an uptrend, not a long sideways drift"). The owner
     # chose a strict filter: only stocks that pass go to the setups list, the evening research
-    # and the live watch; the map goes to the private chat once a week (after Friday's close).
+    # and the live watch; the map goes to the group once a week (after the week's last close).
     enabled: bool = True
     filter: bool = True              # off: the map only, nothing is filtered
     benchmark: str = "AMEX:SPY"      # the market they are measured against (its bars kept nightly)

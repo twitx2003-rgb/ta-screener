@@ -28,7 +28,8 @@ its group leads (the owner chose the strict filter, 2026-10-28). A first look at
 months (today's stocks only, so survivors): the strong and steady stocks beat the average stock
 in most months, with one sharp losing month (a momentum crash). Not advice.
 
-The snapshot is data/flow/<day>.json (the newest SNAPSHOTS_KEPT days).
+The snapshot is data/flow/<day>.json (the newest SNAPSHOTS_KEPT days). The map goes to the
+owner's group (owner, 2026-10-28): the first on the first night, then after each week's last session.
 """
 from __future__ import annotations
 
@@ -196,6 +197,18 @@ def read(root: Path, day: str | None = None) -> dict[str, Any] | None:
         return None
 
 
+def ever_sent(root: Path) -> bool:
+    """Whether a map has gone out yet (the first one goes on the first night, not on Friday)."""
+    folder = root / "flow"
+    for file in sorted(folder.glob("????-??-??.json"), reverse=True) if folder.exists() else []:
+        try:
+            if json.loads(file.read_text(encoding="utf-8")).get("weekly_sent"):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
 def passing(snap: dict[str, Any] | None) -> set[str] | None:
     """The stocks that pass (None when there is no map: nothing is filtered)."""
     return None if snap is None else set(snap.get("passing") or [])
@@ -219,13 +232,16 @@ def _flow_word(x: float) -> str:
     return next(word for floor, word in FLOW_WORDS if x > floor)
 
 
-def weekly_message(snap: dict[str, Any], previous: dict[str, Any] | None, top: int = 8) -> str:
-    """The owner's weekly map (Telegram HTML), from this week's snapshot and last week's."""
+def weekly_message(snap: dict[str, Any], previous: dict[str, Any] | None, top: int = 8, *,
+                   first: bool = False) -> str:
+    """The weekly map for the owner's group (Telegram HTML), from this week's snapshot and last
+    week's. `first`: the first map, sent on its first night."""
     e = html.escape
     d = snap["day"]
     bench = snap.get("benchmark") or {}
     inds = snap.get("industries") or []
-    lines = [f"🧭 <b>לאן הכסף זורם</b> · השבוע שהסתיים ב-{d[8:10]}/{d[5:7]}",
+    when = "לפי הסגירה ב-" if first else "השבוע שהסתיים ב-"
+    lines = [f"🧭 <b>לאן הכסף זורם</b> · {when}{d[8:10]}/{d[5:7]}",
              f"S&amp;P 500: חודש {_pct(bench.get('r21'))} · שלושה חודשים {_pct(bench.get('r63'))}", ""]
     leading = [g for g in inds if g["name"] in set(snap.get("leading_industries") or [])][:5]
     if leading:
@@ -256,6 +272,8 @@ def weekly_message(snap: dict[str, Any], previous: dict[str, Any] | None, top: i
                   "נפח קנייה, ענף מוביל):"]
         lines += [f"• <b>{e(stocks[s]['ticker'])}</b> · {e(INDUSTRIES.get(stocks[s]['industry'] or '', stocks[s]['industry'] or ''))}"
                   f" · חוזק יחסי {stocks[s]['rs']}" for s in best]
-    lines += ["", f"{len(snap.get('passing') or [])} מניות עוברות את כל התנאים מתוך {len(stocks)}.",
-              "<i>לא ייעוץ השקעות. חוזק עבר אינו מבטיח המשך.</i>"]
+    lines += ["", f"{len(snap.get('passing') or [])} מניות עוברות את כל התנאים מתוך {len(stocks)}."]
+    if first:
+        lines.append("המפה הראשונה. מעכשיו היא תגיע כל שבוע, אחרי הסגירה של יום המסחר האחרון בשבוע.")
+    lines.append("<i>לא ייעוץ השקעות. חוזק עבר אינו מבטיח המשך.</i>")
     return "\n".join(lines)

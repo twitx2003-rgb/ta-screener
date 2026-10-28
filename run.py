@@ -629,30 +629,33 @@ def _flow_map(settings, store, target) -> dict:
 
 
 def _flow_weekly(settings, store, target) -> str:
-    """After the week's last session, the weekly map to the owner's private chat, once (after
-    the evening report and the setups list, so it does not come first)."""
+    """The money-flow map to the owner's GROUP (owner, 2026-10-28: "to the group"): the first
+    one on the first night there is a map, then after each week's last session; once each
+    (after the evening report and the setups list, so it does not come first)."""
     from datetime import timedelta
 
     from tascreen import flow, notify
     from tascreen.market_hours import next_sessions
 
-    if next_sessions(target, 1)[0].isocalendar()[1] == target.isocalendar()[1]:
+    first = not flow.ever_sent(store.root)
+    if not first and next_sessions(target, 1)[0].isocalendar()[1] == target.isocalendar()[1]:
         return "not due"
     snap = flow.read(store.root, target.isoformat())
     if snap is None or snap.get("day") != target.isoformat() or not snap.get("stocks"):
         return "no map"
     if snap.get("weekly_sent"):
         return "already sent"
-    owner = notify.owner_from_environment()
-    if owner is None:
-        return "no private chat"
+    group = notify.from_environment()
+    if group is None:
+        return "no bot"
     previous = flow.read(store.root, (target - timedelta(days=7)).isoformat())
-    refused = getattr(owner, "refused", 0)
-    owner.send(flow.weekly_message(snap, previous, settings.flow.weekly_top), html=True)
-    if getattr(owner, "refused", 0) > refused:
-        return "private chat refused"                # the bot blocked there: tried again next run
+    try:
+        group.send(flow.weekly_message(snap, previous, settings.flow.weekly_top, first=first), html=True)
+    except ScreenerError as exc:
+        log.warning("the money-flow map was not sent: %s", exc)
+        return f"failed: {type(exc).__name__}"
     flow.save(store.root, {**snap, "weekly_sent": True})
-    return "sent"
+    return "sent (first)" if first else "sent"
 
 
 def _evening_alerts(settings, store, target) -> dict:
