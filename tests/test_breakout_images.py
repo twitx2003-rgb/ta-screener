@@ -128,3 +128,21 @@ def test_the_evening_report_sends_the_charts_after_the_text(tmp_path):
                                    images=True, to_png=_svg_bytes)
     # the made-up view's stocks have no stored bars: no chart, and the text still went out
     assert bot.events[0] == "text" and result["charts"] == 0 and result["charts_missing"] == 2
+
+
+def test_a_blocked_private_chat_never_stops_a_run():
+    from tascreen.errors import ProviderError
+    from tascreen.notify import PrivateChat
+
+    def blocked(method, params, *files):
+        raise ProviderError("Telegram sendMessage: HTTP 403 Forbidden: bot was blocked by the user")
+
+    def broken(method, params, *files):
+        raise ProviderError("Telegram sendMessage: HTTP 400 Bad Request: can't parse entities")
+
+    chat = PrivateChat("123456:" + "x" * 30, 42, post=blocked, upload=blocked)
+    chat.send("a note", html=True)
+    chat.send_photo(b"PNG", "a picture")
+    assert chat.refused == 2
+    with pytest.raises(ProviderError):                     # any other fault still shows
+        PrivateChat("123456:" + "x" * 30, 42, post=broken).send("a note")

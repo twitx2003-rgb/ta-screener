@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import time
@@ -198,6 +199,31 @@ class Telegram:
 _caption_of = caption          # the methods' `caption` argument shadows the function
 
 
+class PrivateChat(Telegram):
+    """The owner's private chat. A refusal there (2026-10-28: "bot was blocked by the user",
+    403) is logged and the run goes on: the evening run once died on it, and nothing else
+    depends on these messages arriving."""
+
+    REFUSED = ("403", "blocked", "chat not found", "deactivated")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        post, upload = self._post, self._upload
+        self._post = lambda method, params: self._guard(method, lambda: post(method, params))
+        self._upload = lambda method, params, files: self._guard(method, lambda: upload(method, params, files))
+        self.refused = 0
+
+    def _guard(self, method: str, send: Callable[[], dict]) -> dict:
+        try:
+            return send()
+        except ProviderError as exc:
+            if not any(word in str(exc) for word in self.REFUSED):
+                raise
+            self.refused += 1
+            logging.getLogger(__name__).warning("the owner's private chat refused %s: %s", method, exc)
+            return {"ok": True, "result": {}}
+
+
 def owner_from_environment() -> Telegram | None:
     """The bot to the owner's private chat (TELEGRAM_CHAT_ID), even where everything else
     goes to the group: the watchlist's alerts (owner, 2026-09-30: the group must not see it)."""
@@ -205,7 +231,7 @@ def owner_from_environment() -> Telegram | None:
     chat = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
     if bot is None or not chat or not isinstance(bot, Telegram):
         return bot                     # no group set up (or a test's bot): the same chat
-    return Telegram(bot.token, chat)
+    return PrivateChat(bot.token, chat)
 
 
 def from_environment() -> Telegram | None:

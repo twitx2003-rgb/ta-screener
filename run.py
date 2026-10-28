@@ -647,7 +647,10 @@ def _flow_weekly(settings, store, target) -> str:
     if owner is None:
         return "no private chat"
     previous = flow.read(store.root, (target - timedelta(days=7)).isoformat())
+    refused = getattr(owner, "refused", 0)
     owner.send(flow.weekly_message(snap, previous, settings.flow.weekly_top), html=True)
+    if getattr(owner, "refused", 0) > refused:
+        return "private chat refused"                # the bot blocked there: tried again next run
     flow.save(store.root, {**snap, "weekly_sent": True})
     return "sent"
 
