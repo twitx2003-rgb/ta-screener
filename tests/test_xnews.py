@@ -704,3 +704,21 @@ def test_the_run_sends_the_breakdown_picture_instead_of_the_posts_own(tmp_path):
                      market_caps={"ZQX": 5e11}, earnings_min_cap=3e11, fetch=lambda url: ("image/jpeg", b"x"))
     assert summary["earnings_photos"] == 1 and photos[0][0] == "https://pbs.twimg.com/media/flow.jpg"
     assert "פירוק ההכנסות" in photos[0][1]
+
+
+def test_a_blocked_private_chat_does_not_stop_the_groups_news(tmp_path):
+    from tascreen.errors import ProviderError
+
+    def blocked(text):
+        raise ProviderError("Telegram sendMessage: HTTP 403 Forbidden: bot was blocked by the user")
+
+    llm = picker({"post_id": "11", "importance": 5, "summary_he": "חברת ZQX העלתה תחזית", "analysis_he": "",
+                  "same_story_as": "", "repeat_of_sent": False, "earnings_of": ""},
+                 {"post_id": "12", "importance": 3, "summary_he": "חברת ZQX במסיבת עיתונאים", "analysis_he": "",
+                  "same_story_as": "", "repeat_of_sent": False, "earnings_of": ""})
+    sent = []
+    summary, _ = run(tmp_path, FakeReader({"tweets": [row("11", text="ZQX up"), row("12", text="ZQX event")],
+                                           "has_next_page": False}), llm, sent,
+                     holdings=["ZQX"], send_private=blocked)
+    assert summary["sent"] == 1 and len(sent) == 1 and summary["private_error"] == "ProviderError"
+    assert (tmp_path / "state.json").exists()                          # the round was saved

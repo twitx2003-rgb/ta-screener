@@ -857,8 +857,11 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             except ProviderError as exc:
                 summary["explain_error"] = type(exc).__name__
         if mine and send_private is not None:
-            send_private(watchlist.NEWS_HEAD + "\n\n" + message(mine))
-            summary["holding_news"] = len(mine)
+            try:                             # the private chat never blocks the group's news
+                send_private(watchlist.NEWS_HEAD + "\n\n" + message(mine))
+                summary["holding_news"] = len(mine)
+            except ProviderError as exc:     # 2026-10-28: "bot was blocked by the user" (403)
+                summary["private_error"] = type(exc).__name__
         if picks:
             summary["photos"] = deliver(picks, send, send_photo, picture=picture, send_png=send_png,
                                         send_album=send_album)
