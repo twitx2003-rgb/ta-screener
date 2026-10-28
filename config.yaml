@@ -168,6 +168,12 @@ xnews:
   # Once a week the reader's balance is looked at; below this (USD) the bot warns with a
   # top-up link (owner, 2026-09-28). 0 turns it off.
   low_balance_usd: 2
+  # A company worth more than this reports its results (owner, 2026-10-28): one X search
+  # for posts with pictures about its ticker, and Claude picks the picture that breaks the
+  # quarter's numbers down and reads the stock's move from a post that states it.
+  # Pictures from these accounts are offered first (they draw income-statement charts).
+  earnings_min_cap_usd: 3.0e11
+  earnings_image_accounts: [EconomyApp, StockMKTNewz, wallstengine]
   model: "sonnet"
   effort: "low"
   timeout_s: 300

@@ -26,7 +26,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -287,9 +287,10 @@ def schema() -> dict:
                            "summary_he": {"type": "string"},
                            "analysis_he": {"type": "string"},
                            "same_story_as": {"type": "string"},
-                           "repeat_of_sent": {"type": "boolean"}},
+                           "repeat_of_sent": {"type": "boolean"},
+                           "earnings_of": {"type": "string"}},
             "required": ["post_id", "importance", "summary_he", "analysis_he", "same_story_as",
-                         "repeat_of_sent"],
+                         "repeat_of_sent", "earnings_of"],
             "additionalProperties": False}}},
         "required": ["picks"],
         "additionalProperties": False,
@@ -356,8 +357,10 @@ def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
             analysis = str(item.get("analysis_he", "")).strip()
             if banned(analysis):             # advice or forecast wording: the news goes without it
                 analysis = ""
+            earnings = str(item.get("earnings_of") or "").strip().lstrip("$").upper()
             picks[post_id] = {"importance": importance, "summary_he": summary[:SUMMARY_MAX],
-                              "analysis_he": analysis[:ANALYSIS_MAX], "sources": []}
+                              "analysis_he": analysis[:ANALYSIS_MAX], "sources": [],
+                              "earnings_of": earnings if EARNINGS_TICKER.match(earnings) else ""}
             if counts is not None:           # style slips are counted, never a reason to drop
                 slips = len(style_warnings(summary)) + len(style_warnings(analysis))
                 counts["style_slips"] = counts.get("style_slips", 0) + slips
@@ -389,6 +392,8 @@ def item(post: Post, pick_: dict, *, with_image: bool = False) -> str:
     mark = {5: "🔴", 4: "🟠"}.get(pick_["importance"], "🔵")
     link = f'<a href="{html.escape(post.url, quote=True)}">↗</a>'
     text = f"{RLM}{mark} <b>{html.escape(pick_['summary_he'])}</b> {link}"
+    if pick_.get("move_he"):
+        text += f"\n{RLM}{html.escape(pick_['move_he'])}"
     if pick_.get("analysis_he"):
         text += f"\n{RLM}💡 {html.escape(pick_['analysis_he'])}"
     if with_image and pick_.get("image_he"):
@@ -439,7 +444,7 @@ def explain_images(picks: list[tuple[Post, dict]], llm,
     to IMAGES_MAX pictures). Returns how many got one."""
     chosen, images = [], []
     for post, pick_ in picks:
-        if post.photo and len(chosen) < IMAGES_MAX:
+        if post.photo and not pick_.get("image_he") and len(chosen) < IMAGES_MAX:
             got = fetch(post.photo)
             if got is not None:
                 chosen.append((post, pick_))
@@ -461,6 +466,107 @@ def explain_images(picks: list[tuple[Post, dict]], llm,
             pick_["image_he"] = text[:IMAGE_MAX]
             done += 1
     return done
+
+
+# --- a large company's results: the breakdown picture and the stock's move ------------------
+
+EARNINGS_SYSTEM = agent_prompt("earnings-visual-picker")   # tascreen/agents/earnings-visual-picker.md
+EARNINGS_TICKER = re.compile(r"^[A-Z]{1,5}(\.[A-Z])?$")
+EARNINGS_LOOKBACK_S = 12 * 3600   # posts about the report: the last 12 hours
+EARNINGS_TEXTS_MAX = 15           # posts whose text is read for the stock's move
+MOVE_SESSIONS = {"after_hours": "אחרי שעות המסחר", "premarket": "בטרום המסחר", "regular": "במסחר"}
+_PCT = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s?%")
+
+
+def caps_by_ticker(universe) -> dict[str, float]:
+    """{"NVDA": market cap in USD} from a universe frame (symbol "NASDAQ:NVDA", market_cap)."""
+    if universe is None or getattr(universe, "empty", True):
+        return {}
+    return {str(sym).split(":")[-1]: float(cap) for sym, cap in zip(universe["symbol"], universe["market_cap"])
+            if cap == cap}
+
+
+def earnings_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {"breakdown_post_id": {"type": "string"}, "breakdown_he": {"type": "string"},
+                       "move_pct": {"type": ["number", "null"]}, "move_session": {"type": "string"},
+                       "move_post_id": {"type": "string"}},
+        "required": ["breakdown_post_id", "breakdown_he", "move_pct", "move_session", "move_post_id"],
+        "additionalProperties": False,
+    }
+
+
+def stated_pct(text: str, value: float) -> bool:
+    """The post's text writes this percentage (6.2 matches "+6.2%", "6.2 %", "-6.2%")."""
+    return any(abs(float(m) - abs(value)) <= 0.051 for m in _PCT.findall(text))
+
+
+def move_line(ticker: str, pct: float, session: str) -> str:
+    arrow, verb = ("📈", "עולה") if pct > 0 else ("📉", "יורדת")
+    return f"{arrow} מניית {ticker} {verb} ב-{abs(pct):g}% {MOVE_SESSIONS[session]}"
+
+
+def earnings_visuals(picks: list[tuple[Post, dict]], source: "XSource", llm, *, caps: dict[str, float],
+                     min_cap: float, stamp: int, preferred: tuple | list = (),
+                     fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image) -> dict[str, int]:
+    """For each pick that reports the results of a company worth at least `min_cap` (owner,
+    2026-10-28: "a picture of how the financial numbers break down, and the stock's move"):
+    one X search for recent posts with pictures about its ticker, and one model call that
+    picks the picture showing the quarter's breakdown and reads the stock's move from a
+    post that states it. Sets `earnings_photo` (the picture's address), `image_he` and
+    `move_he` on the pick. A move is kept only when its number is written in that post.
+    Returns counts: searched, posts read, model calls, photos, moves."""
+    out = {"searched": 0, "read": 0, "calls": 0, "photos": 0, "moves": 0}
+    first = {a.lower() for a in preferred}
+    for _post, pick_ in picks:
+        ticker = pick_.get("earnings_of") or ""
+        if not ticker or caps.get(ticker, 0.0) < min_cap:
+            continue
+        query = f"${ticker.split('.')[0]} filter:images -filter:replies since_time:{stamp - EARNINGS_LOOKBACK_S}"
+        page = source.search_page(query)
+        out["searched"] += 1
+        rows = page.get("tweets") if isinstance(page.get("tweets"), list) else []
+        out["read"] += len(rows)
+        posts: list[Post] = []
+        for row in rows:
+            try:
+                posts.append(to_post(row))
+            except ProviderError:
+                continue
+        posts.sort(key=lambda q: q.author.lower() not in first)       # trusted accounts first, stable
+        shown, images = [], []
+        for q in posts:
+            image = None
+            if q.photo and len(images) < IMAGES_MAX:
+                got = fetch(q.photo)
+                if got is not None:
+                    images.append(got)
+                    image = len(images)
+            if image is not None or len(shown) < EARNINGS_TEXTS_MAX:
+                shown.append((q, image))
+        if not shown:
+            continue
+        listing = json.dumps({"ticker": ticker, "story_he": pick_["summary_he"],
+                              "posts": [{"post_id": q.id, "author": q.author, "text": q.text, "image": n}
+                                        for q, n in shown]}, ensure_ascii=False, indent=1)
+        answer, _ = llm.complete_with_images(system=EARNINGS_SYSTEM, user=listing, images=images,
+                                             schema=earnings_schema())
+        out["calls"] += 1
+        by_id = {q.id: (q, n) for q, n in shown}
+        chosen = by_id.get(str(answer.get("breakdown_post_id") or ""))
+        about = str(answer.get("breakdown_he") or "").strip()
+        if chosen and chosen[1] is not None and about:
+            pick_["earnings_photo"] = chosen[0].photo
+            pick_["image_he"] = about[:IMAGE_MAX]
+            out["photos"] += 1
+        said = by_id.get(str(answer.get("move_post_id") or ""))
+        pct, session = answer.get("move_pct"), str(answer.get("move_session") or "")
+        if said and isinstance(pct, (int, float)) and pct and session in MOVE_SESSIONS \
+                and stated_pct(said[0].text, float(pct)):
+            pick_["move_he"] = move_line(ticker, float(pct), session)
+            out["moves"] += 1
+    return out
 
 
 def message(picks: list[tuple[Post, dict]]) -> str:
@@ -638,6 +744,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
              send_png: Callable[[bytes, str], None] | None = None,
              send_album: Callable[[list[tuple[bytes | str, str]]], None] | None = None,
              fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
+             market_caps: dict[str, float] | None = None, earnings_min_cap: float = 0.0,
+             earnings_accounts: tuple | list = (),
              first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
     """Read, pick, send, remember. Returns counts only (safe for the public log).
 
@@ -727,6 +835,19 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
                                    "importance": k["importance"], "summary_he": k["summary_he"],
                                    "analysis_he": k["analysis_he"], "sources": [a for a, _ in k["sources"]],
                                    "sent": p.id in chosen} for p, k in every])[-DAY_LOG_MAX:]
+        if picks and market_caps and earnings_min_cap > 0 and send_photo is not None:
+            try:                             # a large company's results: never blocks the news
+                got = earnings_visuals(picks, source, llm, caps=market_caps, min_cap=earnings_min_cap,
+                                       stamp=stamp, preferred=earnings_accounts, fetch=fetch)
+                model["calls"] += got["calls"]
+                reads["posts"] += got["read"]
+                summary.update({f"earnings_{k}": v for k, v in got.items() if v})
+            except UsageLimit:
+                model["paused_until"] = stamp + LIMIT_PAUSE_S
+            except ProviderError as exc:
+                summary["earnings_error"] = type(exc).__name__
+            # the breakdown picture replaces the post's own photo
+            picks = [(replace(p, photo=k["earnings_photo"]) if k.get("earnings_photo") else p, k) for p, k in picks]
         if send_photo is not None and any(p.photo for p, _ in picks):
             try:                             # a second look, at the pictures: never blocks the news
                 summary["explained"] = explain_images(picks, llm, fetch)

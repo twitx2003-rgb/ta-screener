@@ -279,6 +279,10 @@ class XNewsSettings:
     max_per_round: int = 2
     daily_max: int = 12
     low_balance_usd: float = 2.0       # a weekly look at the reader's balance; warn below this (0: off)
+    # a company's results above this market cap get the X picture of the breakdown and the
+    # stock's move (owner, 2026-10-28); 0: off. Pictures from these accounts are offered first.
+    earnings_min_cap_usd: float = 3.0e11
+    earnings_image_accounts: tuple = ()
     model: str = "sonnet"
     effort: str = "low"
     timeout_s: int = 300
@@ -325,6 +329,16 @@ class XNewsSettings:
         object.__setattr__(self, "low_balance_usd", float(self.low_balance_usd))
         if not 0 <= self.low_balance_usd <= 100:
             raise ConfigError("xnews.low_balance_usd must be 0..100")
+        object.__setattr__(self, "earnings_min_cap_usd", float(self.earnings_min_cap_usd))
+        if self.earnings_min_cap_usd < 0:
+            raise ConfigError("xnews.earnings_min_cap_usd must be 0 (off) or a market cap in USD")
+        raw = self.earnings_image_accounts or ()
+        if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+            raise ConfigError("xnews.earnings_image_accounts must be a list of X account names")
+        try:
+            object.__setattr__(self, "earnings_image_accounts", tuple(account_name(a) for a in raw))
+        except Exception as exc:
+            raise ConfigError(f"xnews.earnings_image_accounts: {exc}") from None
 
 
 @dataclass(frozen=True)

@@ -68,7 +68,10 @@ save)
     git push -q --force origin fresh:main
     echo "state: saved"
     if [ -d data/bars ]; then
-        tar --zstd -cf "$RUNNER_TEMP/bars.tar.zst" -C data bars
+        # with the newest universe: the X news runner reads its market caps (the earnings
+        # pictures, owner 2026-10-28); restoring it here only rewrites the same file
+        universe=$(cd data && ls -1 universe/*.parquet 2> /dev/null | sort | tail -n 1 || true)
+        tar --zstd -cf "$RUNNER_TEMP/bars.tar.zst" -C data bars ${universe:+"$universe"}
         gh release view bars --repo "$STATE_REPO" > /dev/null 2>&1 \
             || gh release create bars --repo "$STATE_REPO" --title bars \
                    --notes "Daily bars for the runners (private)." > /dev/null

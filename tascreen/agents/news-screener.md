@@ -65,6 +65,11 @@ Explain, do not forecast: no price targets, no "will rise / will fall", no "על
 "עשוי" or "ילחץ על המניות" in your own voice, no buy or sell wording, no advice. A
 forecast is news only as someone's, named ("הבנק צופה ש...", "החברה מעריכה ש...").
 
+Then `earnings_of`: when the post reports a US company's own quarterly or annual results
+just released (revenue, EPS, guidance in its earnings report), the company's ticker in
+capitals as traded ("ZQX", a class as "BRK.B"); otherwise "". Not for previews, estimates
+before the report, or another company's comment on them.
+
 Hebrew news style for `summary_he`: write it the way an Israeli news desk writes a flash.
 - Who did what: the actor first, then the verb, the number and, in a short clause, the
   cause. Present tense ("זנטריקה מודיעה", "המניה צונחת"); past tense only for a finished

@@ -717,6 +717,20 @@ def _market_snapshot(settings, store, day) -> str:
     return "saved"
 
 
+def _market_caps(settings) -> dict[str, float]:
+    """{"NVDA": market cap} from the newest saved universe (the news runner gets it with the
+    bars, .github/state.sh); {} without one, and the earnings pictures are skipped."""
+    from tascreen import xnews
+    from tascreen.store import Store
+
+    try:
+        latest = Store(settings.data_dir).latest_universe()
+    except Exception as exc:  # noqa: BLE001 — a missing or odd universe only skips the pictures
+        log.warning("universe for the earnings pictures: %s", type(exc).__name__)
+        return {}
+    return xnews.caps_by_ticker(latest[1]) if latest else {}
+
+
 def _saved_holdings(settings) -> list[str]:
     """The owner's watchlist tickers for the X news (tascreen/watchlist.py): the live
     watch's file in the private state repo, or the local one; [] when off or unknown."""
@@ -1840,6 +1854,8 @@ def xnews_pass(settings) -> int:
         llm_daily_cap=cfg.claude_daily_cap, llm_min_interval_s=cfg.claude_every_minutes * 60,
         max_per_round=cfg.max_per_round, daily_max=cfg.daily_max, low_balance_usd=cfg.low_balance_usd,
         holdings=_saved_holdings(settings), send_private=_private_sender(),
+        market_caps=_market_caps(settings), earnings_min_cap=cfg.earnings_min_cap_usd,
+        earnings_accounts=cfg.earnings_image_accounts,
         with_replies=cfg.with_replies)
     print("xnews: " + " ".join(f"{k}={v}" for k, v in summary.items()))
     return 0

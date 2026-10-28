@@ -639,3 +639,68 @@ def test_the_card_page_holds_the_story_and_the_candles():
                                                 importance=5, when="10:00 · 01/01", chart=chart)
     assert (width, height) == (1080, 608) and "חדשה &lt;חשובה&gt;" in page and "מבזק" in page
     assert page.count("<rect") == news_card.CHART_SESSIONS and "SYNT" in page
+
+
+# --- a large company's results: the breakdown picture and the stock's move (invented data) ---
+
+def _earnings_page():
+    return {"tweets": [
+        photo_row("301", url="https://pbs.twimg.com/media/meme.jpg"),
+        {**photo_row("302", url="https://pbs.twimg.com/media/flow.jpg"), "author": {"userName": "FlowCharts"}},
+        row("303", author="DeskTwo", text="$ZQX shares +6.2% after hours on the beat"),
+    ], "has_next_page": False}
+
+
+def _earnings_llm(answer, picks=None):
+    def respond(system, user, schema):
+        if "breakdown_post_id" in schema["properties"]:
+            respond.listing = json.loads(user)
+            return answer
+        return {"picks": picks or []}
+    return SyntheticLLM(respond), respond
+
+
+def test_a_large_company_gets_the_breakdown_picture_and_a_stated_move():
+    reader = FakeReader(_earnings_page())
+    llm, seen = _earnings_llm({"breakdown_post_id": "302", "breakdown_he": "פירוק ההכנסות לפי מגזרים",
+                               "move_pct": 6.2, "move_session": "after_hours", "move_post_id": "303"})
+    pick_ = {"importance": 5, "summary_he": "זנטריקה (ZQX) עוקפת את התחזיות", "earnings_of": "ZQX"}
+    post = xnews.to_post(row("300"))
+    got = xnews.earnings_visuals([(post, pick_)], xnews.XSource(KEY, get=reader), llm,
+                                 caps={"ZQX": 5e11}, min_cap=3e11, stamp=1_800_000_000,
+                                 preferred=("FlowCharts",), fetch=lambda url: ("image/jpeg", b"x"))
+    assert got == {"searched": 1, "read": 3, "calls": 1, "photos": 1, "moves": 1}
+    assert reader.queries[0]["query"].startswith("$ZQX filter:images -filter:replies since_time:")
+    assert seen.listing["posts"][0]["post_id"] == "302"                  # the trusted account first
+    assert pick_["earnings_photo"] == "https://pbs.twimg.com/media/flow.jpg"
+    assert pick_["move_he"] == "📈 מניית ZQX עולה ב-6.2% אחרי שעות המסחר"
+    text = xnews.item(post, pick_, with_image=True)
+    assert "📈 מניית ZQX" in text and "📊 פירוק ההכנסות" in text
+
+
+def test_a_move_not_written_in_its_post_and_a_small_company_are_left_out():
+    llm, _ = _earnings_llm({"breakdown_post_id": "301", "breakdown_he": "", "move_pct": -4.0,
+                            "move_session": "after_hours", "move_post_id": "303"})
+    pick_ = {"importance": 5, "summary_he": "x", "earnings_of": "ZQX"}
+    got = xnews.earnings_visuals([(xnews.to_post(row("300")), pick_)], xnews.XSource(KEY, get=FakeReader(_earnings_page())),
+                                 llm, caps={"ZQX": 5e11}, min_cap=3e11, stamp=1_800_000_000,
+                                 fetch=lambda url: ("image/jpeg", b"x"))
+    assert got["photos"] == 0 and got["moves"] == 0 and "move_he" not in pick_   # 4.0 is not in the text
+    reader = FakeReader(_earnings_page())
+    small = xnews.earnings_visuals([(xnews.to_post(row("300")), {**pick_, "earnings_of": "ZQX"})],
+                                   xnews.XSource(KEY, get=reader), llm, caps={"ZQX": 2e11}, min_cap=3e11,
+                                   stamp=1_800_000_000)
+    assert small["searched"] == 0 and reader.queries == []
+
+
+def test_the_run_sends_the_breakdown_picture_instead_of_the_posts_own(tmp_path):
+    story = {"post_id": "11", "importance": 5, "summary_he": "זנטריקה (ZQX) עוקפת את התחזיות", "analysis_he": "",
+             "same_story_as": "", "repeat_of_sent": False, "earnings_of": "zqx"}
+    llm, _ = _earnings_llm({"breakdown_post_id": "302", "breakdown_he": "פירוק ההכנסות לפי מגזרים",
+                            "move_pct": None, "move_session": "", "move_post_id": ""}, picks=[story])
+    reader = FakeReader({"tweets": [photo_row("11")], "has_next_page": False}, _earnings_page())
+    sent, photos = [], []
+    summary, _ = run(tmp_path, reader, llm, sent, send_photo=lambda u, c: photos.append((u, c)),
+                     market_caps={"ZQX": 5e11}, earnings_min_cap=3e11, fetch=lambda url: ("image/jpeg", b"x"))
+    assert summary["earnings_photos"] == 1 and photos[0][0] == "https://pbs.twimg.com/media/flow.jpg"
+    assert "פירוק ההכנסות" in photos[0][1]

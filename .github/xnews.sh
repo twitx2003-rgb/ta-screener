@@ -44,7 +44,7 @@ bars)
     tmp="${RUNNER_TEMP:-/tmp}"
     if gh release download bars --repo "$STATE_REPO" --pattern bars.tar.zst --dir "$tmp" --clobber > /dev/null 2>&1 \
             && mkdir -p data && tar --zstd -xf "$tmp/bars.tar.zst" -C data; then
-        echo "bars: $(find data/bars -name '*.parquet' | wc -l) files (the news pictures' charts)"
+        echo "bars: $(find data/bars -name '*.parquet' | wc -l) files; universe: $(ls data/universe 2> /dev/null | tail -n 1 || echo none) (market caps for the earnings pictures)"
     else
         echo "bars: not downloaded (the news pictures go without a chart)"
     fi
