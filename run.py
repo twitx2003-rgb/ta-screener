@@ -749,6 +749,9 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
                 s for s in extra if (m := flow.stock_metrics(store.read_bars(s), settings.flow)) and m["template"]}
             list_counts = {**list_counts, "flow_passing": len(symbols)}
         found, counts = setups_list.find_setups(store.root, symbols, cfg, weak_market=weak)
+        sent = _sent_recommendations(settings, store, target, allowed, first=state.get("version", 0) < 4)
+        found = {**sent, **found}                  # a setup of its own, if it shows one, comes first
+        counts = {**counts, "recommended": len(sent)}
         log.info("setups list: %s; the owner's lists: %s; breadth %s", counts, list_counts,
                  None if breadth is None else round(breadth, 1))
         state = setups_list.refresh(state, found, view, store.read_bars, cfg, extra=extra,
@@ -1133,6 +1136,8 @@ def ci_live(settings, max_minutes: float) -> int:
             alerts.write_sent(store, day, sent)
             push_token_file(alerts.sent_path(store, day), "live alerts sent")
             summary["alerts"] += len(found)
+            if settings.setups_list.enabled:      # owner, 2026-10-31: into the TradingView list at once
+                summary["listed"] = summary.get("listed", 0) + _list_alerts(settings, client, store, day, found)
         if holdings:
             _holding_alerts(settings, owner, client, store, view, got, holdings, day, sent, summary)
         if settings.setups_list.enabled and "setups_open" not in summary and datetime.now(timezone.utc) >= (
@@ -1207,6 +1212,79 @@ def _setups_coach(settings, store, target) -> dict:
         owner.send(text, html=True)
     return {**out, "status": "done", "left_today": len(user["left_today"]), "lessons": len(result["keep"]) + len(result["improve"]),
             "notes": len(result["analyst_notes"]), "sent": bool(text)}
+
+
+def _list_alerts(settings, client, store, day, found: list[dict]) -> int:
+    """The live breakout alerts just sent, into the bot's TradingView list at once (owner,
+    2026-10-31: "every stock you send me goes into TradingView"); the night's review manages
+    them from then on. Returns how many went in; a failure is logged, never raised."""
+    from tascreen import setups_list
+    from tascreen.tv.mcp_client import _run, push_token_file
+    from tascreen.tv.data import fetch_in_session
+
+    cfg = settings.setups_list
+    state = setups_list.read(store.root)
+    if not cfg.id or cfg.id == settings.watchlist.id or state.get("id") != cfg.id:
+        return 0
+    have = {e["symbol"] for e in state.get("entries") or []}
+    new = setups_list.sent_setups(day.isoformat(), picks=[], leaders=[], allowed=None,
+                                  live={c["key"]: {"line": c.get("line")} for c in found})
+    new = {s: setup for s, setup in new.items() if s not in have}
+    if not new:
+        return 0
+
+    async def work():
+        async with client.own_list_session(cfg.id, setups_list.NAME) as session:
+            await fetch_in_session(session, setups_list.ADD, {"watchlist_id": cfg.id, "symbols": sorted(new)},
+                                   delays=settings.tradingview.rate_limit_delays)
+    try:
+        _run(work())
+    except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("live alerts not added to the list: %s", type(exc).__name__)
+        return 0
+    entries = list(state.get("entries") or []) + [{"symbol": s, **setup, "added": day.isoformat()}
+                                                  for s, setup in sorted(new.items())]
+    state = {**state, "entries": entries, "managed": sorted(set(state.get("managed") or []) | set(new))}
+    setups_list.write(store.root, state)
+    push_token_file(setups_list.path(store.root), "live alerts added to the list")
+    return len(new)
+
+
+SEED_SESSIONS = 5           # the first night of the recommendations: this many sessions back
+
+
+def _sent_recommendations(settings, store, target, allowed, *, first: bool = False) -> dict:
+    """The stocks recommended in Telegram on `target` (owner, 2026-10-31: they go into the
+    TradingView list): the evening research's picks, the day's live breakout alerts, and after
+    the week's last session the weekly map's leaders; `first` (the list's first night with them)
+    also the last SEED_SESSIONS sessions' picks and alerts and the newest map's leaders."""
+    from datetime import timedelta
+
+    from tascreen import alerts, flow, research, setups_list
+    from tascreen.market_hours import is_trading_day, next_sessions
+
+    days, day = [target], target
+    while first and len(days) < SEED_SESSIONS:
+        day -= timedelta(days=1)
+        if is_trading_day(day):
+            days.append(day)
+    picks = research.read_picks(store)
+    out: dict = {}
+    for d in days:                                   # the newest first: its entry wins
+        for symbol, setup in setups_list.sent_setups(
+                d.isoformat(), picks=picks, live=alerts.read_sent(store, d).get("live") or {}, leaders=[],
+                allowed=allowed).items():
+            out.setdefault(symbol, {**setup, "since": d.isoformat()})
+    week_ends = next_sessions(target, 1)[0].isocalendar()[1] != target.isocalendar()[1]
+    snap = flow.read(store.root, target.isoformat()) if settings.flow.enabled else None
+    if snap and (week_ends or first):
+        stocks = snap.get("stocks") or {}
+        leaders = sorted((s for s in snap.get("passing") or [] if s in stocks),
+                         key=lambda s: -stocks[s]["rs"])[: settings.flow.weekly_top]
+        for symbol, setup in setups_list.sent_setups(target.isoformat(), picks=[], live={}, leaders=leaders,
+                                                     allowed=allowed).items():
+            out.setdefault(symbol, setup)
+    return out
 
 
 def _owner_list_stocks(settings, client, store, view) -> tuple[list[str], dict]:

@@ -111,3 +111,99 @@ def test_the_first_map_goes_to_the_group_at_once_then_weekly(tmp_path, monkeypat
     flow.save(tmp_path, flow.snapshot(stocks, bars.get, None, CFG, date(2026, 9, 3)))
     assert run._flow_weekly(settings, store, date(2026, 9, 3)) == "not due"           # Thursday
     assert run._flow_weekly(settings, store, friday) == "sent" and "השבוע שהסתיים" in sent[1]
+
+
+# ------------------------------------------------- recommended stocks into the TradingView list
+def test_the_recommended_stocks_become_list_entries_only_where_the_money_flows():
+    from tascreen import setups_list
+
+    live = {"NASDAQ:AAA|ascending_triangle": {"line": 12.5}, "NYSE:OUT|flag": {"line": 40.0}}
+    picks = [{"day": "2026-09-04", "symbol": "NASDAQ:BBB", "pattern": "rising_wedge"},
+             {"day": "2026-09-03", "symbol": "NASDAQ:OLD", "pattern": "flag"},
+             {"day": "2026-09-04", "symbol": "NASDAQ:AAA", "pattern": "flag"}]
+    got = setups_list.sent_setups("2026-09-04", picks=picks, live=live, leaders=["NASDAQ:CCC"],
+                                  allowed={"NASDAQ:AAA", "NASDAQ:BBB", "NASDAQ:CCC", "NASDAQ:OLD"})
+    assert set(got) == {"NASDAQ:AAA", "NASDAQ:BBB", "NASDAQ:CCC"}           # not the other day's, not OUT
+    assert got["NASDAQ:AAA"]["kind"] == "alert" and got["NASDAQ:AAA"]["line"] == 12.5
+    assert got["NASDAQ:BBB"]["kind"] == "pick" and "pattern" not in got["NASDAQ:BBB"]   # wedges allowed here
+    assert got["NASDAQ:CCC"]["kind"] == "flow" and got["NASDAQ:CCC"]["level"] == "none"
+    from tascreen.config import SetupsListSettings
+
+    assert setups_list.qualifies({"symbol": "NASDAQ:BBB", **got["NASDAQ:BBB"]}, SetupsListSettings())
+
+
+def test_a_leader_without_a_level_stays_until_its_uptrend_breaks_or_it_grows_old():
+    from types import SimpleNamespace
+
+    from tascreen import setups_list
+
+    bars = _rising(4)
+    days = bars["timestamp"].dt.date.astype(str).tolist()
+    view = SimpleNamespace(stocks=pd.DataFrame({"symbol": ["NASDAQ:CCC"], "close": [float(bars["close"].iloc[-1])]}),
+                           day=bars["timestamp"].iloc[-1].date())
+    entry = {"symbol": "NASDAQ:CCC", "kind": "flow", "level": "none", "since": days[-3], "text": "x"}
+    kept, events = setups_list.review([entry], view, lambda s: bars, break_atr=0.5, keep_sessions=10,
+                                      trending={"NASDAQ:CCC"})
+    assert len(kept) == 1 and not events
+    old = {**entry, "since": days[-20]}
+    assert setups_list.review([old], view, lambda s: bars, break_atr=0.5, keep_sessions=10,
+                              trending={"NASDAQ:CCC"})[1][0]["reason"] == "stale"
+    assert setups_list.review([entry], view, lambda s: bars, break_atr=0.5, keep_sessions=10,
+                              trending=set())[1][0]["reason"] == "trend"
+
+
+def test_the_first_night_brings_the_last_sessions_recommendations(tmp_path):
+    import json
+
+    import run
+    from tascreen import alerts
+    from tascreen.store import Store
+
+    settings, store = run.load_settings(), Store(tmp_path)
+    (tmp_path / "research").mkdir()
+    (tmp_path / "research" / "picks.json").write_text(json.dumps(
+        [{"day": "2026-09-02", "symbol": "NASDAQ:BBB", "pattern": "flag"},
+         {"day": "2026-08-20", "symbol": "NASDAQ:OLD", "pattern": "flag"}]), encoding="utf-8")
+    alerts.write_sent(store, date(2026, 9, 3), {"live": {"NASDAQ:AAA|flag": {"line": 10.0}}})
+    stocks, bars = _universe()
+    flow.save(tmp_path, flow.snapshot(stocks, bars.get, None, CFG, DAY))
+    first = run._sent_recommendations(settings, store, DAY, None, first=True)
+    assert {"NASDAQ:AAA", "NASDAQ:BBB"} <= set(first) and "NASDAQ:OLD" not in first
+    assert any(v["kind"] == "flow" for v in first.values())                # the newest map's leaders
+    later = run._sent_recommendations(settings, store, date(2026, 9, 3), None)
+    assert set(later) == {"NASDAQ:AAA"}                                    # a Thursday: no leaders
+
+
+def test_a_live_alert_goes_into_the_list_at_once(tmp_path):
+    import asyncio
+    from contextlib import asynccontextmanager
+
+    import run
+    from tascreen import setups_list
+    from tascreen.store import Store
+
+    settings, store = run.load_settings(), Store(tmp_path)
+    if not settings.setups_list.id:
+        import pytest
+        pytest.skip("no list id in config.yaml")
+    setups_list.write(tmp_path, {"id": settings.setups_list.id, "version": 4, "entries": [
+        {"symbol": "NASDAQ:OLD", "kind": "ma150"}], "managed": ["NASDAQ:OLD"]})
+    calls = []
+
+    class Session:
+        async def call_tool(self, name, args):
+            from fakes import result
+            calls.append((name, args))
+            return result({"success": True})
+
+    class Client:
+        @asynccontextmanager
+        async def own_list_session(self, list_id, name):
+            yield Session()
+
+    found = [{"key": "NASDAQ:NEW|flag", "symbol": "NASDAQ:NEW", "line": 10.0},
+             {"key": "NASDAQ:OLD|flag", "symbol": "NASDAQ:OLD", "line": 9.0}]
+    assert run._list_alerts(settings, Client(), store, DAY, found) == 1
+    assert calls == [(setups_list.ADD, {"watchlist_id": settings.setups_list.id, "symbols": ["NASDAQ:NEW"]})]
+    state = setups_list.read(tmp_path)
+    assert [e["symbol"] for e in state["entries"]] == ["NASDAQ:OLD", "NASDAQ:NEW"] and "NASDAQ:NEW" in state["managed"]

@@ -80,10 +80,15 @@ REMOVE = "mcp-watchlist-remove-from-watchlist"
 LISTS = "mcp-watchlist-list-watchlists"   # {"watchlists": [{"id", "name", "symbols", ...}]} (live, 2026-10-06)
 # 1: the research team's picks; 2 (2026-10-05): the owner's setups; 3 (2026-10-06): his own lists
 # and foreign companies scanned too. A new version rebuilds the list at once (run.py).
-VERSION = 3
-KINDS = ("retest", "ma150", "breakout", "ma20")   # one entry a stock: the first of these it shows
+VERSION = 4                 # 4: the recommended stocks too (2026-10-31)
+# one entry a stock: the first of these it shows; the last three are the stocks the bot
+# recommended in Telegram (owner, 2026-10-31: "every stock you send me goes into TradingView")
+KINDS = ("retest", "ma150", "breakout", "ma20", "alert", "pick", "flow")
 
-KIND_HE = {"ma150": "ממוצע 150", "ma20": "ממוצע 20", "retest": "בדיקה אחרי פריצה", "breakout": "פריצה"}
+KIND_HE = {"ma150": "ממוצע 150", "ma20": "ממוצע 20", "retest": "בדיקה אחרי פריצה", "breakout": "פריצה",
+           "alert": "התראת פריצה", "pick": "בחירת דוח הערב", "flow": "מובילה בזרימת הכסף"}
+SENT_TEXT = {"alert": "נשלחה כהתראת פריצה בזמן המסחר", "pick": "נבחרה בדוח הערב",
+             "flow": "מובילה בזרימת הכסף (מפת השבוע)"}
 REASONS = {
     "fell_ma": "נסגרה מתחת לממוצע: התמיכה נשברה",
     "fell_back": "נסגרה מתחת לקו שנפרץ: הפריצה לא החזיקה",
@@ -313,10 +318,44 @@ def _after(bars: pd.DataFrame, day: str) -> pd.DataFrame:
 
 
 def level_now(entry: dict[str, Any], bars: pd.DataFrame) -> float:
-    """The level an entry stands on, tonight: its average, or its line moved by its slope."""
+    """The level an entry stands on, tonight: its average, or its line moved by its slope
+    (NaN for an entry without a level: a pick or a money-flow leader)."""
     if entry.get("level") == "ma":
         return float(sma(bars["close"], int(entry["n"])).iloc[-1])
+    if entry.get("level") != "line":
+        return math.nan
     return float(entry["line"]) + float(entry.get("slope") or 0.0) * len(_after(bars, entry["line_day"]))
+
+
+def sent_setups(day: str, *, picks: list[dict], live: dict[str, dict], leaders: list[str],
+                allowed: set[str] | None) -> dict[str, dict[str, Any]]:
+    """The stocks the bot recommended in Telegram on `day`, as the list's setups (owner,
+    2026-10-31): the live breakout alerts (standing on their line: a close back through it
+    takes them out), the evening research's picks and the weekly money-flow map's leaders
+    (no level: they leave when the uptrend breaks or after `keep_sessions`). Only the stocks
+    that pass the money-flow filter (`allowed`; None: all). The pattern is kept as
+    `source_pattern`: the list's own rule against wedges is for its setups, not for these."""
+    out: dict[str, dict[str, Any]] = {}
+
+    def put(symbol: str, kind: str, **more: Any) -> None:
+        if (allowed is None or symbol in allowed) and symbol not in out:
+            out[symbol] = {"kind": kind, "text": SENT_TEXT[kind], "since": day, "strict": True, "volume": 0.0,
+                           "level": "none", **more}
+
+    for key, alert in sorted(live.items()):
+        symbol, _, pattern = key.partition("|")
+        line = alert.get("line") if isinstance(alert, dict) else None
+        if _finite(line):
+            put(symbol, "alert", source_pattern=pattern or None, level="line", line=float(line), slope=0.0,
+                line_day=day, watch=float(line))
+        else:
+            put(symbol, "alert", source_pattern=pattern or None)
+    for pick in picks:
+        if pick.get("day") == day and pick.get("symbol"):
+            put(pick["symbol"], "pick", source_pattern=pick.get("pattern"))
+    for symbol in leaders:
+        put(symbol, "flow")
+    return out
 
 
 def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr: float,

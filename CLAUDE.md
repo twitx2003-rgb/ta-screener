@@ -199,6 +199,13 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   `notify.PrivateChat` logs it and the run goes on (setups-list and coach notes do not arrive). First night: of 39 entries, 21 would leave (template
   broken). Next stages, after the owner's review: 3) learning (which conditions worked, in the
   list's ledger and the history study), 4) news sentiment per sector from the X triage.
+- Recommended stocks into TradingView (owner, 2026-10-31: "every stock you send me goes into
+  TradingView, and so the watchlist builds"; into the bot's existing setups list, recommendations
+  only, money-flow filter only): `setups_list.sent_setups` makes list entries of the evening
+  research's picks ("pick"), the live breakout alerts ("alert", standing on their line; added at
+  once from the live watch, `run._list_alerts`) and the weekly map's leaders ("flow"); the night's
+  review manages them like the setups (trend break, stale, a close back through the line).
+  List VERSION 4; its first night also took the last 5 sessions' picks and alerts.
 - X news pictures (owner, 2026-10-10): every story goes with a picture: the post's photo, else a
   drawn card (`news_card.py`: the digest's design, with the named stock's three months of candles;
   `xnews.yml` downloads the bars). Two or more stories in a round: one album, the whole text on the
