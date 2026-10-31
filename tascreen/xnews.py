@@ -786,8 +786,13 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
     day_log = [r for r in state.get("day_log") or []
                if isinstance(r, dict) and stamp - int(r.get("at", 0)) <= DAY_LOG_S]
     since = max(int(state.get("since") or stamp - first_lookback_s), stamp - MAX_LOOKBACK_S)
+    read_failed = False
     if reads["posts"] < daily_read_cap:
-        posts = source.new_posts(accounts, since - OVERLAP_S, with_replies=with_replies)
+        try:
+            posts = source.new_posts(accounts, since - OVERLAP_S, with_replies=with_replies)
+        except ProviderError as exc:          # 2026-10-29: two runs died on one failed pass
+            summary["read_error"] = type(exc).__name__
+            read_failed, posts = True, []
         summary["calls"], summary["read"] = source.calls, len(posts)
         seen_set = set(seen)
         new = [p for p in posts if p.id not in seen_set]
@@ -796,7 +801,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
         pending = (pending + [_post_row(p, stamp) for p in new])[-PENDING_MAX:]
         recent = (recent + [_post_row(p, stamp) for p in new])[-RECENT_MAX:]
         reads["posts"] += len(posts)
-        since = stamp
+        if not read_failed:                   # else the next pass reads the same window again
+            since = stamp
     else:
         summary["read_status"] = "daily cap"
     status = "ok"
@@ -818,6 +824,11 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
         except UsageLimit:
             model["paused_until"] = stamp + LIMIT_PAUSE_S
             picks, status = [], "claude limit"
+        except ProviderError as exc:          # Claude failed: the posts wait for the next try
+            model["calls"] += 1
+            model["last"] = stamp
+            picks, status = [], "claude failed"
+            summary["judge_error"] = type(exc).__name__
         else:
             model["calls"] += 1
             model["last"] = stamp
@@ -862,7 +873,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
                 summary["holding_news"] = len(mine)
             except ProviderError as exc:     # 2026-10-28: "bot was blocked by the user" (403)
                 summary["private_error"] = type(exc).__name__
-        if picks:
+        if picks:                            # a failed send raises: the state is not saved, the next pass retries
             summary["photos"] = deliver(picks, send, send_photo, picture=picture, send_png=send_png,
                                         send_album=send_album)
             sent_recent += [{"at": stamp, "author": p.author, "summary_he": k["summary_he"]}

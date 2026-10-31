@@ -722,3 +722,24 @@ def test_a_blocked_private_chat_does_not_stop_the_groups_news(tmp_path):
                      holdings=["ZQX"], send_private=blocked)
     assert summary["sent"] == 1 and len(sent) == 1 and summary["private_error"] == "ProviderError"
     assert (tmp_path / "state.json").exists()                          # the round was saved
+
+
+# ------------------------------------------------- one failed pass never stops the loop
+def test_a_failed_read_is_counted_and_the_same_window_is_read_again(tmp_path):
+    def down(path, params):
+        raise ProviderError("X reader /twitter/tweet/advanced_search: HTTP 503")
+
+    summary, _ = run(tmp_path, down, picker(), [])
+    assert summary["read_error"] == "ProviderError" and summary["status"] == "ok"
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["since"] < int(NOW.timestamp())                           # the window is read again
+
+
+def test_a_failed_claude_call_keeps_the_posts_for_the_next_try(tmp_path):
+    def broken(system, user, schema):
+        raise ProviderError("Claude Code returned an error (error_during_execution): x")
+
+    summary, _ = run(tmp_path, FakeReader({"tweets": [row("302")], "has_next_page": False}),
+                     SyntheticLLM(broken), [])
+    assert summary["judge_error"] == "ProviderError" and summary["status"] == "claude failed"
+    assert summary["waiting"] == 1

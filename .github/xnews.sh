@@ -18,6 +18,7 @@ restore)
     if git clone -q --depth 1 --branch xnews --single-branch "$url" xnews-state 2> /dev/null; then
         cp xnews-state/state.json data/xnews/state.json 2> /dev/null || true
         cp xnews-state/digest.json data/xnews/digest.json 2> /dev/null || true   # the morning digest's record
+        cp xnews-state/errors.log data/xnews/errors.log 2> /dev/null || true     # failed passes' log tails
         echo "xnews state: restored"
     else
         git init -q -b xnews xnews-state
@@ -31,6 +32,7 @@ keep)
     if [ ! -f data/xnews/state.json ]; then echo "xnews state: nothing to keep"; exit 0; fi
     cp data/xnews/state.json xnews-state/state.json
     if [ -f data/xnews/digest.json ]; then cp data/xnews/digest.json xnews-state/digest.json; fi
+    if [ -f data/xnews/errors.log ]; then cp data/xnews/errors.log xnews-state/errors.log; fi   # failed passes
     cd xnews-state
     git add -A
     git commit -qm "xnews $(date -u +%Y-%m-%dT%H:%MZ)" || { echo "xnews state: unchanged"; exit 0; }

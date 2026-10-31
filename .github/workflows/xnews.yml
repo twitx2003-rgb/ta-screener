@@ -91,9 +91,20 @@ jobs:
           while :; do
             hour=$((10#$(date -u +%H)))
             if [ -n "$X_API_KEY" ] && [ "$hour" -ge 4 ]; then    # 07:00-03:00 Israel time
-              python -u run.py --xnews > "$RUNNER_TEMP/xnews.log" 2>&1
+              # one failed pass never ends the loop (2026-10-29: "bash -e" stopped two runs); its
+              # error class goes to this public log, the log's tail (keys masked) to the private
+              # xnews branch (data/xnews/errors.log)
+              python -u run.py --xnews > "$RUNNER_TEMP/xnews.log" 2>&1 || true
               line=$(grep -h '^xnews: ' "$RUNNER_TEMP/xnews.log" | tail -n 1)
-              echo "$(date -u +%H:%M) ${line:-xnews: no status line (an error)}"
+              if [ -z "$line" ]; then
+                err=$(grep -oE '[A-Z][A-Za-z]*(Error|Exception|Failed|Limited|Exhausted)' "$RUNNER_TEMP/xnews.log" | tail -n 1)
+                line="xnews: no status line (${err:-an error})"
+                mkdir -p data/xnews
+                { echo "== $(date -u +%Y-%m-%dT%H:%MZ)"; tail -n 40 "$RUNNER_TEMP/xnews.log" \
+                    | sed -E 's/bot[0-9]+:[A-Za-z0-9_-]+/bot***/g; s/[A-Za-z0-9_-]{32,}/***/g'; } >> data/xnews/errors.log
+                tail -n 400 data/xnews/errors.log > "$RUNNER_TEMP/errors.log" && mv "$RUNNER_TEMP/errors.log" data/xnews/errors.log
+              fi
+              echo "$(date -u +%H:%M) $line"
               bash .github/xnews.sh keep > /dev/null || echo "xnews state: could not keep"
             fi
             python -u run.py --ensure-live 2> /dev/null | grep -h '^ensure-live: ' || true
