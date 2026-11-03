@@ -509,7 +509,8 @@ def move_line(ticker: str, pct: float, session: str) -> str:
 
 def earnings_visuals(picks: list[tuple[Post, dict]], source: "XSource", llm, *, caps: dict[str, float],
                      min_cap: float, stamp: int, preferred: tuple | list = (),
-                     fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image) -> dict[str, int]:
+                     fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
+                     lookback_s: int = 0) -> dict[str, int]:
     """For each pick that reports the results of a company worth at least `min_cap` (owner,
     2026-10-28: "a picture of how the financial numbers break down, and the stock's move"):
     one X search for recent posts with pictures about its ticker, and one model call that
@@ -523,7 +524,7 @@ def earnings_visuals(picks: list[tuple[Post, dict]], source: "XSource", llm, *, 
         ticker = pick_.get("earnings_of") or ""
         if not ticker or caps.get(ticker, 0.0) < min_cap:
             continue
-        query = f"${ticker.split('.')[0]} filter:images -filter:replies since_time:{stamp - EARNINGS_LOOKBACK_S}"
+        query = f"${ticker.split('.')[0]} filter:images -filter:replies since_time:{stamp - (lookback_s or EARNINGS_LOOKBACK_S)}"
         page = source.search_page(query)
         out["searched"] += 1
         rows = page.get("tweets") if isinstance(page.get("tweets"), list) else []
@@ -567,6 +568,90 @@ def earnings_visuals(picks: list[tuple[Post, dict]], source: "XSource", llm, *, 
             pick_["move_he"] = move_line(ticker, float(pct), session)
             out["moves"] += 1
     return out
+
+
+CALL_SYSTEM = agent_prompt("earnings-call-summarizer")   # tascreen/agents/earnings-call-summarizer.md
+CALL_POSTS_MAX = 40               # posts read for one call's summary
+CALL_LOOKBACK_MAX_S = 26 * 3600   # never further back than this
+CALL_POINTS_MAX = 5
+
+
+def call_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {"headline_he": {"type": "string"}, "guidance_he": {"type": "string"},
+                       "points_he": {"type": "array", "items": {"type": "string"}},
+                       "move_pct": {"type": ["number", "null"]}, "move_session": {"type": "string"},
+                       "move_post_id": {"type": "string"}},
+        "required": ["headline_he", "guidance_he", "points_he", "move_pct", "move_session", "move_post_id"],
+        "additionalProperties": False,
+    }
+
+
+def _numbers(text: str) -> set[str]:
+    return {n.replace(",", "") for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text)}
+
+
+def grounded(line: str, posts_text: str) -> bool:
+    """Every number in the line is written in the posts (owner's rule for the news: never a
+    number the sources do not give), and the line carries no advice wording."""
+    return _numbers(line) <= _numbers(posts_text) and not banned(line)
+
+
+def call_summary(ticker: str, source: "XSource", llm, *, since: int, preferred: tuple | list = ()) -> dict | None:
+    """The earnings call's summary from the X posts about `ticker` since `since` (owner,
+    2026-11-03: "the investor call"): {headline_he, guidance_he, points_he, move_he}, every line
+    checked against the posts (`grounded`); None when the posts do not cover the call."""
+    base = ticker.split(".")[0]
+    page = source.search_page(f"${base} -filter:replies since_time:{since}")
+    rows = page.get("tweets") if isinstance(page.get("tweets"), list) else []
+    posts: list[Post] = []
+    for row in rows:
+        try:
+            posts.append(to_post(row))
+        except ProviderError:
+            continue
+    first = {a.lower() for a in preferred}
+    posts.sort(key=lambda q: q.author.lower() not in first)
+    posts = posts[:CALL_POSTS_MAX]
+    if not posts:
+        return None
+    listing = json.dumps({"ticker": base, "posts": [{"post_id": q.id, "author": q.author, "text": q.text}
+                                                    for q in posts]}, ensure_ascii=False, indent=1)
+    answer, _ = llm.complete(system=CALL_SYSTEM, user=listing, schema=call_schema())
+    text = "\n".join(q.text for q in posts)
+    headline = str(answer.get("headline_he") or "").strip()
+    if not headline or not grounded(headline, text):
+        return None
+    guidance = str(answer.get("guidance_he") or "").strip()
+    points = [str(x).strip() for x in answer.get("points_he") or [] if str(x).strip()]
+    out = {"ticker": base, "headline_he": headline,
+           "guidance_he": guidance if guidance and grounded(guidance, text) else "",
+           "points_he": [x for x in points if grounded(x, text)][:CALL_POINTS_MAX], "move_he": ""}
+    said = {q.id: q for q in posts}.get(str(answer.get("move_post_id") or ""))
+    pct, session = answer.get("move_pct"), str(answer.get("move_session") or "")
+    if said and isinstance(pct, (int, float)) and pct and session in MOVE_SESSIONS and stated_pct(said.text, float(pct)):
+        out["move_he"] = move_line(base, float(pct), session)
+    return out
+
+
+def call_message(summary: dict) -> str:
+    """The call's summary as one Telegram HTML message."""
+    e = html.escape
+    lines = [f"🎙️ <b>עיקרי שיחת המשקיעים · {e(summary['ticker'])}</b>", f"<b>{e(summary['headline_he'])}</b>"]
+    if summary.get("move_he"):
+        lines.append(e(summary["move_he"]))
+    if summary.get("guidance_he"):
+        lines.append(f"🔭 <b>תחזית:</b> {e(summary['guidance_he'])}")
+    lines += [f"• {e(x)}" for x in summary.get("points_he") or []]
+    lines.append("<i>סיכום מתוך פוסטים ב-X בזמן השיחה. לא ייעוץ השקעות.</i>")
+    return "\n".join(lines)
+
+
+def before_close(now: datetime, market_tz: str = "America/New_York") -> bool:
+    """A trading weekday before 16:00 New York: the evening's earnings are still to come."""
+    local = now.astimezone(ZoneInfo(market_tz))
+    return local.weekday() < 5 and local.hour < 16
 
 
 def message(picks: list[tuple[Post, dict]]) -> str:
@@ -746,6 +831,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
              fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
              market_caps: dict[str, float] | None = None, earnings_min_cap: float = 0.0,
              earnings_accounts: tuple | list = (),
+             llm_evening_reserve: int = 0, call_after_s: int = 0,
              first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
     """Read, pick, send, remember. Returns counts only (safe for the public log).
 
@@ -807,7 +893,11 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
         summary["read_status"] = "daily cap"
     status = "ok"
     mine: list[tuple[Post, dict]] = []
-    due = (pending and model["calls"] < llm_daily_cap and stamp >= int(model.get("paused_until", 0))
+    # owner, 2026-11-03: the cap ran out at 20:09 UTC on 2026-11-02, as the evening's earnings came
+    # out; `llm_evening_reserve` calls are kept for after the close
+    cap_now = llm_daily_cap - (llm_evening_reserve if before_close(now) else 0)
+    calls = [c for c in state.get("calls") or [] if isinstance(c, dict) and stamp - int(c.get("since", 0)) <= CALL_LOOKBACK_MAX_S]
+    due = (pending and model["calls"] < cap_now and stamp >= int(model.get("paused_until", 0))
            and stamp - int(model.get("last", 0)) >= llm_min_interval_s)
     if due:
         try:
@@ -859,6 +949,13 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
                 summary["earnings_error"] = type(exc).__name__
             # the breakdown picture replaces the post's own photo
             picks = [(replace(p, photo=k["earnings_photo"]) if k.get("earnings_photo") else p, k) for p, k in picks]
+            if call_after_s > 0:               # the investor call's summary, `call_after_s` later
+                known = {c["ticker"] for c in calls}
+                for _p, k in picks:
+                    ticker = (k.get("earnings_of") or "").split(".")[0]
+                    if ticker and ticker not in known and market_caps.get(k.get("earnings_of") or "", 0.0) >= earnings_min_cap:
+                        calls.append({"ticker": ticker, "since": stamp - 3600, "due": stamp + call_after_s})
+                        known.add(ticker)
         if send_photo is not None and any(p.photo for p, _ in picks):
             try:                             # a second look, at the pictures: never blocks the news
                 summary["explained"] = explain_images(picks, llm, fetch)
@@ -879,13 +976,29 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             sent_recent += [{"at": stamp, "author": p.author, "summary_he": k["summary_he"]}
                             for p, k in picks]
         summary["sent"] = len(picks)
-    elif pending and model["calls"] >= llm_daily_cap:
-        status = "claude daily cap"
+    elif pending and model["calls"] >= cap_now:
+        status = "claude daily cap" if model["calls"] >= llm_daily_cap else "claude kept for the evening"
+    ready = [c for c in calls if stamp >= int(c["due"])]
+    if ready and model["calls"] < llm_daily_cap and stamp >= int(model.get("paused_until", 0)):
+        call = ready[0]                       # one a pass: the cap is shared
+        calls = [c for c in calls if c is not call]
+        try:
+            got = call_summary(call["ticker"], source, llm_factory(), since=int(call["since"]),
+                               preferred=earnings_accounts)
+            model["calls"] += 1
+            if got is not None:
+                send(call_message(got))
+                summary["call_summaries"] = 1
+        except UsageLimit:
+            model["paused_until"] = stamp + LIMIT_PAUSE_S
+            calls.append(call)                # tried again after the pause
+        except ProviderError as exc:
+            summary["call_error"] = type(exc).__name__
     summary["waiting"] = len(pending)
     summary["claude_today"] = model["calls"]
     save_state(state_path, {"since": since, "seen": seen, "pending": pending, "reads": reads, "llm": model,
                             "budget": budget, "balance": balance, "sent_recent": sent_recent[-SENT_RECENT_KEPT:],
-                            "recent": recent, "day_log": day_log})
+                            "recent": recent, "day_log": day_log, "calls": calls})
     summary["status"] = status
     return summary
 

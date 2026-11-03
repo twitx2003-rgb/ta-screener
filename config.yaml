@@ -154,8 +154,11 @@ xnews:
   # Claude's share of the subscription (also used by the chart analyses), kept at the
   # earlier 45 a day: the posts are read every 10 minutes, but judged together every
   # 30 minutes at most (the 20-hour window 07:00-03:00 Israel time fits 40)
-  claude_daily_cap: 45
+  claude_daily_cap: 60
   claude_every_minutes: 30
+  # owner, 2026-11-03: 2026-11-02's cap ran out at 20:09 UTC as the evening's earnings came out
+  # (Palantir's among them): 15 of the 60 are kept for after the close (16:00 New York)
+  claude_evening_reserve: 15
   # Few, hand-picked stories (owner, 2026-09-28: "not a story from every scan"): at most
   # max_per_round a round (the most important), and daily_max regular ones a day, spread
   # over the news hours. A 5 (market-moving now) always goes.
@@ -172,8 +175,11 @@ xnews:
   # for posts with pictures about its ticker, and Claude picks the picture that breaks the
   # quarter's numbers down and reads the stock's move from a post that states it.
   # Pictures from these accounts are offered first (they draw income-statement charts).
-  earnings_min_cap_usd: 3.0e11
+  # 2026-11-03: 300B -> 200B, so every stock on the owner's list is covered (without telling the
+  # group which ones), and the investor call's summary two hours after the report
+  earnings_min_cap_usd: 2.0e11
   earnings_image_accounts: [EconomyApp, StockMKTNewz, wallstengine]
+  call_summary_after_minutes: 120
   model: "sonnet"
   effort: "low"
   timeout_s: 300

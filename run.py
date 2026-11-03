@@ -164,6 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Save the twitterapi.io key (asked for, never shown) and test it")
     parser.add_argument("--x-discover", metavar="ACCOUNT",
                         help="One real search for an X account: print the answer's keys (no post text)")
+    parser.add_argument("--earnings-now", metavar="TICKER",
+                        help="One company's last report now: the breakdown picture, the stated move and the "
+                             "investor call's summary, to the group (GitHub: xnews.yml's earnings_now)")
     parser.add_argument("--x-vision-check", action="store_true",
                         help="One real post picture -> Claude's explanation -> Telegram (confirms the "
                              "picture call; normal terminal or xnews.yml with check_vision)")
@@ -2045,9 +2048,51 @@ def xnews_pass(settings) -> int:
         holdings=_saved_holdings(settings), send_private=_private_sender(),
         market_caps=_market_caps(settings), earnings_min_cap=cfg.earnings_min_cap_usd,
         earnings_accounts=cfg.earnings_image_accounts,
+        llm_evening_reserve=cfg.claude_evening_reserve, call_after_s=cfg.call_summary_after_minutes * 60,
         with_replies=cfg.with_replies)
     print("xnews: " + " ".join(f"{k}={v}" for k, v in summary.items()))
     return 0
+
+
+def earnings_now(settings, ticker: str) -> int:
+    """One company's last report, now (owner, 2026-11-03: Palantir's never came: the news's
+    Claude cap ran out as it came out): the X picture that breaks the quarter down, the stock's
+    stated move and the investor call's summary, from the last day's posts, to the group.
+    One status line."""
+    from datetime import datetime, timezone
+
+    from tascreen import xnews
+    from tascreen.llm import ClaudeCodeLLM
+    from tascreen.notify import from_environment
+
+    cfg = settings.xnews
+    ticker = ticker.strip().upper().lstrip("$")
+    if not xnews.EARNINGS_TICKER.match(ticker):
+        raise ConfigError(f"'{ticker[:12]}' is not a ticker")
+    bot = from_environment()
+    if bot is None:
+        raise ConfigError("no Telegram bot")
+    source, llm = _x_source(), ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s)
+    stamp = int(datetime.now(timezone.utc).timestamp())
+    post = xnews.Post(id="0", author="", text="", url="", created_at="", is_reply=False)
+    pick = {"earnings_of": ticker, "summary_he": f"דוח הרבעון של {ticker}", "importance": 4}
+    got = xnews.earnings_visuals([(post, pick)], source, llm, caps={ticker: 1.0}, min_cap=0.0, stamp=stamp,
+                                 preferred=cfg.earnings_image_accounts, lookback_s=24 * 3600)
+    lines = [f"📊 <b>דוח הרבעון · {ticker}</b>"] + [html_escape(pick[k]) for k in ("image_he", "move_he") if pick.get(k)]
+    if pick.get("earnings_photo"):
+        bot.send_photo_url(pick["earnings_photo"], "\n".join(lines), html=True)
+    call = xnews.call_summary(ticker, source, llm, since=stamp - 24 * 3600, preferred=cfg.earnings_image_accounts)
+    if call is not None:
+        bot.send(xnews.call_message(call), html=True)
+    print(f"earnings-now: {ticker} picture={bool(pick.get('earnings_photo'))} call={call is not None} "
+          f"searches={source.calls} claude={got['calls'] + 1}")
+    return 0
+
+
+def html_escape(text: str) -> str:
+    import html
+
+    return html.escape(str(text))
 
 
 def update(settings, limit: int | None, stop_at=None) -> int:
@@ -2114,6 +2159,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.setup_x, lambda: setup_x(settings)),
         (args.x_discover, lambda: x_discover(settings, args.x_discover)),
         (args.x_vision_check, lambda: x_vision_check(settings)),
+        (args.earnings_now, lambda: earnings_now(settings, args.earnings_now)),
         (args.x_latest is not None, lambda: x_latest(settings, args.x_latest)),
         (args.xnews, lambda: xnews_pass(settings)),
     )

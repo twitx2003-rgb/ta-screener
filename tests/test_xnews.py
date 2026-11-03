@@ -743,3 +743,71 @@ def test_a_failed_claude_call_keeps_the_posts_for_the_next_try(tmp_path):
                      SyntheticLLM(broken), [])
     assert summary["judge_error"] == "ProviderError" and summary["status"] == "claude failed"
     assert summary["waiting"] == 1
+
+
+# --- the investor call's summary and the evening's reserve (invented data) ---
+
+def _call_page():
+    return {"tweets": [
+        row("401", author="DeskOne", text="*ZQX CEO: DEMAND FOR OUR PLATFORM HAS NEVER BEEN STRONGER"),
+        row("402", author="DeskTwo", text="$ZQX sees Q4 revenue of $1.32B to $1.35B, above estimates"),
+        row("403", author="DeskTwo", text="$ZQX shares +8.5% after hours"),
+    ], "has_next_page": False}
+
+
+def test_the_call_summary_keeps_only_lines_whose_numbers_the_posts_give():
+    answer = {"headline_he": "המנכ\"ל: הביקוש לפלטפורמה חזק מאי פעם",
+              "guidance_he": "התחזית לרבעון הרביעי: הכנסות של 1.32 עד 1.35 מיליארד דולר",
+              "points_he": ["ההכנסות מלקוחות ממשלתיים צמחו ב-40%", "החברה הוסיפה לקוחות חדשים"],
+              "move_pct": 8.5, "move_session": "after_hours", "move_post_id": "403"}
+    reader = FakeReader(_call_page())
+    got = xnews.call_summary("ZQX", xnews.XSource(KEY, get=reader), SyntheticLLM(lambda s, u, sc: answer),
+                             since=1_800_000_000)
+    assert reader.queries[0]["query"] == "$ZQX -filter:replies since_time:1800000000"
+    assert got["guidance_he"] and got["points_he"] == ["החברה הוסיפה לקוחות חדשים"]   # 40% is in no post
+    assert got["move_he"] == "📈 מניית ZQX עולה ב-8.5% אחרי שעות המסחר"
+    text = xnews.call_message(got)
+    assert text.startswith("🎙️ <b>עיקרי שיחת המשקיעים · ZQX</b>") and "לא ייעוץ השקעות" in text
+    empty = xnews.call_summary("ZQX", xnews.XSource(KEY, get=FakeReader(_call_page())),
+                               SyntheticLLM(lambda s, u, sc: {**answer, "headline_he": ""}), since=1)
+    assert empty is None
+
+
+def test_a_reports_story_schedules_its_call_summary_two_hours_later(tmp_path):
+    story = {"post_id": "11", "importance": 5, "summary_he": "זנטריקה (ZQX) עוקפת את התחזיות", "analysis_he": "",
+             "same_story_as": "", "repeat_of_sent": False, "earnings_of": "zqx"}
+    call = {"headline_he": "המנכ\"ל: הביקוש חזק מאי פעם", "guidance_he": "", "points_he": [],
+            "move_pct": None, "move_session": "", "move_post_id": ""}
+
+    def respond(system, user, schema):
+        if "breakdown_post_id" in schema["properties"]:
+            return {"breakdown_post_id": "", "breakdown_he": "", "move_pct": None, "move_session": "", "move_post_id": ""}
+        if "headline_he" in schema["properties"]:
+            return call
+        return {"picks": [story]}
+
+    sent = []
+    kw = dict(send_photo=lambda u, c: None, market_caps={"ZQX": 5e11}, earnings_min_cap=2e11, call_after_s=7200)
+    run(tmp_path, FakeReader({"tweets": [row("11")], "has_next_page": False}, _earnings_page()),
+        SyntheticLLM(respond), sent, **kw)
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert [c["ticker"] for c in state["calls"]] == ["ZQX"]
+    run(tmp_path, FakeReader(), SyntheticLLM(respond), sent, now=NOW.replace(hour=16), **kw)    # not yet
+    assert not any("שיחת המשקיעים" in t for t in sent)
+    summary, _ = run(tmp_path, FakeReader({"tweets": [], "has_next_page": False}, _call_page()),
+                     SyntheticLLM(respond), sent, now=NOW.replace(hour=17, minute=5), **kw)
+    assert summary["call_summaries"] == 1 and "שיחת המשקיעים" in sent[-1]
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["calls"] == []
+
+
+def test_calls_are_kept_for_the_evening_before_the_close(tmp_path):
+    (tmp_path / "state.json").write_text(json.dumps({"llm": {"day": "2026-01-05", "calls": 50, "last": 0}}),
+                                         encoding="utf-8")
+    llm = picker({"post_id": "21", "importance": 5, "summary_he": "חדשה"})
+    page = {"tweets": [row("21")], "has_next_page": False}
+    summary, _ = run(tmp_path, FakeReader(page), llm, [], now=NOW.replace(hour=20, minute=30), llm_daily_cap=60,
+                     llm_evening_reserve=15)                                                # 15:30 New York
+    assert summary["status"] == "claude kept for the evening" and summary["judged"] == 0
+    summary, _ = run(tmp_path, FakeReader(), llm, [], now=NOW.replace(hour=21, minute=30), llm_daily_cap=60,
+                     llm_evening_reserve=15)                                                # 16:30 New York
+    assert summary["judged"] == 1

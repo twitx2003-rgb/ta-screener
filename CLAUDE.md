@@ -209,6 +209,14 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   An evening whose report started no full analysis (the strict filter: 0 picks on 10-30 and
   11-02) dispatches analyst.yml for the 2 strongest newcomers of the list (`run._fallback_analyses`,
   owner 2026-11-03), never a stock from the owner's own lists (the group must not learn them).
+- Earnings (owner, 2026-11-03: "I did not get the results' breakdown and the investor call"):
+  2026-11-02's Claude cap (45) ran out at 20:09 UTC as the evening's reports came out (Palantir's
+  among them), and the waiting posts aged out. Now the cap is 60 with 15 kept for after the close
+  (`xnews.claude_evening_reserve`, `xnews.before_close`); the breakdown picture's floor is $200B
+  (every stock on the owner's list, without telling the group which); a report's story schedules
+  the investor call's summary two hours later (`xnews.call_summary`, agents/earnings-call-summarizer.md:
+  one X search, one Claude call, every number checked against the posts); `run.py --earnings-now
+  TICKER` (xnews.yml input `earnings_now`, own concurrency group) does one report now.
 - X news pictures (owner, 2026-10-10): every story goes with a picture: the post's photo, else a
   drawn card (`news_card.py`: the digest's design, with the named stock's three months of candles;
   `xnews.yml` downloads the bars). Two or more stories in a round: one album, the whole text on the

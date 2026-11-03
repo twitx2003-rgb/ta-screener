@@ -283,6 +283,10 @@ class XNewsSettings:
     # stock's move (owner, 2026-10-28); 0: off. Pictures from these accounts are offered first.
     earnings_min_cap_usd: float = 3.0e11
     earnings_image_accounts: tuple = ()
+    # owner, 2026-11-03: calls kept for after the close (the evening's earnings), and the
+    # investor call's summary this many minutes after a report's story (0: none)
+    claude_evening_reserve: int = 15
+    call_summary_after_minutes: int = 120
     model: str = "sonnet"
     effort: str = "low"
     timeout_s: int = 300
@@ -305,6 +309,10 @@ class XNewsSettings:
         except Exception as exc:
             raise ConfigError(f"xnews.accounts: {exc}") from None
         object.__setattr__(self, "accounts", names)
+        for name in ("claude_evening_reserve", "call_summary_after_minutes"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        if not (0 <= self.claude_evening_reserve < self.claude_daily_cap and 0 <= self.call_summary_after_minutes <= 600):
+            raise ConfigError("xnews: claude_evening_reserve 0..claude_daily_cap, call_summary_after_minutes 0..600")
         for name in ("min_importance", "weekend_min_importance", "daily_read_cap", "timeout_s", "claude_daily_cap",
                      "claude_every_minutes", "max_per_round", "daily_max"):
             object.__setattr__(self, name, int(getattr(self, name)))

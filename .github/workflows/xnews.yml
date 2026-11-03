@@ -24,13 +24,16 @@ on:
         description: "Only check the picture explanations (one real post picture -> Telegram)"
         type: boolean
         default: false
+      earnings_now:
+        description: "Only one company's last report now (a ticker, e.g. PLTR): breakdown picture, move, investor call"
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
   # its own group: never waits for, or delays, the nightly run; a digest trial runs beside the loop
-  group: ${{ inputs.digest_trial && 'xnews-digest-trial' || 'xnews' }}
+  group: ${{ inputs.digest_trial && 'xnews-digest-trial' || inputs.earnings_now != '' && 'xnews-earnings' || 'xnews' }}
   cancel-in-progress: false
 
 jobs:
@@ -73,12 +76,20 @@ jobs:
           TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID }}
           GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
           CHECK_VISION: ${{ inputs.check_vision }}
+          EARNINGS_NOW: ${{ inputs.earnings_now }}
           DIGEST_TRIAL: ${{ inputs.digest_trial }}
         run: |
           if [ "$DIGEST_TRIAL" = "true" ]; then
             python -u run.py --digest-trial > "$RUNNER_TEMP/digest.log" 2>&1
             code=$?
             grep -h '^digest: ' "$RUNNER_TEMP/digest.log" | tail -n 1
+            exit $code
+          fi
+          if [ -n "$EARNINGS_NOW" ]; then
+            code=0
+            python -u run.py --earnings-now "$EARNINGS_NOW" > "$RUNNER_TEMP/earnings.log" 2>&1 || code=$?
+            grep -h '^earnings-now: ' "$RUNNER_TEMP/earnings.log" | tail -n 1
+            if [ "$code" != 0 ]; then grep -oE '[A-Z][A-Za-z]*(Error|Exception)' "$RUNNER_TEMP/earnings.log" | tail -n 1; fi
             exit $code
           fi
           if [ "$CHECK_VISION" = "true" ]; then
