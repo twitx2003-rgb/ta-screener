@@ -206,6 +206,9 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   once from the live watch, `run._list_alerts`) and the weekly map's leaders ("flow"); the night's
   review manages them like the setups (trend break, stale, a close back through the line).
   List VERSION 4; its first night also took the last 5 sessions' picks and alerts.
+  An evening whose report started no full analysis (the strict filter: 0 picks on 10-30 and
+  11-02) dispatches analyst.yml for the 2 strongest newcomers of the list (`run._fallback_analyses`,
+  owner 2026-11-03), never a stock from the owner's own lists (the group must not learn them).
 - X news pictures (owner, 2026-10-10): every story goes with a picture: the post's photo, else a
   drawn card (`news_card.py`: the digest's design, with the named stock's three months of candles;
   `xnews.yml` downloads the bars). Two or more stories in a round: one album, the whole text on the

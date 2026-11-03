@@ -766,7 +766,12 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
         owner = owner or notify.owner_from_environment()
         if text and owner is not None:
             owner.send(text, html=True)
+        fallback = _fallback_analyses(settings, store, target, state)
+    else:
+        fallback = 0
     out = {"entries": len(state["entries"]), "changes": len(state.get("events") or [])}
+    if fallback:
+        out["fallback_analyses"] = fallback
     if state.get("synced"):
         return {**out, "status": "kept"}
     wanted = [e["symbol"] for e in state["entries"]]
@@ -1248,6 +1253,29 @@ def _list_alerts(settings, client, store, day, found: list[dict]) -> int:
     setups_list.write(store.root, state)
     push_token_file(setups_list.path(store.root), "live alerts added to the list")
     return len(new)
+
+
+FALLBACK_ANALYSES = 2       # an evening without the team's analyses: this many of the list's newcomers
+
+
+def _fallback_analyses(settings, store, target, state) -> int:
+    """An evening whose report started no full analysis (owner, 2026-11-03: none came while no
+    pick passed the money-flow filter): the strongest FALLBACK_ANALYSES stocks that joined the
+    bot's TradingView list tonight get one, in the group. Never a stock from the owner's own
+    lists (the group must not learn them). Once a session; returns how many started."""
+    from tascreen import alerts, flow, github
+
+    sent = alerts.read_sent(store, target)
+    evening = sent.get("evening") or {}
+    if not evening or evening.get("analyses") or "fallback" in evening:
+        return 0
+    added = [e["symbol"] for e in state.get("events") or []
+             if e.get("what") in ("added", "filled") and not e.get("from_lists")]
+    stocks = (flow.read(store.root, target.isoformat()) or {}).get("stocks") or {}
+    chosen = sorted(dict.fromkeys(added), key=lambda s: -(stocks.get(s) or {}).get("rs", 0))[:FALLBACK_ANALYSES]
+    started = [s for s in chosen if github.dispatch("analyst.yml", {"symbol": s}) == 204]
+    alerts.write_sent(store, target, {**sent, "evening": {**evening, "fallback": started}})
+    return len(started)
 
 
 SEED_SESSIONS = 5           # the first night of the recommendations: this many sessions back

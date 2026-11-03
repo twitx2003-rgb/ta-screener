@@ -207,3 +207,26 @@ def test_a_live_alert_goes_into_the_list_at_once(tmp_path):
     assert calls == [(setups_list.ADD, {"watchlist_id": settings.setups_list.id, "symbols": ["NASDAQ:NEW"]})]
     state = setups_list.read(tmp_path)
     assert [e["symbol"] for e in state["entries"]] == ["NASDAQ:OLD", "NASDAQ:NEW"] and "NASDAQ:NEW" in state["managed"]
+
+
+def test_an_evening_without_analyses_gets_the_lists_strongest_newcomers(tmp_path, monkeypatch):
+    import run
+    from tascreen import alerts, github
+    from tascreen.store import Store
+
+    started = []
+    monkeypatch.setattr(github, "dispatch", lambda wf, inputs: started.append((wf, inputs["symbol"])) or 204)
+    store = Store(tmp_path)
+    stocks, bars = _universe()
+    flow.save(tmp_path, flow.snapshot(stocks, bars.get, None, CFG, DAY))
+    strong = sorted(flow.read(tmp_path)["stocks"].items(), key=lambda kv: -kv[1]["rs"])
+    best, second, weak = strong[0][0], strong[1][0], strong[-1][0]
+    state = {"events": [{"symbol": weak, "what": "added"}, {"symbol": second, "what": "added"},
+                        {"symbol": best, "what": "added", "from_lists": True},       # the owner's own list
+                        {"symbol": strong[2][0], "what": "removed"}]}
+    alerts.write_sent(store, DAY, {"evening": {"analyses": []}})
+    assert run._fallback_analyses(run.load_settings(), store, DAY, state) == 2
+    assert started == [("analyst.yml", second), ("analyst.yml", weak)]               # never the owner's own
+    assert run._fallback_analyses(run.load_settings(), store, DAY, state) == 0        # once a session
+    alerts.write_sent(store, date(2026, 9, 3), {"evening": {"analyses": ["NASDAQ:X"]}})
+    assert run._fallback_analyses(run.load_settings(), store, date(2026, 9, 3), state) == 0
