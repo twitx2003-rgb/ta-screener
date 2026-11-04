@@ -81,13 +81,15 @@ LISTS = "mcp-watchlist-list-watchlists"   # {"watchlists": [{"id", "name", "symb
 # 1: the research team's picks; 2 (2026-10-05): the owner's setups; 3 (2026-10-06): his own lists
 # and foreign companies scanned too. A new version rebuilds the list at once (run.py).
 VERSION = 4                 # 4: the recommended stocks too (2026-10-31)
-# one entry a stock: the first of these it shows; the last three are the stocks the bot
+# one entry a stock: the first of these it shows; the last four are the stocks the bot
 # recommended in Telegram (owner, 2026-10-31: "every stock you send me goes into TradingView")
-KINDS = ("retest", "ma150", "breakout", "ma20", "alert", "pick", "flow")
+KINDS = ("retest", "ma150", "breakout", "ma20", "alert", "pick", "opp", "flow")
 
 KIND_HE = {"ma150": "ממוצע 150", "ma20": "ממוצע 20", "retest": "בדיקה אחרי פריצה", "breakout": "פריצה",
-           "alert": "התראת פריצה", "pick": "בחירת דוח הערב", "flow": "מובילה בזרימת הכסף"}
+           "alert": "התראת פריצה", "pick": "בחירת דוח הערב", "opp": "הזדמנות בממוצע עולה",
+           "flow": "מובילה בזרימת הכסף"}
 SENT_TEXT = {"alert": "נשלחה כהתראת פריצה בזמן המסחר", "pick": "נבחרה בדוח הערב",
+             "opp": "נשלחה כהזדמנות: חזרה לממוצע עולה",
              "flow": "מובילה בזרימת הכסף (מפת השבוע)"}
 REASONS = {
     "fell_ma": "נסגרה מתחת לממוצע: התמיכה נשברה",
@@ -328,12 +330,13 @@ def level_now(entry: dict[str, Any], bars: pd.DataFrame) -> float:
 
 
 def sent_setups(day: str, *, picks: list[dict], live: dict[str, dict], leaders: list[str],
-                allowed: set[str] | None) -> dict[str, dict[str, Any]]:
+                allowed: set[str] | None, opps: dict[str, dict] | None = None) -> dict[str, dict[str, Any]]:
     """The stocks the bot recommended in Telegram on `day`, as the list's setups (owner,
     2026-10-31): the live breakout alerts (standing on their line: a close back through it
-    takes them out), the evening research's picks and the weekly money-flow map's leaders
-    (no level: they leave when the uptrend breaks or after `keep_sessions`). Only the stocks
-    that pass the money-flow filter (`allowed`; None: all). The pattern is kept as
+    takes them out), the evening research's picks, the evening's opportunities (standing on
+    their average; tascreen/opportunities.py) and the weekly money-flow map's leaders (no
+    level: they leave when the uptrend breaks or after `keep_sessions`). Only the stocks that
+    pass the money-flow filter (`allowed`; None: all). The pattern is kept as
     `source_pattern`: the list's own rule against wedges is for its setups, not for these."""
     out: dict[str, dict[str, Any]] = {}
 
@@ -353,6 +356,9 @@ def sent_setups(day: str, *, picks: list[dict], live: dict[str, dict], leaders: 
     for pick in picks:
         if pick.get("day") == day and pick.get("symbol"):
             put(pick["symbol"], "pick", source_pattern=pick.get("pattern"))
+    for symbol, o in sorted((opps or {}).items()):
+        put(symbol, "opp", text=f"נשלחה כהזדמנות: חזרה לממוצע {o['n']} העולה", level="ma", n=int(o["n"]),
+            watch=float(o["average"]), atr=float(o["atr"]))
     for symbol in leaders:
         put(symbol, "flow")
     return out

@@ -240,7 +240,7 @@ setups_list:
   # private state repo (data/setups_list.json); only the id is here.
   enabled: true
   id: "349311195"
-  max_size: 40
+  max_size: 80               # 2026-11-04: room for the evening's opportunities (8 a night, 10 sessions)
   min_bounce_volume: 1.15
   min_breakout_volume: 1.5
   entry_sessions: 2
@@ -282,3 +282,11 @@ flow:
   steady_r2: 0.6             # six months of closes on a rising line, not a sideways drift
   ud_min: 1.0                # more volume on up days than on down days (50 sessions)
   group_top_share: 0.4       # in an industry (sector) among the strongest 40%
+  # Opportunities (owner, 2026-11-04: "not stretched, the ones that make the opportunity; send
+  # more"): passing stocks back on a rising 20- or 50-day average, at most 3 ATRs over the
+  # 50-day; every evening to the group with a chart each, and into the bot's TradingView list.
+  opportunities: true
+  opp_max_risk_pct: 8        # the exit at most 8% under the close
+  opp_per_night: 8           # new ones a night
+  opp_per_industry: 2
+  opp_repeat_sessions: 10    # one sent is not sent again for two weeks

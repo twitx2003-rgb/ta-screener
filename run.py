@@ -583,6 +583,8 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
         summary["flow"] = _flow_map(settings, store, target)
     if settings.alerts.enabled:
         summary["alerts"] = _evening_alerts(settings, store, target)
+    if settings.flow.enabled and settings.flow.opportunities:
+        summary["opportunities"] = _opportunities(settings, store, target)
     if settings.setups_list.enabled:
         summary["setups_list"] = _setups_list(settings, store, target)
         if settings.setups_list.coach:
@@ -659,6 +661,58 @@ def _flow_weekly(settings, store, target) -> str:
         return f"failed: {type(exc).__name__}"
     flow.save(store.root, {**snap, "weekly_sent": True})
     return "sent (first)" if first else "sent"
+
+
+def _opportunities(settings, store, target, client=None) -> dict:
+    """The evening's opportunities (tascreen/opportunities.py; owner, 2026-11-04: "not stretched,
+    the ones that make the opportunity; send more"): after the evening report, into the bot's
+    TradingView list and to the group (the message says they are on the list only when they
+    are). Once a session. Counts only: this goes to the public log."""
+    from datetime import timedelta
+
+    from tascreen import alerts, flow, notify, opportunities, research, setups_list
+    from tascreen.analyst import load_rules as analyst_rules
+    from tascreen.market_hours import is_trading_day
+    from tascreen.tv.mcp_client import push_token_file
+
+    cfg = settings.flow
+    sent = alerts.read_sent(store, target)
+    if not sent.get("evening"):
+        return {"status": "waiting for the evening report"}
+    if "opportunities" in sent:
+        return {"status": "already sent", "sent": len(sent["opportunities"])}
+    snap = flow.read(store.root, target.isoformat())
+    if snap is None or snap.get("day") != target.isoformat():
+        return {"status": "no map"}
+    bot = notify.from_environment()
+    if bot is None:
+        return {"status": "no bot"}
+    skip = {key.partition("|")[0] for key in sent.get("live") or {}}
+    skip |= {p["symbol"] for p in research.read_picks(store) if p.get("day") == target.isoformat() and p.get("symbol")}
+    day, back = target, 0
+    while back < cfg.opp_repeat_sessions:
+        day -= timedelta(days=1)
+        if is_trading_day(day):
+            back += 1
+            skip |= set(alerts.read_sent(store, day).get("opportunities") or {})
+    found = opportunities.find(snap, store.read_bars, cfg, break_atr=float(analyst_rules()["support_break_atr"]))
+    chosen = opportunities.choose(found, skip=skip, per_night=cfg.opp_per_night, per_industry=cfg.opp_per_industry)
+    record, listed = {o["symbol"]: opportunities.saved(o) for o in chosen}, 0
+    if chosen:
+        new = setups_list.sent_setups(target.isoformat(), picks=[], live={}, leaders=[], allowed=None, opps=record)
+        listed = _list_add(settings, client or make_tradingview(settings), store, target, new, "opportunities")
+        have = {e["symbol"] for e in setups_list.read(store.root).get("entries") or []}
+        try:
+            bot.send(opportunities.message(target, chosen, listed=set(record) <= have), html=True)
+            pictures = opportunities.photos(chosen, store.read_bars, alerts.default_png)
+            if pictures:
+                bot.send_album(pictures)
+        except ScreenerError as exc:
+            log.warning("the opportunities were not sent: %s", exc)
+            return {"status": "failed", "error": type(exc).__name__, "found": len(found), "listed": listed}
+    alerts.write_sent(store, target, {**sent, "opportunities": record})
+    push_token_file(alerts.sent_path(store, target), "opportunities sent")      # never twice, even if the run dies
+    return {"found": len(found), "sent": len(chosen), "listed": listed}
 
 
 def _evening_alerts(settings, store, target) -> dict:
@@ -1227,6 +1281,16 @@ def _list_alerts(settings, client, store, day, found: list[dict]) -> int:
     2026-10-31: "every stock you send me goes into TradingView"); the night's review manages
     them from then on. Returns how many went in; a failure is logged, never raised."""
     from tascreen import setups_list
+
+    new = setups_list.sent_setups(day.isoformat(), picks=[], leaders=[], allowed=None,
+                                  live={c["key"]: {"line": c.get("line")} for c in found})
+    return _list_add(settings, client, store, day, new, "live alerts")
+
+
+def _list_add(settings, client, store, day, new: dict, what: str) -> int:
+    """Setups just sent in Telegram, into the bot's TradingView list at once (a stock already
+    on it stays as it is). Returns how many went in; a failure is logged, never raised."""
+    from tascreen import setups_list
     from tascreen.tv.mcp_client import _run, push_token_file
     from tascreen.tv.data import fetch_in_session
 
@@ -1235,8 +1299,6 @@ def _list_alerts(settings, client, store, day, found: list[dict]) -> int:
     if not cfg.id or cfg.id == settings.watchlist.id or state.get("id") != cfg.id:
         return 0
     have = {e["symbol"] for e in state.get("entries") or []}
-    new = setups_list.sent_setups(day.isoformat(), picks=[], leaders=[], allowed=None,
-                                  live={c["key"]: {"line": c.get("line")} for c in found})
     new = {s: setup for s, setup in new.items() if s not in have}
     if not new:
         return 0
@@ -1248,13 +1310,13 @@ def _list_alerts(settings, client, store, day, found: list[dict]) -> int:
     try:
         _run(work())
     except (ScreenerError, OSError, TimeoutError, ExceptionGroup) as exc:
-        log.warning("live alerts not added to the list: %s", type(exc).__name__)
+        log.warning("%s not added to the list: %s", what, type(exc).__name__)
         return 0
     entries = list(state.get("entries") or []) + [{"symbol": s, **setup, "added": day.isoformat()}
                                                   for s, setup in sorted(new.items())]
     state = {**state, "entries": entries, "managed": sorted(set(state.get("managed") or []) | set(new))}
     setups_list.write(store.root, state)
-    push_token_file(setups_list.path(store.root), "live alerts added to the list")
+    push_token_file(setups_list.path(store.root), f"{what} added to the list")
     return len(new)
 
 
@@ -1302,9 +1364,10 @@ def _sent_recommendations(settings, store, target, allowed, *, first: bool = Fal
     picks = research.read_picks(store)
     out: dict = {}
     for d in days:                                   # the newest first: its entry wins
+        sent = alerts.read_sent(store, d)
         for symbol, setup in setups_list.sent_setups(
-                d.isoformat(), picks=picks, live=alerts.read_sent(store, d).get("live") or {}, leaders=[],
-                allowed=allowed).items():
+                d.isoformat(), picks=picks, live=sent.get("live") or {}, leaders=[], allowed=allowed,
+                opps=sent.get("opportunities") or {}).items():
             out.setdefault(symbol, {**setup, "since": d.isoformat()})
     week_ends = next_sessions(target, 1)[0].isocalendar()[1] != target.isocalendar()[1]
     snap = flow.read(store.root, target.isoformat()) if settings.flow.enabled else None

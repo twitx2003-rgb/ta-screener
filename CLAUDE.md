@@ -209,6 +209,15 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   An evening whose report started no full analysis (the strict filter: 0 picks on 10-30 and
   11-02) dispatches analyst.yml for the 2 strongest newcomers of the list (`run._fallback_analyses`,
   owner 2026-11-03), never a stock from the owner's own lists (the group must not learn them).
+- Opportunities (owner, 2026-11-04: "the filter should send me, and put on the watchlist, stocks
+  that are not stretched but make the opportunity; send more"; `tascreen/opportunities.py`,
+  `flow.opp_*` in config): the evening report looks for breakouts, so among the money-flow stocks
+  it found none on most nights. Now, after it (`run._opportunities`), the passing stocks back on a
+  rising 20- or 50-day average, at most 3 ATRs over the 50-day, the exit (a close 0.5 ATR under the
+  average, as in the list's review) at most 8% under the close: the best 8 new ones (rating, at
+  most 2 an industry, not sent in the last 10 sessions) go to the group, a list and a chart each,
+  and into the bot's TradingView list at once (kind "opp"; `max_size` 80). The study and its
+  limits are in the module: about the same return, a nearer exit, about 6 in 10 reach the exit.
 - Earnings (owner, 2026-11-03: "I did not get the results' breakdown and the investor call"):
   2026-11-02's Claude cap (45) ran out at 20:09 UTC as the evening's reports came out (Palantir's
   among them), and the waiting posts aged out. Now the cap is 60 with 15 kept for after the close
