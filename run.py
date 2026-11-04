@@ -794,25 +794,34 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
         above = pd.to_numeric(view.stocks.get("above_sma150"), errors="coerce") if "above_sma150" in view.stocks else None
         breadth = float(above.mean() * 100) if above is not None and above.notna().any() else None
         weak = breadth is not None and breadth < cfg.weak_market_pct
-        symbols, trending = list(view.stocks["symbol"]) + extra, None
+        symbols, trending, passing, stretched, others = list(view.stocks["symbol"]) + extra, None, None, set(), {}
         allowed = _flow_allowed(settings, store, view.day)
         if allowed is not None:                    # owner, 2026-10-28: only where the money flows
-            from tascreen import flow
+            from tascreen import flow, opportunities
 
             snap = flow.read(store.root, view.day.isoformat())
             ok_extra = {s for s in extra if flow.extra_passes(snap, store.read_bars(s), settings.flow)}
-            symbols = [s for s in symbols if s in allowed or s in ok_extra]
+            passing = allowed | ok_extra           # owner, 2026-11-04: and nothing stretched
+            stretched = {s for s in passing if opportunities.stretched(store.read_bars(s), settings.flow)}
+            symbols = [s for s in symbols if s in passing and s not in stretched]
             trending = {s for s, x in snap["stocks"].items() if "template" not in x["missing"]} | {
                 s for s in extra if (m := flow.stock_metrics(store.read_bars(s), settings.flow)) and m["template"]}
             list_counts = {**list_counts, "flow_passing": len(symbols)}
+            if settings.flow.opportunities:
+                others = setups_list.opp_setups(view.day.isoformat(), opportunities.find(
+                    snap, store.read_bars, settings.flow, break_atr=float(analyst_rules()["support_break_atr"])))
         found, counts = setups_list.find_setups(store.root, symbols, cfg, weak_market=weak)
         sent = _sent_recommendations(settings, store, target, allowed, first=state.get("version", 0) < 4)
-        found = {**sent, **found}                  # a setup of its own, if it shows one, comes first
-        counts = {**counts, "recommended": len(sent)}
+        # a setup of its own, if it shows one, comes first, unless it only fills a short list (that
+        # would keep this stock off the list); an opportunity has an exit, a leader none
+        ours = {**sent, **{s: o for s, o in others.items() if sent.get(s, {}).get("kind", "flow") == "flow"}}
+        found = {**ours, **{s: x for s, x in found.items() if x.get("strict", True) or s not in ours}}
+        counts = {**counts, "recommended": len(sent), "opportunities": len(others)}
         log.info("setups list: %s; the owner's lists: %s; breadth %s", counts, list_counts,
                  None if breadth is None else round(breadth, 1))
         state = setups_list.refresh(state, found, view, store.read_bars, cfg, extra=extra,
-                                    break_atr=float(analyst_rules()["support_break_atr"]), trending=trending)
+                                    break_atr=float(analyst_rules()["support_break_atr"]), trending=trending,
+                                    passing=passing, stretched=stretched)
         setups_list.write(store.root, state)
         from tascreen import setups_coach
 
@@ -1353,7 +1362,7 @@ def _sent_recommendations(settings, store, target, allowed, *, first: bool = Fal
     also the last SEED_SESSIONS sessions' picks and alerts and the newest map's leaders."""
     from datetime import timedelta
 
-    from tascreen import alerts, flow, research, setups_list
+    from tascreen import alerts, flow, opportunities, research, setups_list
     from tascreen.market_hours import is_trading_day, next_sessions
 
     days, day = [target], target
@@ -1373,7 +1382,8 @@ def _sent_recommendations(settings, store, target, allowed, *, first: bool = Fal
     snap = flow.read(store.root, target.isoformat()) if settings.flow.enabled else None
     if snap and (week_ends or first):
         stocks = snap.get("stocks") or {}
-        leaders = sorted((s for s in snap.get("passing") or [] if s in stocks),
+        leaders = sorted((s for s in snap.get("passing") or [] if s in stocks
+                          and not opportunities.stretched(store.read_bars(s), settings.flow)),
                          key=lambda s: -stocks[s]["rs"])[: settings.flow.weekly_top]
         for symbol, setup in setups_list.sent_setups(target.isoformat(), picks=[], live={}, leaders=leaders,
                                                      allowed=allowed).items():

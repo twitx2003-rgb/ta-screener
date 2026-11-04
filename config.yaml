@@ -238,6 +238,9 @@ setups_list:
   # Out: a close through the level, a target reached, keep_sessions without renewal, or a
   # stock no longer followed. Changes go to the owner's PRIVATE chat. The symbols stay in the
   # private state repo (data/setups_list.json); only the id is here.
+  # Owner, 2026-11-04 ("edit the whole list by the rules we made"): an entry also leaves when
+  # it no longer passes the whole money-flow filter or is stretched (flow.opp_max_over_50_atr),
+  # and all the night's opportunities go on the list, not only the ones sent.
   enabled: true
   id: "349311195"
   max_size: 80               # 2026-11-04: room for the evening's opportunities (8 a night, 10 sessions)

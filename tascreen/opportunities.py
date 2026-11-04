@@ -54,6 +54,17 @@ STUDY_NOTE = ("בבדיקה על כ-16 החודשים האחרונים (רק מ�
               "לא ייעוץ השקעות.")
 
 
+def stretched(bars: pd.DataFrame | None, cfg) -> bool:
+    """Whether the last close is more than `opp_max_over_50_atr` ATRs over the 50-day average
+    (also what keeps a stock off the list, tascreen/setups_list.py). Too few bars to tell: no."""
+    if bars is None or len(bars) < MIN_BARS:
+        return False
+    close, atr = float(bars["close"].iloc[-1]), float(atr_series(bars, 14).iloc[-1])
+    if not (math.isfinite(atr) and atr > 0 and math.isfinite(close)):
+        return False
+    return (close - float(bars["close"].iloc[-50:].mean())) / atr > cfg.opp_max_over_50_atr
+
+
 def of(bars: pd.DataFrame | None, cfg) -> dict[str, Any] | None:
     """The stock's opportunity at its last close (oldest bars first), or None: {"n" (20 or 50),
     "average", "atr", "close", "over_atr"}."""
@@ -65,8 +76,8 @@ def of(bars: pd.DataFrame | None, cfg) -> dict[str, Any] | None:
         return None
     k = cfg.opp_rise_sessions
     avg = {n: (float(np.mean(c[-n:])), float(np.mean(c[-n - k:-k]))) for n in (20, 50)}
-    if (close - avg[50][0]) / atr > cfg.opp_max_over_50_atr:
-        return None                                     # stretched
+    if stretched(bars, cfg):
+        return None
     for n, limit in ((20, cfg.opp_max_over_20_atr), (50, cfg.opp_max_over_50_atr)):
         now, before = avg[n]
         over = (close - now) / atr

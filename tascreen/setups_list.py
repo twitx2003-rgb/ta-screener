@@ -30,8 +30,13 @@ Once per session, after the evening report:
    `support_break_atr` (analyst rules) below its level (the average, or the broken line
    followed with its slope), when a pattern's target is reached (it worked), after
    `keep_sessions` sessions without a new hold, or when the scan no longer covers the stock.
-2. In: tonight's setups; a stock already on the list is renewed (a breakout whose retest
-   held becomes a retest). The oldest leave first over `max_size`.
+   And (owner, 2026-11-04: "edit the whole list by the rules we made") when it no longer
+   passes the whole money-flow filter or is stretched (opportunities.stretched); what was sent
+   tonight stays the night.
+2. In: tonight's setups, on stocks that pass and are not stretched, and all the night's
+   opportunities (opportunities.find; the ones sent are only part of them); a stock already on
+   the list is renewed (a breakout whose retest held becomes a retest). The oldest leave first
+   over `max_size`.
 3. TradingView: missing symbols are added, and symbols this bot added that left are removed;
    a symbol the owner put there by hand stays. Only this list's id can be edited
    (tv.mcp_client.OwnListSession).
@@ -80,7 +85,7 @@ REMOVE = "mcp-watchlist-remove-from-watchlist"
 LISTS = "mcp-watchlist-list-watchlists"   # {"watchlists": [{"id", "name", "symbols", ...}]} (live, 2026-10-06)
 # 1: the research team's picks; 2 (2026-10-05): the owner's setups; 3 (2026-10-06): his own lists
 # and foreign companies scanned too. A new version rebuilds the list at once (run.py).
-VERSION = 4                 # 4: the recommended stocks too (2026-10-31)
+VERSION = 5                 # 4: the recommended stocks too (2026-10-31); 5: the whole filter, none stretched (2026-11-04)
 # one entry a stock: the first of these it shows; the last four are the stocks the bot
 # recommended in Telegram (owner, 2026-10-31: "every stock you send me goes into TradingView")
 KINDS = ("retest", "ma150", "breakout", "ma20", "alert", "pick", "opp", "flow")
@@ -101,6 +106,8 @@ REASONS = {
     "redefined": "לא עומדת בהגדרות החדשות של הרשימה",
     "opened_below": "נפתחה מתחת לרמה שלה: התמיכה נשברה בפתיחה",
     "trend": "המגמה העולה נשברה (מתחת לממוצעים הארוכים או רחוק מהשיא)",
+    "flow": "לא עוברת יותר את מסנן זרימת הכסף",
+    "stretched": "מתוחה מדי: רחוקה מממוצע 50",
 }
 WEAK_MARKET_KINDS = ("ma150",)            # what may go in while the market is weak
 
@@ -364,14 +371,24 @@ def sent_setups(day: str, *, picks: list[dict], live: dict[str, dict], leaders: 
     return out
 
 
+def opp_setups(day: str, found: list[dict]) -> dict[str, dict[str, Any]]:
+    """The night's opportunities (opportunities.find) as the list's setups, in words that do
+    not say they were sent: most of them were not."""
+    setups = sent_setups(day, picks=[], live={}, leaders=[], allowed=None, opps={o["symbol"]: o for o in found})
+    return {s: {**e, "text": f"הזדמנות: חזרה לממוצע {e['n']} העולה"} for s, e in setups.items()}
+
+
 def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr: float,
            keep_sessions: int, extra: list[str] | tuple = (),
            qualify: Callable[[dict], bool] = lambda e: True,
-           trending: set[str] | None = None) -> tuple[list[dict], list[dict]]:
+           trending: set[str] | None = None, passing: set[str] | None = None,
+           stretched: set[str] | frozenset = frozenset()) -> tuple[list[dict], list[dict]]:
     """(entries kept, events): each event is {"symbol", "kind", "what": "removed", "reason"}.
     `extra`: the owner's stocks followed beside the scan's. `trending`: the stocks still in
-    the money-flow map's uptrend (tascreen/flow.py; None: not checked). An entry without the
-    session's close is kept as it is (a gap in the data)."""
+    the money-flow map's uptrend (tascreen/flow.py; None: not checked). `passing`: the stocks
+    passing the whole filter (None: not checked). `stretched`: the ones too far over their
+    50-day average; an entry from tonight stays the night (the owner's "what you send goes on
+    the list"). An entry without the session's close is kept as it is (a gap in the data)."""
     kept, events = [], []
     followed = set(view.stocks["symbol"]) | set(extra)
     for e in entries:
@@ -386,6 +403,12 @@ def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr:
             continue
         if trending is not None and e["symbol"] not in trending:   # owner, 2026-10-28: uptrends only
             drop("trend")
+            continue
+        if passing is not None and e["symbol"] not in passing:     # owner, 2026-11-04: the whole filter
+            drop("flow")
+            continue
+        if e["symbol"] in stretched and e.get("since") != view.day.isoformat():
+            drop("stretched")
             continue
         close, bars = _close(view, e["symbol"]), bars_of(e["symbol"])
         if close is None and bars is not None and len(bars) and day_of(bars["timestamp"].iloc[-1]) == view.day:
@@ -420,7 +443,8 @@ def cap(entries: list[dict], max_size: int) -> tuple[list[dict], list[dict]]:
 
 
 def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_of: Callable, cfg, *,
-            break_atr: float, extra: list[str] | tuple = (), trending: set[str] | None = None) -> dict[str, Any]:
+            break_atr: float, extra: list[str] | tuple = (), trending: set[str] | None = None,
+            passing: set[str] | None = None, stretched: set[str] | frozenset = frozenset()) -> dict[str, Any]:
     """The new state after the session: review, tonight's setups in (or renewing an entry),
     then the cap. `events` lists what changed (added / renewed / removed). A list from before
     the owner's setups (version 1) is replaced: its entries leave unless they show one now."""
@@ -433,7 +457,8 @@ def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_
                    for e in entries if e["symbol"] not in found]
         entries = []
     kept, gone = review(entries, view, bars_of, break_atr=break_atr, keep_sessions=cfg.keep_sessions,
-                        extra=extra, qualify=lambda e: qualifies(e, cfg), trending=trending)
+                        extra=extra, qualify=lambda e: qualifies(e, cfg), trending=trending,
+                        passing=passing, stretched=stretched)
     mine = set(extra)
     events += gone
     by = {e["symbol"]: e for e in kept}
@@ -507,9 +532,10 @@ def symbols_of(payload: dict) -> list[str]:
 async def sync(session, list_id: str, wanted: list[str], managed: list[str], delays, *,
                adopt: bool = False) -> dict[str, int]:
     """Make the TradingView list hold `wanted`: add what is missing, remove what this bot
-    added and no longer wants. A symbol the owner added by hand stays. With `adopt` (the first
-    sync of a new list version), everything already on the list counts as the bot's: on
-    2026-10-06 the list was rebuilt from the owner's computer before the cloud's first run."""
+    added and no longer wants. A symbol the owner added by hand stays (`others` counts them).
+    With `adopt` (the first sync of a new list version), everything already on the list counts
+    as the bot's: on 2026-10-06 the list was rebuilt from the owner's computer before the
+    cloud's first run."""
     current = symbols_of(await fetch_in_session(session, GET, {"watchlist_id": list_id}, delays=delays))
     if adopt:
         managed = sorted(set(managed) | set(current))
@@ -519,7 +545,7 @@ async def sync(session, list_id: str, wanted: list[str], managed: list[str], del
         await fetch_in_session(session, ADD, {"watchlist_id": list_id, "symbols": add}, delays=delays)
     if remove:
         await fetch_in_session(session, REMOVE, {"watchlist_id": list_id, "symbols": remove}, delays=delays)
-    return {"added": len(add), "removed": len(remove)}
+    return {"added": len(add), "removed": len(remove), "others": len(set(current) - set(wanted) - set(remove))}
 
 
 # ------------------------------------------------------------------ the message

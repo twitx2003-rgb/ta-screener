@@ -94,6 +94,23 @@ def test_an_entry_whose_uptrend_broke_leaves_the_setups_list():
     assert setups_list.REASONS["trend"]
 
 
+def test_an_entry_failing_the_filter_or_stretched_leaves_the_setups_list():
+    from types import SimpleNamespace
+
+    from tascreen import setups_list
+
+    names = ["NASDAQ:AAA", "NASDAQ:BBB", "NASDAQ:CCC", "NASDAQ:DDD"]
+    view = SimpleNamespace(stocks=pd.DataFrame({"symbol": names, "close": [10.0] * 4}), day=DAY)
+    entries = [{"symbol": s, "kind": "flow", "since": "2026-09-01"} for s in names[:3]]
+    entries.append({"symbol": "NASDAQ:DDD", "kind": "alert", "since": DAY.isoformat()})      # sent tonight
+    kept, events = setups_list.review(entries, view, lambda s: None, break_atr=0.5, keep_sessions=10,
+                                      passing={"NASDAQ:AAA", "NASDAQ:CCC", "NASDAQ:DDD"},
+                                      stretched={"NASDAQ:CCC", "NASDAQ:DDD"})
+    assert [e["symbol"] for e in kept] == ["NASDAQ:AAA", "NASDAQ:DDD"]
+    assert {e["symbol"]: e["reason"] for e in events} == {"NASDAQ:BBB": "flow", "NASDAQ:CCC": "stretched"}
+    assert setups_list.REASONS["flow"] and setups_list.REASONS["stretched"]
+
+
 def test_the_first_map_goes_to_the_group_at_once_then_weekly(tmp_path, monkeypatch):
     import run
     from tascreen import notify

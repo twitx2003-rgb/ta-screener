@@ -232,6 +232,70 @@ def test_a_list_failure_still_sends_without_claiming_the_list(tmp_path, monkeypa
     assert len(later) == 4 and {v["kind"] for v in later.values()} == {"opp"}
 
 
+def test_stretched_is_measured_over_the_50_day_average():
+    assert opportunities.stretched(_stretched(), CFG)
+    assert not opportunities.stretched(_pullback(), CFG)
+    assert not opportunities.stretched(_falling(), CFG)
+    assert not opportunities.stretched(None, CFG) and not opportunities.stretched(_pullback().tail(10), CFG)
+
+
+def test_a_new_list_version_holds_the_whole_list_to_the_rules(tmp_path, monkeypatch):
+    import run
+    from fakes import result
+    from tascreen import alerts, flow, notify, setups_list
+    from tascreen.store import Store
+    from tascreen.web import data as web_data
+
+    settings, store = run.load_settings(), Store(tmp_path)
+    if not settings.setups_list.id:
+        import pytest
+        pytest.skip("no list id in config.yaml")
+    bars = {"NASDAQ:S0": _pullback(), "NASDAQ:S1": _pullback(), "NASDAQ:MID": _falling(), "NASDAQ:OUT": _pullback(),
+            "NASDAQ:FAR": _stretched(), "NASDAQ:HOT": _stretched()}
+    store.read_bars = bars.get
+    stocks = {s: {"ticker": s.split(":")[1], "rs": 90, "industry": "Industry", "missing": []} for s in bars}
+    flow.save(tmp_path, {"day": DAY.isoformat(), "passing": sorted(set(bars) - {"NASDAQ:OUT"}), "stocks": stocks})
+    view = SimpleNamespace(day=DAY, stocks=pd.DataFrame({
+        "symbol": list(bars), "close": [float(b["close"].iloc[-1]) for b in bars.values()], "last_date": DAY.isoformat()}))
+    monkeypatch.setattr(web_data, "ScanRepository", lambda *a: SimpleNamespace(current=lambda: view))
+    filling = {"kind": "ma20", "strict": False, "since": DAY.isoformat(), "text": "y", "level": "none"}
+    monkeypatch.setattr(setups_list, "find_setups", lambda *a, **k: ({"NASDAQ:S1": filling}, {}))
+    monkeypatch.setattr(run, "_owner_list_stocks", lambda *a: ([], {}))
+    monkeypatch.setattr(notify, "owner_from_environment", lambda: None)
+    old = ["NASDAQ:OUT", "NASDAQ:FAR", "NASDAQ:MID", "NASDAQ:S0"]
+    setups_list.write(tmp_path, {"id": settings.setups_list.id, "version": 4, "day": DAY.isoformat(), "synced": True,
+                                 "managed": old, "entries": [
+                                     {"symbol": s, "kind": "pick", "level": "none", "since": "2026-09-01",
+                                      "text": "x", "added": "2026-09-01"} for s in old]})
+    alerts.write_sent(store, DAY, {"evening": {"picks": 0, "fallback": []},
+                                   "opportunities": {"NASDAQ:S0": {"n": 20, "average": 99.0, "atr": 2.0}},
+                                   "live": {"NASDAQ:HOT|flag": {"line": 90.0}}})
+    calls = []
+
+    class Session:
+        async def call_tool(self, name, args):
+            calls.append((name, args))
+            return result({"watchlist": {"id": 1, "name": setups_list.NAME, "symbols": ["NYSE:HAND"] + old}})
+
+    class Client:
+        @asynccontextmanager
+        async def own_list_session(self, list_id, name):
+            yield Session()
+
+    got = run._setups_list(settings, store, DAY, client=Client())
+    assert got["status"] == "synced" and got["others"] == 1                # the one put there by hand stays
+    state = setups_list.read(tmp_path)
+    by = {e["symbol"]: e for e in state["entries"]}
+    assert set(by) == {"NASDAQ:S0", "NASDAQ:S1", "NASDAQ:MID", "NASDAQ:HOT"}
+    assert {e["symbol"]: e["reason"] for e in state["events"] if e["what"] == "removed"} == {
+        "NASDAQ:OUT": "flow", "NASDAQ:FAR": "stretched"}
+    assert by["NASDAQ:S0"]["text"].startswith("נשלחה") and by["NASDAQ:S1"]["text"].startswith("הזדמנות")
+    assert by["NASDAQ:S1"]["kind"] == "opp" and by["NASDAQ:S1"]["level"] == "ma"    # a leader too: it keeps its exit
+    assert by["NASDAQ:HOT"]["kind"] == "alert" and by["NASDAQ:MID"]["kind"] == "flow"
+    removed = next(args for name, args in calls if name == setups_list.REMOVE)
+    assert sorted(removed["symbols"]) == ["NASDAQ:FAR", "NASDAQ:OUT"]
+
+
 def test_a_telegram_failure_is_tried_again(tmp_path, monkeypatch):
     from tascreen import alerts
 

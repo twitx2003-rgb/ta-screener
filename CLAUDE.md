@@ -218,6 +218,16 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   most 2 an industry, not sent in the last 10 sessions) go to the group, a list and a chart each,
   and into the bot's TradingView list at once (kind "opp"; `max_size` 80). The study and its
   limits are in the module: about the same return, a nearer exit, about 6 in 10 reach the exit.
+- The whole list by the rules (owner, 2026-11-04: "edit the whole watchlist by the rules we
+  made"; list VERSION 5, a new version rebuilds the list at the next run): an entry leaves when it
+  no longer passes the whole filter ("flow", not only a broken template) or is stretched
+  ("stretched", `opportunities.stretched`, over `flow.opp_max_over_50_atr` ATRs above the 50-day;
+  what was sent tonight stays the night, so a stretched alert leaves the next evening). The
+  analyst's setups and the weekly leaders go in only when not stretched. All the night's
+  opportunities go on the list, not only the 8 sent (`setups_list.opp_setups`; its words do not say
+  "sent"); they may still be sent on a later night. The touch of the average is for going in, not
+  for staying. So a stock that runs away from its average leaves the list even while it works;
+  it can come back at the average. `sync` counts `others`: symbols the bot did not add.
 - Earnings (owner, 2026-11-03: "I did not get the results' breakdown and the investor call"):
   2026-11-02's Claude cap (45) ran out at 20:09 UTC as the evening's reports came out (Palantir's
   among them), and the waiting posts aged out. Now the cap is 60 with 15 kept for after the close
