@@ -35,7 +35,13 @@ Rate each picked post 1-5:
   snippets, "stocks to watch" lists, recaps of older news, research promotion, and
   anything only loosely related.
 
-For each pick write `summary_he`: the news line, ONE headline sentence of Hebrew, about 8
+For each pick write `headline_he` first: the bold title the reader sees, 2 to 5 Hebrew
+words that say what happened, like a newspaper's headline over a flash. A noun phrase or a
+short sentence, no full stop, no ticker, no emoji, no colon ("זנטריקה עוקפת את התחזיות",
+"הפד מעלה ריבית", "צניחה במניות השבבים", "מנכ"ל זנטריקה מתפטר"). It must not repeat the
+summary word for word: the summary under it gives the details.
+
+Then write `summary_he`: the news line, ONE headline sentence of Hebrew, about 8
 to 15 words, written as the news style below says: who did what, the number, and the
 stock or market it touches. Name every company the story is about with its ticker in
 brackets (a ticker you are sure of): the ticker is how the bot knows the story is about
@@ -64,6 +70,13 @@ but "זו ההזמנה השלישית שזנטריקה מבטלת החודש".)
 Explain, do not forecast: no price targets, no "will rise / will fall", no "עלול",
 "עשוי" or "ילחץ על המניות" in your own voice, no buy or sell wording, no advice. A
 forecast is news only as someone's, named ("הבנק צופה ש...", "החברה מעריכה ש...").
+
+Then `topic`: a short English key for the running story this post belongs to, lowercase
+words joined by hyphens, at most four words ("zqx-ceo-exit", "fed-rates", "oil-iran",
+"zqx-q3-results"). Posts about the same running story get the same key, also across
+rounds: when a story in `already_sent` has a topic and this post continues it, copy that
+key exactly. A different event gets a different key even about the same company
+("zqx-q3-results" is not "zqx-ceo-exit").
 
 Then `earnings_of`: when the post reports a US company's own quarterly or annual results
 just released (revenue, EPS, guidance in its earnings report), the company's ticker in

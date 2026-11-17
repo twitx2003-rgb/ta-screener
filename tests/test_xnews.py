@@ -362,7 +362,7 @@ def test_a_repeat_of_what_was_sent_is_dropped_and_the_sent_list_is_shown(tmp_pat
                      now=later)
     assert summary["repeats"] == 1 and sent == []
     shown = json.loads(llm2.calls[-1])["already_sent"]
-    assert shown == [{"author": "NewsDesk", "summary_he": "הפד הוריד ריבית", "minutes_ago": 40}]
+    assert shown == [{"author": "NewsDesk", "summary_he": "הפד הוריד ריבית", "topic": "", "minutes_ago": 40}]
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert [r["id"] for r in state["recent"]] == ["151", "152"]          # kept for the explainer
 
@@ -458,7 +458,7 @@ def test_a_story_sent_three_hours_ago_is_still_shown_and_its_repeat_dropped(tmp_
     later = datetime(2026, 1, 5, 18, 0, tzinfo=timezone.utc)                       # three hours on
     summary, _ = run(tmp_path, FakeReader({"tweets": [again], "has_next_page": False}), _deduper(shown), sent,
                      accounts=("DeskOne", "DeskTwo"), now=later)
-    assert shown[-1] == [{"author": "DeskOne", "summary_he": "סיפור 161", "minutes_ago": 180}]
+    assert shown[-1] == [{"author": "DeskOne", "summary_he": "סיפור 161", "topic": "", "minutes_ago": 180}]
     assert summary["repeats"] == 1 and summary["sent"] == 0 and len(sent) == 1
 
 
@@ -499,7 +499,8 @@ def test_two_accounts_with_different_figures_are_one_story(tmp_path):
 
 def test_the_deduper_is_told_a_different_figure_is_a_repeat_and_an_update_says_so():
     assert "different figures" in xnews.SYSTEM and "revision" in xnews.SYSTEM
-    assert '"עדכון:"' in xnews.SYSTEM and "twelve hours" in xnews.SYSTEM
+    assert '"עדכון:"' in xnews.SYSTEM and "in the last\nday" in xnews.SYSTEM
+    assert "another outlet confirming" in xnews.SYSTEM and "When in doubt, it is a repeat" in xnews.SYSTEM
 
 
 def test_an_empty_analysis_sends_the_news_without_a_line(tmp_path):
@@ -811,3 +812,53 @@ def test_calls_are_kept_for_the_evening_before_the_close(tmp_path):
     summary, _ = run(tmp_path, FakeReader(), llm, [], now=NOW.replace(hour=21, minute=30), llm_daily_cap=60,
                      llm_evening_reserve=15)                                                # 16:30 New York
     assert summary["judged"] == 1
+
+
+# --- the night, one running story, and the bold headline (owner, 2026-11-14; invented data) ---
+
+def _story(post_id, importance, topic="", headline=""):
+    return {"post_id": post_id, "importance": importance, "summary_he": f"סיפור {post_id}", "analysis_he": "",
+            "same_story_as": "", "repeat_of_sent": False, "earnings_of": "", "headline_he": headline,
+            "topic": topic}
+
+
+def test_at_night_only_the_dramatic_goes_out_one_a_round(tmp_path):
+    night = datetime(2026, 1, 6, 0, 30, tzinfo=timezone.utc)                      # 02:30 in Israel
+    page = {"tweets": [row("401"), row("402"), row("403")], "has_next_page": False}
+    sent = []
+    summary, _ = run(tmp_path, FakeReader(page), picker(_story("401", 5), _story("402", 5), _story("403", 4)),
+                     sent, now=night, night_hours=("22:00", "07:00"))
+    assert summary["night"] is True and summary["sent"] == 1 and "סיפור 401" in sent[0]
+    assert xnews.is_night(datetime(2026, 1, 6, 4, 59, tzinfo=timezone.utc), "22:00", "07:00")        # 06:59
+    assert not xnews.is_night(datetime(2026, 1, 6, 5, 0, tzinfo=timezone.utc), "22:00", "07:00")     # 07:00
+    assert xnews.is_night(datetime(2026, 1, 5, 20, 0, tzinfo=timezone.utc), "22:00", "07:00")        # 22:00
+    day = datetime(2026, 1, 6, 10, 0, tzinfo=timezone.utc)
+    sent2 = []
+    summary2, _ = run(tmp_path / "day", FakeReader(page), picker(_story("401", 5), _story("402", 5), _story("403", 4)),
+                      sent2, now=day, night_hours=("22:00", "07:00"), max_per_round=4)
+    assert "night" not in summary2 and summary2["sent"] == 3
+
+
+def test_one_running_story_waits_between_its_messages():
+    posts = [xnews.to_post(row(str(i))) for i in range(5)]
+    stamp = 1_800_000_000
+
+    def pk(post, importance, topic):
+        return (post, {"importance": importance, "summary_he": "x", "topic": topic, "sources": []})
+
+    sent = [{"at": stamp - 3600, "topic": "zqx-ceo-exit"}]
+    kept, held = xnews.topic_gate([pk(posts[0], 4, "zqx-ceo-exit"), pk(posts[1], 5, "zqx-ceo-exit"),
+                                   pk(posts[2], 4, "fed-rates"), pk(posts[3], 3, "fed-rates"), pk(posts[4], 4, "")],
+                                  sent, stamp)
+    assert [p.id for p, _ in kept] == ["1", "2", "4"] and held == 2      # a 5 passes; one per topic a round
+    full = [{"at": stamp - h * 5 * 3600, "topic": "oil-iran"} for h in (1, 2, 3)]   # three in the last day
+    assert xnews.topic_gate([pk(posts[0], 4, "oil-iran")], full, stamp) == ([], 1)
+
+
+def test_a_bold_headline_over_the_news_line(tmp_path):
+    sent = []
+    run(tmp_path, FakeReader({"tweets": [row("411")], "has_next_page": False}),
+        picker(_story("411", 5, topic="ZQX CEO!", headline="מנכ\"ל זנטריקה מתפטר.")), sent)
+    assert sent[0].startswith("‏🔴 <b>מנכ&quot;ל זנטריקה מתפטר</b>\n‏סיפור 411 <a href=")
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["sent_recent"][-1]["topic"] == ""                         # not a valid key: no topic

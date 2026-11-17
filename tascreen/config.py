@@ -283,6 +283,13 @@ class XNewsSettings:
     # stock's move (owner, 2026-10-28); 0: off. Pictures from these accounts are offered first.
     earnings_min_cap_usd: float = 3.0e11
     earnings_image_accounts: tuple = ()
+    # fewer messages at night (owner, 2026-11-14): between night_start and night_end, Israel
+    # time, only stories rated night_min_importance go out, at most night_max_per_round a
+    # round; the rest wait for the morning digest
+    night_start: str = "22:00"
+    night_end: str = "07:00"
+    night_min_importance: int = 5
+    night_max_per_round: int = 1
     # owner, 2026-11-03: calls kept for after the close (the evening's earnings), and the
     # investor call's summary this many minutes after a report's story (0: none)
     claude_evening_reserve: int = 15
@@ -337,6 +344,18 @@ class XNewsSettings:
         object.__setattr__(self, "low_balance_usd", float(self.low_balance_usd))
         if not 0 <= self.low_balance_usd <= 100:
             raise ConfigError("xnews.low_balance_usd must be 0..100")
+        import re as _re
+        for name in ("night_start", "night_end"):
+            value = str(getattr(self, name))
+            if not _re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", value):
+                raise ConfigError(f"xnews.{name} must be HH:MM, got '{value}'")
+            object.__setattr__(self, name, value)
+        for name in ("night_min_importance", "night_max_per_round"):
+            object.__setattr__(self, name, int(getattr(self, name)))
+        if not 1 <= self.night_min_importance <= 5:
+            raise ConfigError("xnews.night_min_importance must be 1..5")
+        if not 1 <= self.night_max_per_round <= 10:
+            raise ConfigError("xnews.night_max_per_round must be 1..10")
         object.__setattr__(self, "earnings_min_cap_usd", float(self.earnings_min_cap_usd))
         if self.earnings_min_cap_usd < 0:
             raise ConfigError("xnews.earnings_min_cap_usd must be 0 (off) or a market cap in USD")

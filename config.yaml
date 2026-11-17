@@ -179,6 +179,14 @@ xnews:
   # group which ones), and the investor call's summary two hours after the report
   earnings_min_cap_usd: 2.0e11
   earnings_image_accounts: [EconomyApp, StockMKTNewz, wallstengine]
+  # Fewer messages at night (owner, 2026-11-14): between these hours, Israel time, only
+  # stories rated night_min_importance go out, at most night_max_per_round a round; the
+  # rest wait for the morning digest. One running story waits 4 hours between messages
+  # and goes out at most 3 times a day unless rated 5 (xnews.TOPIC_GAP_S / TOPIC_DAILY_MAX).
+  night_start: "22:00"
+  night_end: "07:00"
+  night_min_importance: 5
+  night_max_per_round: 1
   call_summary_after_minutes: 120
   model: "sonnet"
   effort: "low"

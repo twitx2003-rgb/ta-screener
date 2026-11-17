@@ -225,9 +225,9 @@ SYSTEM = agent_prompt("news-screener", "news-deduper")
 # the same story twice 2-3 hours apart from two accounts, with different figures (2026-09-29).
 # Twelve hours covers a whole US session plus its evening, so a story sent at the open is
 # still known when a second account repeats it late at night.
-SENT_WINDOW_S = 12 * 3600
-SENT_SHOWN_MAX = 30          # the newest this many go into the prompt (about 30 x 250 chars)
-SENT_RECENT_KEPT = 60        # rows kept in the state file (the explainer reads them too)
+SENT_WINDOW_S = 24 * 3600   # owner, 2026-11-14: a running story repeated over days
+SENT_SHOWN_MAX = 40          # the newest this many go into the prompt (about 40 x 250 chars)
+SENT_RECENT_KEPT = 100       # rows kept in the state file (the explainer reads them too)
 RECENT_WINDOW_S = 3 * 3600   # posts kept this long for the market explainer (tascreen/explain.py)
 RECENT_MAX = 300
 # Every pick for the morning digest (owner, 2026-09-29): sent, held back by `ration`, and
@@ -288,9 +288,11 @@ def schema() -> dict:
                            "analysis_he": {"type": "string"},
                            "same_story_as": {"type": "string"},
                            "repeat_of_sent": {"type": "boolean"},
-                           "earnings_of": {"type": "string"}},
+                           "earnings_of": {"type": "string"},
+                           "headline_he": {"type": "string"},
+                           "topic": {"type": "string"}},
             "required": ["post_id", "importance", "summary_he", "analysis_he", "same_story_as",
-                         "repeat_of_sent", "earnings_of"],
+                         "repeat_of_sent", "earnings_of", "headline_he", "topic"],
             "additionalProperties": False}}},
         "required": ["picks"],
         "additionalProperties": False,
@@ -310,6 +312,48 @@ def user_prompt(posts: list[Post], already_sent: list[dict] | None = None,
 WEEKEND_NOTE = ("It is the weekend and US markets are closed: rate 4 or 5 only what is dramatic, "
                 "or what the investor needs to know before the coming trading week (events, data "
                 "and earnings due, big news from the weekend).")
+
+
+# One running story is not news every hour (owner, 2026-11-14: "avoid duplicating news with
+# the same meaning"; one company's story went out more than thirty times in three days):
+# the model gives each pick a `topic`, and a topic sent within TOPIC_GAP_S, or already
+# TOPIC_DAILY_MAX times in a day, waits for the morning digest unless the pick is a 5.
+TOPIC = re.compile(r"^[a-z0-9]+(-[a-z0-9]+){0,5}$")
+TOPIC_GAP_S = 4 * 3600
+TOPIC_DAILY_MAX = 3
+HEADLINE_MAX = 60
+
+
+def topic_gate(picks: list[tuple["Post", dict]], sent_recent: list[dict],
+               stamp: int) -> tuple[list[tuple["Post", dict]], int]:
+    """(the picks whose topic may go out now, most important first; how many wait). A pick
+    rated 5 always passes; inside one round a topic goes out once."""
+    last: dict[str, int] = {}
+    today: dict[str, int] = {}
+    for r in sent_recent:
+        t = str(r.get("topic") or "")
+        if t and stamp - int(r.get("at", 0)) <= 24 * 3600:
+            last[t] = max(last.get(t, 0), int(r["at"]))
+            today[t] = today.get(t, 0) + 1
+    kept, held = [], 0
+    for post, pick_ in sorted(picks, key=lambda pk: -pk[1]["importance"]):
+        t = pick_.get("topic") or ""
+        if t and pick_["importance"] < URGENT and (
+                stamp - last.get(t, 0) < TOPIC_GAP_S or today.get(t, 0) >= TOPIC_DAILY_MAX):
+            held += 1
+            continue
+        if t:
+            last[t], today[t] = stamp, today.get(t, 0) + 1
+        kept.append((post, pick_))
+    order = {id(pk[1]): n for n, pk in enumerate(picks)}
+    return sorted(kept, key=lambda pk: order[id(pk[1])]), held
+
+
+def is_night(now: datetime, start: str, end: str, tz: str = "Asia/Jerusalem") -> bool:
+    """Between `start` and `end` ("22:00", "07:00") in Israel (owner, 2026-11-14: fewer
+    messages at night)."""
+    local = now.astimezone(ZoneInfo(tz)).strftime("%H:%M")
+    return (start <= local or local < end) if start > end else (start <= local < end)
 
 
 def is_weekend(now: datetime) -> bool:
@@ -358,9 +402,13 @@ def triage(posts: list[Post], llm, min_importance: int, note: str = "", *,
             if banned(analysis):             # advice or forecast wording: the news goes without it
                 analysis = ""
             earnings = str(item.get("earnings_of") or "").strip().lstrip("$").upper()
+            topic = str(item.get("topic") or "").strip().lower()
+            headline = str(item.get("headline_he") or "").strip().rstrip(".:")
             picks[post_id] = {"importance": importance, "summary_he": summary[:SUMMARY_MAX],
                               "analysis_he": analysis[:ANALYSIS_MAX], "sources": [],
-                              "earnings_of": earnings if EARNINGS_TICKER.match(earnings) else ""}
+                              "earnings_of": earnings if EARNINGS_TICKER.match(earnings) else "",
+                              "headline_he": headline if len(headline) <= HEADLINE_MAX else "",
+                              "topic": topic if TOPIC.match(topic) else ""}
             if counts is not None:           # style slips are counted, never a reason to drop
                 slips = len(style_warnings(summary)) + len(style_warnings(analysis))
                 counts["style_slips"] = counts.get("style_slips", 0) + slips
@@ -391,7 +439,11 @@ def item(post: Post, pick_: dict, *, with_image: bool = False) -> str:
     opened that way, and Telegram set them left to right)."""
     mark = {5: "🔴", 4: "🟠"}.get(pick_["importance"], "🔵")
     link = f'<a href="{html.escape(post.url, quote=True)}">↗</a>'
-    text = f"{RLM}{mark} <b>{html.escape(pick_['summary_he'])}</b> {link}"
+    if pick_.get("headline_he"):             # owner, 2026-11-14: a short bold title over the line
+        text = (f"{RLM}{mark} <b>{html.escape(pick_['headline_he'])}</b>\n"
+                f"{RLM}{html.escape(pick_['summary_he'])} {link}")
+    else:
+        text = f"{RLM}{mark} <b>{html.escape(pick_['summary_he'])}</b> {link}"
     if pick_.get("move_he"):
         text += f"\n{RLM}{html.escape(pick_['move_he'])}"
     if pick_.get("analysis_he"):
@@ -831,6 +883,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
              fetch: Callable[[str], tuple[str, bytes] | None] = fetch_image,
              market_caps: dict[str, float] | None = None, earnings_min_cap: float = 0.0,
              earnings_accounts: tuple | list = (),
+             night_hours: tuple[str, str] | None = None, night_min_importance: int = 5,
+             night_max_per_round: int = 1,
              llm_evening_reserve: int = 0, call_after_s: int = 0,
              first_lookback_s: int = 900, with_replies: bool = False) -> dict[str, Any]:
     """Read, pick, send, remember. Returns counts only (safe for the public log).
@@ -904,9 +958,13 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             llm = llm_factory()
             weekend = is_weekend(now)
             counts: dict[str, int] = {}
-            already = [{"author": r["author"], "summary_he": r["summary_he"],
+            already = [{"author": r["author"], "summary_he": r["summary_he"], "topic": r.get("topic", ""),
                         "minutes_ago": (stamp - int(r["at"])) // 60} for r in sent_recent[-SENT_SHOWN_MAX:]]
             threshold = max(min_importance, weekend_min_importance) if weekend else min_importance
+            round_max = max_per_round
+            if night_hours and is_night(now, *night_hours):
+                threshold, round_max = max(threshold, night_min_importance), min(max_per_round, night_max_per_round)
+                summary["night"] = True
             picks, summary["rejected"] = triage(
                 [_row_post(r) for r in pending], llm, min(DIGEST_FROM, threshold),
                 WEEKEND_NOTE if weekend else "", already_sent=already, holdings=list(holdings), counts=counts)
@@ -926,7 +984,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             pending = []
             every = picks                    # all for the digest; only the important may be sent
             picks = [pk for pk in every if pk[1]["importance"] >= threshold]
-            picks, budget, summary["held_back"] = ration(picks, budget, stamp, day, max_per_round=max_per_round,
+            picks, summary["same_topic_held"] = topic_gate(picks, sent_recent, stamp)
+            picks, budget, summary["held_back"] = ration(picks, budget, stamp, day, max_per_round=round_max,
                                                          daily_max=daily_max)
             chosen = {p.id for p, _ in picks}
             # news about the owner's watchlist that the group did not get: to the private chat
@@ -935,6 +994,7 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
             day_log = (day_log + [{"at": stamp, "id": p.id, "author": p.author, "url": p.url, "time": p.created_at,
                                    "importance": k["importance"], "summary_he": k["summary_he"],
                                    "analysis_he": k["analysis_he"], "sources": [a for a, _ in k["sources"]],
+                                   "headline_he": k.get("headline_he", ""), "topic": k.get("topic", ""),
                                    "sent": p.id in chosen} for p, k in every])[-DAY_LOG_MAX:]
         if picks and market_caps and earnings_min_cap > 0 and send_photo is not None:
             try:                             # a large company's results: never blocks the news
@@ -973,8 +1033,8 @@ def run_once(*, accounts: list[str], source: XSource, llm_factory: Callable[[], 
         if picks:                            # a failed send raises: the state is not saved, the next pass retries
             summary["photos"] = deliver(picks, send, send_photo, picture=picture, send_png=send_png,
                                         send_album=send_album)
-            sent_recent += [{"at": stamp, "author": p.author, "summary_he": k["summary_he"]}
-                            for p, k in picks]
+            sent_recent += [{"at": stamp, "author": p.author, "summary_he": k["summary_he"],
+                             "topic": k.get("topic", "")} for p, k in picks]
         summary["sent"] = len(picks)
     elif pending and model["calls"] >= cap_now:
         status = "claude daily cap" if model["calls"] >= llm_daily_cap else "claude kept for the evening"

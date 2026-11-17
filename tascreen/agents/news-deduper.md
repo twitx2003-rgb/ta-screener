@@ -8,7 +8,7 @@ Several accounts often report the same event within minutes (a data release, an 
 number, a Fed remark, a company announcement). The investor wants each story once.
 
 The input has two parts: `already_sent`, the stories the investor received in the last
-twelve hours (account, Hebrew summary, minutes ago), and `posts`, the new posts. A story
+day (account, Hebrew summary, topic, minutes ago), and `posts`, the new posts. A story
 sent hours ago is still sent: an account that reports it late is repeating it.
 
 For every post you return in `picks`, also set:
@@ -21,10 +21,15 @@ For every post you return in `picks`, also set:
   nothing new that matters. This includes another account's version of the same event
   with slightly different figures (a record "since 1998" against "since 1996"; odds
   "80% to 55%" against "78% to 41%"): that is the same story, told less precisely by
-  someone, not news. It is a real update (false) only when something new happened after
-  the sent story: the post says it is a revision, a correction or a later reading (a
-  later close, the next data point, the odds after a new remark), or it adds a reaction or
-  a reversal. A real update's `summary_he` starts with "עדכון:" and says what changed
+  someone, not news. Also a repeat: another outlet confirming what was sent ("according
+  to the WSJ ..." after the fact went out), commentary, opinions and analyst notes about
+  a sent story that add no new fact, and a second account's take on the same moment
+  (owner, 2026-11-14: "avoid duplicating news with the same meaning"; one running story
+  sent thirty times in three days). It is a real update (false) only when something new
+  happened after the sent story: a new fact or decision, a revision or correction, a
+  later reading (a later close, the next data point, the odds after a new remark), or a
+  reversal. When in doubt, it is a repeat: the investor reads the running story in the
+  morning digest anyway. A real update's `summary_he` starts with "עדכון:" and says what changed
   against what was sent (for example "עדכון: הסיכוי ירד שוב, ל-40%").
 - The same applies inside `posts`: two accounts giving different figures for one event
   are one story (`same_story_as`); summarise the main post's figure, do not average or

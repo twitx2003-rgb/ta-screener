@@ -2121,6 +2121,8 @@ def xnews_pass(settings) -> int:
         holdings=_saved_holdings(settings), send_private=_private_sender(),
         market_caps=_market_caps(settings), earnings_min_cap=cfg.earnings_min_cap_usd,
         earnings_accounts=cfg.earnings_image_accounts,
+        night_hours=(cfg.night_start, cfg.night_end), night_min_importance=cfg.night_min_importance,
+        night_max_per_round=cfg.night_max_per_round,
         llm_evening_reserve=cfg.claude_evening_reserve, call_after_s=cfg.call_summary_after_minutes * 60,
         with_replies=cfg.with_replies)
     print("xnews: " + " ".join(f"{k}={v}" for k, v in summary.items()))
