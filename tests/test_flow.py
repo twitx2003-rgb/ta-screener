@@ -94,6 +94,25 @@ def test_an_entry_whose_uptrend_broke_leaves_the_setups_list():
     assert setups_list.REASONS["trend"]
 
 
+def test_big_stocks_in_an_uptrend_are_popular_without_the_other_checks():
+    from dataclasses import replace
+
+    stocks, bars = _universe()
+    stocks = stocks.assign(market_cap=1.0e9)
+    names = list(stocks["symbol"])
+    lone = names[0]
+    stocks.loc[stocks["symbol"] == lone, "market_cap"] = 6.0e10
+    snap = flow.snapshot(stocks, bars.get, _rising(999, gain=0.3), replace(CFG, rs_min=99), DAY)
+    assert snap["passing"] == []                                          # a rating none reaches
+    assert snap["popular"] == [lone] and snap["stocks"][lone]["big"]
+    flat = names[-1]
+    stocks.loc[stocks["symbol"] == flat, "market_cap"] = 6.0e10
+    snap = flow.snapshot(stocks, bars.get, _rising(999, gain=0.3), replace(CFG, rs_min=99), DAY)
+    assert flat not in snap["popular"]                                    # big, but no uptrend
+    off = flow.snapshot(stocks, bars.get, _rising(999, gain=0.3), replace(CFG, rs_min=99, popular_min_cap=0), DAY)
+    assert off["popular"] == []
+
+
 def test_an_entry_failing_the_filter_or_stretched_leaves_the_setups_list():
     from types import SimpleNamespace
 

@@ -532,14 +532,21 @@ class FlowSettings:
     opp_rise_sessions: int = 5           # rising: above its value this many sessions back
     opp_max_risk_pct: float = 8.0        # the exit at most this far under the close
     opp_per_night: int = 8               # new ones a night (an album holds ten)
+    # Owner, 2026-11-18: "more stocks each time, and more popular ones": a stock worth at least
+    # this much (USD) counts as passing for the opportunities and the list when it is in the
+    # uptrend template, without the other checks (0: none). See tascreen/opportunities.py.
+    popular_min_cap: float = 5.0e10
     opp_per_industry: int = 2
     opp_repeat_sessions: int = 10        # one sent is not sent again for this many sessions
 
     def __post_init__(self):
         object.__setattr__(self, "benchmark", str(self.benchmark).strip())
         for name in ("rs_min", "steady_r2", "ud_min", "near_high_pct", "above_low_pct", "group_top_share",
-                     "opp_max_over_50_atr", "opp_max_over_20_atr", "opp_touch_atr", "opp_max_risk_pct"):
+                     "opp_max_over_50_atr", "opp_max_over_20_atr", "opp_touch_atr", "opp_max_risk_pct",
+                     "popular_min_cap"):
             object.__setattr__(self, name, float(getattr(self, name)))
+        if self.popular_min_cap < 0:
+            raise ConfigError("flow: popular_min_cap >= 0")
         for name in ("steady_sessions", "ud_sessions", "industry_min_members", "weekly_top", "opp_touch_sessions",
                      "opp_rise_sessions", "opp_per_night", "opp_per_industry", "opp_repeat_sessions"):
             object.__setattr__(self, name, int(getattr(self, name)))

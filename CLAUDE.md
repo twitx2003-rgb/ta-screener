@@ -228,6 +228,14 @@ Exit codes: 0 ok, 1 failed, 2 bad args.
   "sent"); they may still be sent on a later night. The touch of the average is for going in, not
   for staying. So a stock that runs away from its average leaves the list even while it works;
   it can come back at the average. `sync` counts `others`: symbols the bot did not add.
+- Popular stocks (owner, 2026-11-18: "more stocks each time, and more popular ones"): after the
+  first nights about 3 opportunities a night went out, about 1 of them big; most big stocks fail
+  the strict filter. Now a stock worth `flow.popular_min_cap` ($50B) or more in the trend template
+  counts as passing for the opportunities and the setups list (the map's `popular`; the evening
+  research, the live watch and the weekly leaders keep the strict filter). The big ones go first,
+  up to `opp_per_night` 10; such a line says "a big stock, a looser filter". The study (in
+  the module): per unit of risk about the same as the strict ones, the smaller loosened ones far
+  less; neither made money from about February 2026, and the group's note says so.
 - Earnings (owner, 2026-11-03: "I did not get the results' breakdown and the investor call"):
   2026-11-02's Claude cap (45) ran out at 20:09 UTC as the evening's reports came out (Palantir's
   among them), and the waiting posts aged out. Now the cap is 60 with 15 kept for after the close

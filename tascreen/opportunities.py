@@ -5,7 +5,9 @@ instead of running far above it.
 
 A stock is one when, at its last close:
 - it passes the money-flow filter (the owner's strict one: template, steady, rating, volume,
-  a leading group);
+  a leading group); or (owner, 2026-11-18: "more stocks each time, and more popular ones") it
+  is big, worth at least `flow.popular_min_cap`, and in the uptrend template (the map's
+  `popular`);
 - it is not stretched: at most `opp_max_over_50_atr` ATRs over its 50-day average (the
   analyst's own stretch line, analyst/rules.yaml `stretch_atr`);
 - it stands on a rising average: the 20-day (the close on or over it, at most
@@ -26,8 +28,15 @@ as far (about 4.4% against 9.8%), so more per unit of risk (0.49 of the risk aga
 About 6 in 10 reached the exit within the 20 sessions. A quiet pullback, an up day and a tight
 base under the high were no better, so none is asked for. Not advice.
 
+A second study (2026-11-18, the same kind of history to mid-October 2026, about 17 months, every
+fifth session, 20 sessions ahead, the exit as above; survivors, today's market caps): the strict
+ones made about 0.30 of their risk a trade and about 3 in 4 reached the exit; the big stocks in
+the template that do not pass the rest made about as much per unit of risk (0.28) on a nearer
+exit, while the smaller ones that do not pass made far less (0.12). So only big stocks get the
+looser bar. From about February 2026 neither made money (about -0.05 and -0.10 of the risk).
+
 Every evening after the report (run._opportunities): the best `opp_per_night` new ones (the
-highest rating first, at most `opp_per_industry` an industry, none sent as one in the last
+big ones first, then the highest rating, at most `opp_per_industry` an industry, none sent as one in the last
 `opp_repeat_sessions` sessions nor sent tonight as a pick or an alert) go to the group: one
 message with the list, then a chart each (candles, the 20- and 50-day averages, the exit); and
 into the bot's TradingView list at once (kind "opp", standing on its average).
@@ -49,9 +58,10 @@ from .indicators import atr as atr_series
 log = logging.getLogger(__name__)
 
 MIN_BARS = 60
-STUDY_NOTE = ("בבדיקה על כ-16 החודשים האחרונים (רק מניות שעדיין נסחרות, אז התוצאה מחמיאה): על כל שקל סיכון "
-              "הן הרוויחו בערך פי 1.6 משאר המניות החזקות, אבל כ-6 מכל 10 הגיעו לנקודת היציאה בתוך חודש. "
-              "לא ייעוץ השקעות.")
+STUDY_NOTE = ("בבדיקה על כ-17 החודשים האחרונים (רק מניות שעדיין נסחרות, אז התוצאה מחמיאה): כ-3 מכל 4 הגיעו "
+              "לנקודת היציאה בתוך חודש, והרווח בא מהשליש שהמשיך לעלות. המניות הגדולות במסנן המקל הרוויחו "
+              "ביחס לסיכון בערך כמו אלה שעוברות את המסנן המלא. מאז פברואר השיטה לא הרוויחה. לא ייעוץ השקעות.")
+POPULAR_MARK = " · מניה גדולה, מסנן מקל"
 
 
 def stretched(bars: pd.DataFrame | None, cfg) -> bool:
@@ -92,12 +102,15 @@ def of(bars: pd.DataFrame | None, cfg) -> dict[str, Any] | None:
 
 def find(snap: dict[str, Any], bars_of: Callable[[str], pd.DataFrame | None], cfg, *,
          break_atr: float) -> list[dict[str, Any]]:
-    """Every opportunity among tonight's passing stocks, the highest rating first (then the
-    nearest exit). Each also carries the map's ticker, groups, rating and distance from the
-    high, its exit (`stop`) and how far under the close that is (`risk_pct`)."""
+    """Every opportunity among tonight's passing stocks and the big ones in an uptrend
+    (`popular`), the big ones first, then the highest rating (then the nearest exit). Each also
+    carries the map's ticker, groups, rating and distance from the high, whether it is big and
+    whether it came in on the looser bar (`popular`), its exit (`stop`) and how far under the
+    close that is (`risk_pct`)."""
     stocks = snap.get("stocks") or {}
+    popular = set(snap.get("popular") or [])
     out = []
-    for symbol in snap.get("passing") or []:
+    for symbol in sorted(set(snap.get("passing") or []) | popular):
         o = of(bars_of(symbol), cfg)
         if o is None:
             continue
@@ -107,9 +120,10 @@ def find(snap: dict[str, Any], bars_of: Callable[[str], pd.DataFrame | None], cf
             continue                                    # the exit is too far: no opportunity
         out.append({"symbol": symbol, "ticker": x.get("ticker") or symbol.split(":")[-1],
                     "industry": x.get("industry"), "sector": x.get("sector"), "rs": int(x.get("rs") or 0),
-                    "from_high_pct": x.get("from_high_pct"), **o, "stop": stop,
+                    "from_high_pct": x.get("from_high_pct"), "big": bool(x.get("big")),
+                    "popular": symbol in popular, **o, "stop": stop,
                     "risk_pct": (o["close"] - stop) / o["close"] * 100})
-    out.sort(key=lambda o: (-o["rs"], o["risk_pct"], o["symbol"]))
+    out.sort(key=lambda o: (not o["big"], -o["rs"], o["risk_pct"], o["symbol"]))
     return out
 
 
@@ -154,7 +168,8 @@ def exit_line(o: dict[str, Any]) -> str:
 
 def caption(o: dict[str, Any]) -> str:
     """One chart's caption (HTML)."""
-    return (f"<b>{html.escape(o['ticker'])}</b> · {html.escape(_group(o))} · חוזק יחסי {o['rs']}\n"
+    return (f"<b>{html.escape(o['ticker'])}</b> · {html.escape(_group(o))} · חוזק יחסי {o['rs']}"
+            f"{POPULAR_MARK if o.get('popular') else ''}\n"
             f"{what(o)}\n{exit_line(o)}")
 
 
@@ -162,10 +177,12 @@ def message(day: date, chosen: list[dict], *, listed: bool) -> str:
     """The evening's list for the group (HTML). `listed`: all of them are on the bot's
     TradingView list (the line says so only then)."""
     lines = [f"🎯 <b>הזדמנויות · מניות חזקות שלא מתוחות · {day:%d/%m}</b>",
-             "מניות שעוברות את מסנן זרימת הכסף (מגמה עולה יציבה, חוזק יחסי, ענף מוביל) וחזרו לממוצע עולה "
-             "במקום לרוץ רחוק ממנו: נקודת היציאה קרובה, והסיכון קטן יותר."]
+             "מניות שעוברות את מסנן זרימת הכסף (מגמה עולה יציבה, חוזק יחסי, ענף מוביל), וגם מניות גדולות "
+             "ומוכרות שנמצאות במגמה עולה, שחזרו לממוצע עולה במקום לרוץ רחוק ממנו: נקודת היציאה קרובה, "
+             "והסיכון קטן יותר."]
     for n, o in enumerate(chosen, 1):
-        lines += ["", f"{n}. {_link(o['symbol'])} · {html.escape(_group(o))} · חוזק יחסי {o['rs']}",
+        lines += ["", f"{n}. {_link(o['symbol'])} · {html.escape(_group(o))} · חוזק יחסי {o['rs']}"
+                      f"{POPULAR_MARK if o.get('popular') else ''}",
                   f"{what(o)}", exit_line(o)]
     lines += ["", *(["📋 כולן נכנסו לרשימה של הבוט בטריידינגוויו."] if listed else []), f"<i>{STUDY_NOTE}</i>"]
     return "\n".join(lines)

@@ -232,6 +232,19 @@ def test_a_list_failure_still_sends_without_claiming_the_list(tmp_path, monkeypa
     assert len(later) == 4 and {v["kind"] for v in later.values()} == {"opp"}
 
 
+def test_big_stocks_on_the_looser_bar_are_found_first_and_marked():
+    stocks = {"NASDAQ:SMALL": {"ticker": "SMALL", "rs": 95, "industry": "A"},
+              "NASDAQ:BIG": {"ticker": "BIG", "rs": 72, "industry": "B", "big": True}}
+    snap = {**_snap(**stocks), "passing": ["NASDAQ:SMALL"], "popular": ["NASDAQ:BIG"]}
+    found = opportunities.find(snap, lambda s: _pullback(), CFG, break_atr=0.5)
+    assert [o["symbol"] for o in found] == ["NASDAQ:BIG", "NASDAQ:SMALL"]
+    assert found[0]["popular"] and not found[1]["popular"]
+    text = opportunities.message(DAY, found, listed=False)
+    assert text.count(opportunities.POPULAR_MARK) == 1 and opportunities.POPULAR_MARK in opportunities.caption(found[0])
+    old = opportunities.find(_snap(**stocks), lambda s: _pullback(), CFG, break_atr=0.5)    # a map from before
+    assert {o["symbol"] for o in old} == set(stocks) and not any(o["popular"] for o in old)
+
+
 def test_stretched_is_measured_over_the_50_day_average():
     assert opportunities.stretched(_stretched(), CFG)
     assert not opportunities.stretched(_pullback(), CFG)

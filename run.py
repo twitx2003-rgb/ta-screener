@@ -801,7 +801,8 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
 
             snap = flow.read(store.root, view.day.isoformat())
             ok_extra = {s for s in extra if flow.extra_passes(snap, store.read_bars(s), settings.flow)}
-            passing = allowed | ok_extra           # owner, 2026-11-04: and nothing stretched
+            # owner, 2026-11-04: and nothing stretched; 2026-11-18: the big ones in an uptrend too
+            passing = allowed | ok_extra | set(snap.get("popular") or [])
             stretched = {s for s in passing if opportunities.stretched(store.read_bars(s), settings.flow)}
             symbols = [s for s in symbols if s in passing and s not in stretched]
             trending = {s for s, x in snap["stocks"].items() if "template" not in x["missing"]} | {
@@ -811,7 +812,7 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
                 others = setups_list.opp_setups(view.day.isoformat(), opportunities.find(
                     snap, store.read_bars, settings.flow, break_atr=float(analyst_rules()["support_break_atr"])))
         found, counts = setups_list.find_setups(store.root, symbols, cfg, weak_market=weak)
-        sent = _sent_recommendations(settings, store, target, allowed, first=state.get("version", 0) < 4)
+        sent = _sent_recommendations(settings, store, target, passing, first=state.get("version", 0) < 4)
         # a setup of its own, if it shows one, comes first, unless it only fills a short list (that
         # would keep this stock off the list); an opportunity has an exit, a leader none
         ours = {**sent, **{s: o for s, o in others.items() if sent.get(s, {}).get("kind", "flow") == "flow"}}

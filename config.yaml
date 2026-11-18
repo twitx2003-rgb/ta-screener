@@ -300,6 +300,11 @@ flow:
   # 50-day; every evening to the group with a chart each, and into the bot's TradingView list.
   opportunities: true
   opp_max_risk_pct: 8        # the exit at most 8% under the close
-  opp_per_night: 8           # new ones a night
+  opp_per_night: 10          # new ones a night (2026-11-18: more; an album holds ten)
+  # Owner, 2026-11-18 ("more stocks each time, and more popular ones"): a stock worth $50B or
+  # more counts as passing for the opportunities and the list when it is in an uptrend (the
+  # trend template), without the rating, steadiness, volume and group checks. The study is in
+  # tascreen/opportunities.py. The evening research and the live watch keep the strict filter.
+  popular_min_cap: 5.0e10
   opp_per_industry: 2
   opp_repeat_sessions: 10    # one sent is not sent again for two weeks

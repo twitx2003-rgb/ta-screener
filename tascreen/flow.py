@@ -117,13 +117,14 @@ def groups(frame: pd.DataFrame, by: str, bench: dict[str, float], min_members: i
 
 def snapshot(stocks: pd.DataFrame, bars_of: Callable[[str], pd.DataFrame | None],
              benchmark: pd.DataFrame | None, cfg, day: date) -> dict[str, Any]:
-    """The night's map. `stocks`: the followed stocks with symbol, ticker, sector and industry."""
+    """The night's map. `stocks`: the followed stocks with symbol, ticker, sector and industry
+    (and market_cap: `popular` lists the big ones in the uptrend template that do not pass)."""
     rows = []
     for r in stocks.to_dict("records"):
         m = stock_metrics(bars_of(r["symbol"]), cfg)
         if m is not None:
             rows.append({"symbol": r["symbol"], "ticker": r.get("ticker") or r["symbol"].split(":")[-1],
-                         "sector": r.get("sector"), "industry": r.get("industry"), **m})
+                         "sector": r.get("sector"), "industry": r.get("industry"), "cap": r.get("market_cap"), **m})
     frame = pd.DataFrame(rows)
     b = stock_metrics(benchmark, cfg) if benchmark is not None else None
     bench = {k: (b or {}).get(k, 0.0) for k in ("r21", "r63", "r126")}
@@ -143,8 +144,11 @@ def snapshot(stocks: pd.DataFrame, bars_of: Callable[[str], pd.DataFrame | None]
         group_ok = r["industry"] in lead_industries if judged_by_industry else r["sector"] in lead_sectors
         checks = {"template": r["template"], "steady": r["steady"], "rs": r["rs"] >= cfg.rs_min,
                   "ud": r["ud"] >= cfg.ud_min, "group": bool(group_ok)}
+        cap = r.get("cap")
         out_stocks[r["symbol"]] = {
             "ticker": r["ticker"], "sector": r["sector"], "industry": r["industry"], "rs": int(r["rs"]),
+            "big": bool(cfg.popular_min_cap and isinstance(cap, (int, float)) and math.isfinite(cap)
+                        and cap >= cfg.popular_min_cap),
             "r2": r["r2"], "ud": round(r["ud"], 2), "r63": round(r["r63"], 4), "from_high_pct": round(r["from_high_pct"], 1),
             "missing": [k for k, ok in checks.items() if not ok], "passes": all(checks.values())}
     table = lambda t, kind: [{"name": name, "kind": kind, **{k: (round(float(v), 4) if isinstance(v, (int, float, np.floating, np.integer)) else v)  # noqa: E731
@@ -154,7 +158,9 @@ def snapshot(stocks: pd.DataFrame, bars_of: Callable[[str], pd.DataFrame | None]
             "stocks": out_stocks, "cuts": cuts,
             "sectors": table(sectors, "sector"), "industries": table(industries, "industry"),
             "leading_sectors": sorted(lead_sectors), "leading_industries": sorted(lead_industries),
-            "passing": sorted(s for s, x in out_stocks.items() if x["passes"])}
+            "passing": sorted(s for s, x in out_stocks.items() if x["passes"]),
+            "popular": sorted(s for s, x in out_stocks.items()
+                              if x["big"] and not x["passes"] and "template" not in x["missing"])}
 
 
 def extra_passes(snap: dict[str, Any], bars: pd.DataFrame | None, cfg) -> bool:
