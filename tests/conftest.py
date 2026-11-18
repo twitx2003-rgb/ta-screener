@@ -79,8 +79,10 @@ def _restore_root_logging():
 def _quota_not_spent():
     """TradingView's daily quota (tascreen/tv/data.py) is remembered per process: a test that
     spends it must not leave the next test without calls."""
-    from tascreen.tv.data import quota_spent
+    from tascreen.tv.data import cooldown_reset, quota_spent
 
     quota_spent(None)
+    cooldown_reset()                    # ...and so is its cooldown (2026-11-18)
     yield
     quota_spent(None)
+    cooldown_reset()

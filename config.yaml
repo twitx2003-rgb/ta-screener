@@ -56,7 +56,9 @@ bars:
   overlap_tolerance_pct: 0.05
   session_batch: 100         # new MCP session every N symbols (tokens last 15 min)
   concurrency: 1             # calls in flight at once
-  min_interval_s: 0.0        # pause after each call
+  # a pause after each call (2026-11-18: TradingView's cooldown came after calls back to
+  # back; 2 s keeps the nightly batch at about 50 calls in two minutes)
+  min_interval_s: 2.0
   batch: true                # the new bar from batch rows, 50 symbols a call (the daily quota)
 
 market:

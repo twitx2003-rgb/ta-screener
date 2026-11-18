@@ -46,7 +46,8 @@ from .fields import pick
 from .market_hours import (drop_incomplete_session, is_trading_day, last_completed_session, live_session,
                            session_bounds, sessions_between)
 from .store import Store
-from .tv.data import OHLCV_TOOL, QuotaExhausted, bars_frame, fetch_in_session, quota_back
+from .tv.data import (COOLDOWN_GIVE_UP, OHLCV_TOOL, QuotaExhausted, RateLimited, bars_frame,
+                      cooldown_strikes, fetch_in_session, quota_back)
 
 log = logging.getLogger(__name__)
 
@@ -161,7 +162,9 @@ class BarsJob:
                 result.note = (result.note + "; " if result.note else "") + \
                     f"newest bar {result.last_date} is older than {target.isoformat()}"
                 result.status = "stale"
-        except QuotaExhausted as exc:
+        except (QuotaExhausted, RateLimited) as exc:
+            # TradingView's limits (the daily quota, the per-minute one, the cooldown) are not
+            # a data failure: the symbol waits for the next run (2026-11-18: 242 "failed")
             result.status, result.note = "deferred", str(exc)[:200]
         except (ProviderError, ContractError) as exc:
             # TradingView no longer knows the symbol (2026-10-07: three in a saved universe
@@ -181,6 +184,8 @@ class BarsJob:
                     return SymbolResult(symbol, "deferred", note="stopped at the deadline")
                 if quota_back() is not None:
                     return SymbolResult(symbol, "deferred", note="TradingView's daily quota is spent")
+                if cooldown_strikes() >= COOLDOWN_GIVE_UP:
+                    return SymbolResult(symbol, "deferred", note="TradingView's cooldown kept coming back")
                 result = await self.update_symbol(session, symbol)
                 if result.calls and self.bars.min_interval_s:
                     await asyncio.sleep(self.bars.min_interval_s)
@@ -200,12 +205,15 @@ def batch_bar(row: dict[str, Any], symbol: str, day: date, market_tz: str) -> tu
     return bars_frame({"bars": [bar]}, symbol), close - change_abs
 
 
-async def batch_rows(session, symbols: list[str], delays: tuple[float, ...]) -> dict[str, dict]:
+async def batch_rows(session, symbols: list[str], delays: tuple[float, ...],
+                     pause: float = 0.0) -> dict[str, dict]:
     """symbol -> its batch row, `BATCH_SIZE` symbols a call ({"data": {symbol: {column:
     value}}, "missing": [...]}, confirmed live 2026-09-28: tascreen/explain.py)."""
     rows: dict[str, dict] = {}
     for start in range(0, len(symbols), BATCH_SIZE):
         chunk = symbols[start:start + BATCH_SIZE]
+        if start and pause:
+            await asyncio.sleep(pause)
         payload = await fetch_in_session(session, BATCH_TOOL, {"symbols": chunk, "columns": BATCH_COLUMNS},
                                          delays=delays)
         data = pick(payload, ["data"], context=BATCH_TOOL)
@@ -237,7 +245,7 @@ def batch_update(client: Any, job: BarsJob, symbols: list[str]) -> tuple[dict[st
     checks = behind[:: max(1, len(behind) // CROSS_CHECKS)][:CROSS_CHECKS]
 
     async def work(session):
-        rows = await batch_rows(session, behind, job.delays)
+        rows = await batch_rows(session, behind, job.delays, job.bars.min_interval_s)
         direct = {}
         for symbol in checks:
             fresh = await job._fetch(session, symbol, 2)
@@ -246,6 +254,13 @@ def batch_update(client: Any, job: BarsJob, symbols: list[str]) -> tuple[dict[st
 
     try:
         rows, direct = client.with_session(work)
+    except (QuotaExhausted, RateLimited) as exc:
+        # not a reason for one call per symbol (about 1000, the whole daily quota; 2026-11-17):
+        # the symbols one session behind wait for the next run
+        log.warning("batch bars rate limited: %s; %d symbols deferred", type(exc).__name__, len(behind))
+        note = f"batch rate limited: {str(exc)[:150]}"
+        return ({s: SymbolResult(s, "deferred", note=note) for s in behind},
+                {"used": False, "why": type(exc).__name__})
     except (ProviderError, ContractError, OSError, TimeoutError, ExceptionGroup) as exc:
         log.warning("batch bars not used: %s", type(exc).__name__)
         return {}, {"used": False, "why": type(exc).__name__}
@@ -313,6 +328,9 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
                 done += [SymbolResult(s, "deferred", note="stopped at the deadline") for s in need]
             elif need and quota_back() is not None:
                 done += [SymbolResult(s, "deferred", note="TradingView's daily quota is spent") for s in need]
+            elif need and cooldown_strikes() >= COOLDOWN_GIVE_UP:
+                done += [SymbolResult(s, "deferred", note="TradingView's cooldown kept coming back")
+                         for s in need]
             elif need and broken >= MAX_BROKEN_SESSIONS:
                 done += [SymbolResult(s, "deferred", note="TradingView sessions kept failing")
                          for s in need]

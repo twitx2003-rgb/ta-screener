@@ -231,3 +231,64 @@ def test_the_per_minute_quota_is_a_short_wait():
     with pytest.raises(RateLimited) as caught:
         tool_payload(result({"success": False, "error": text}), "mcp-tv-get-ohlcv")
     assert caught.value.retry_after == 2.0
+
+
+COOLDOWN_TEXT = ("tool_pre_invoke blocked by plugin ToolQuotaPlugin: TOOL_QUOTA_EXCEEDED - Tool call quota "
+                 "exceeded (MCP cooldown is currently active. You can make another call in 7 mins, once the "
+                 "cooldown is lifted.)")
+
+
+def test_the_cooldown_is_waited_out_once_not_hammered():
+    import asyncio
+    from tascreen.tv.data import CoolingDown, cooldown_strikes, cooling_until, fetch_in_session
+
+    with pytest.raises(CoolingDown) as caught:
+        tool_payload(result(None, is_error=True, text=COOLDOWN_TEXT), "mcp-tv-get-ohlcv")
+    assert caught.value.retry_after == 7 * 60 + 30 and cooling_until() is not None and cooldown_strikes() == 1
+
+    class Session:
+        calls = 0
+
+        async def call_tool(self, name, args):
+            Session.calls += 1
+            return result(None, is_error=True, text=COOLDOWN_TEXT) if Session.calls == 1 else \
+                result({"success": True, "bars": []})
+
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    payload = asyncio.run(fetch_in_session(Session(), "mcp-tv-get-ohlcv", {}, sleep=sleep))
+    assert payload["success"] is True and Session.calls == 2
+    assert len(waits) == 2 and all(w > 400 for w in waits)        # the old cooldown, then the new one
+
+
+def test_a_second_cooldown_for_one_call_is_raised():
+    import asyncio
+    from tascreen.tv.data import CoolingDown, fetch_in_session
+
+    class Session:
+        calls = 0
+
+        async def call_tool(self, name, args):
+            Session.calls += 1
+            return result(None, is_error=True, text=COOLDOWN_TEXT)
+
+    async def sleep(seconds):
+        pass
+
+    with pytest.raises(CoolingDown):
+        asyncio.run(fetch_in_session(Session(), "mcp-tv-get-ohlcv", {}, sleep=sleep))
+    assert Session.calls == 2                                     # not four, as for the per-minute quota
+
+
+def test_a_long_cooldown_is_not_waited_in_process():
+    from datetime import datetime, timedelta, timezone
+
+    from tascreen.tv import data
+    from tascreen.tv.data import CoolingDown
+
+    data._cooling_until = datetime.now(timezone.utc) + timedelta(hours=2)
+    with pytest.raises(CoolingDown):
+        data._cooldown_wait("mcp-tv-get-ohlcv")

@@ -23,6 +23,13 @@ What the live server showed (market-research-pipeline, 2026-09):
   minute. Wait about 1 seconds"). Both come as a tool error with TOOL_QUOTA_EXCEEDED.
   The daily one is QuotaExhausted, and no call is made after it until 00:00 UTC; the
   per-minute one is RateLimited with the wait it names.
+- Since about 2026-11-16 a third answer: "MCP cooldown is currently active. You can make
+  another call in 7 mins, once the cooldown is lifted." (CoolingDown). Retrying after 5,
+  15 and 45 s, as for the per-minute one, kept the account cooling: the nightly update ran
+  five hours and failed five times in a row (2026-11-16..18). Now nothing is called until
+  the cooldown ends: a cooldown up to COOLDOWN_WAIT_MAX_S is waited out once, a longer one
+  or a second one for the same call is raised, and after COOLDOWN_GIVE_UP cooldowns in
+  one run the bars update defers the rest to the next run.
 
 A payload that does not match a mapped shape is saved under logs/ and raised as
 ShapeNotMapped — never read by guessing field names.
@@ -74,6 +81,12 @@ QUOTA = "TOOL_QUOTA_EXCEEDED"
 DAILY_QUOTA = re.compile(r"daily tool-call quota", re.IGNORECASE)
 QUOTA_WAIT = re.compile(r"wait about (\d+) seconds?", re.IGNORECASE)
 _quota_back: datetime | None = None      # when the spent daily quota comes back (UTC)
+COOLDOWN = re.compile(r"another call in (\d+)\s*(hours?|hrs?|minutes?|mins?|seconds?|secs?)", re.IGNORECASE)
+COOLDOWN_MARGIN_S = 30.0                  # called again this long after the cooldown's end
+COOLDOWN_WAIT_MAX_S = 20 * 60             # a longer cooldown is not waited out in-process
+COOLDOWN_GIVE_UP = 3                      # cooldowns in one run before the bars update stops
+_cooling_until: datetime | None = None    # when TradingView's cooldown ends (UTC)
+_cooldowns = 0                            # cooldown answers seen by this process
 
 
 def quota_back(now: datetime | None = None) -> datetime | None:
@@ -82,6 +95,42 @@ def quota_back(now: datetime | None = None) -> datetime | None:
     if _quota_back is not None and (now or datetime.now(timezone.utc)) >= _quota_back:
         _quota_back = None
     return _quota_back
+
+
+class CoolingDown(RateLimited):
+    """TradingView's MCP cooldown for the account (first seen 2026-11-18). Every call during
+    it is refused, so nothing is called until it ends (`cooling_until()`)."""
+
+
+def cooling_until(now: datetime | None = None) -> datetime | None:
+    """When TradingView's cooldown ends, if this process was told of one; else None."""
+    global _cooling_until
+    if _cooling_until is not None and (now or datetime.now(timezone.utc)) >= _cooling_until:
+        _cooling_until = None
+    return _cooling_until
+
+
+def cooldown_strikes() -> int:
+    """How many cooldown answers this process has had."""
+    return _cooldowns
+
+
+def cooldown_reset() -> None:
+    """Forget every cooldown (tests, and a new run in the same process)."""
+    global _cooling_until, _cooldowns
+    _cooling_until, _cooldowns = None, 0
+
+
+def _cooldown_wait(tool: str) -> float:
+    """Seconds to wait before calling `tool` (0: none). A cooldown longer than
+    COOLDOWN_WAIT_MAX_S is raised instead: the caller defers."""
+    until = cooling_until()
+    if until is None:
+        return 0.0
+    left = (until - datetime.now(timezone.utc)).total_seconds()
+    if left > COOLDOWN_WAIT_MAX_S:
+        raise CoolingDown(f"{tool}: not called, TradingView's cooldown lasts until {until:%H:%M} UTC")
+    return max(0.0, left)
 
 
 def quota_spent(back: datetime | None) -> None:
@@ -98,8 +147,19 @@ def _quota_error(tool: str, text: str) -> ProviderError | None:
         now = datetime.now(timezone.utc)
         quota_spent(datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), timezone.utc))
         return QuotaExhausted(f"{tool}: TradingView's daily tool-call quota is spent (back at 00:00 UTC)")
+    cool = COOLDOWN.search(text)
+    if cool:
+        global _cooling_until, _cooldowns
+        unit = cool.group(2).lower()
+        seconds = int(cool.group(1)) * (3600 if unit.startswith("h") else 60 if unit.startswith("m") else 1)
+        cooling = CoolingDown(f"{tool}: TradingView's cooldown is active (the next call in {cool.group(1)} "
+                              f"{cool.group(2)})")
+        cooling.retry_after = seconds + COOLDOWN_MARGIN_S
+        _cooling_until = datetime.now(timezone.utc) + timedelta(seconds=cooling.retry_after)
+        _cooldowns += 1
+        return cooling
     wait = QUOTA_WAIT.search(text)
-    error = RateLimited(f"{tool}: TradingView's per-minute tool-call quota is spent")
+    error = RateLimited(f"{tool}: TradingView's per-minute tool-call quota is spent ({text[-160:]})")
     error.retry_after = float(wait.group(1)) + 1 if wait else 5.0
     return error
 
@@ -209,10 +269,20 @@ class TradingViewData:
 
     def fetch(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call a tool and return its checked payload, retrying only on 429."""
+        cooled = 0
         for delay in (*self.delays, None):
             _refuse_while_spent(tool)
+            wait = _cooldown_wait(tool)
+            if wait:
+                log.warning("%s: waiting %.0f s for TradingView's cooldown to end", tool, wait)
+                self.sleep(wait)
             try:
                 return tool_payload(self.client.call_tool(tool, arguments), tool)
+            except CoolingDown:
+                cooled += 1
+                if cooled > 1 or delay is None:
+                    raise
+                continue                      # the next pass waits the cooldown out
             except RateLimited as exc:
                 if delay is None:
                     raise RateLimited(f"{exc} (still rate limited after "
@@ -231,10 +301,20 @@ async def fetch_in_session(session: Any, tool: str, arguments: dict[str, Any], *
                            delays: tuple[float, ...] = RATE_LIMIT_DELAYS,
                            sleep: Callable[[float], Any] = asyncio.sleep) -> dict[str, Any]:
     """`TradingViewData.fetch` for an open session (many calls, one connection)."""
+    cooled = 0
     for delay in (*delays, None):
         _refuse_while_spent(tool)
+        wait = _cooldown_wait(tool)
+        if wait:
+            log.warning("%s: waiting %.0f s for TradingView's cooldown to end", tool, wait)
+            await sleep(wait)
         try:
             return tool_payload(await session.call_tool(tool, arguments), tool)
+        except CoolingDown:
+            cooled += 1
+            if cooled > 1 or delay is None:
+                raise
+            continue                          # the next pass waits the cooldown out
         except RateLimited as exc:
             if delay is None:
                 raise RateLimited(f"{exc} (still rate limited after "

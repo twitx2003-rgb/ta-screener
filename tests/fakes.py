@@ -137,14 +137,15 @@ class FakeBatch(FakeOhlcv):
         super().__init__(last_day, days)
         self.wrong: set[str] = set()
         self.quota_after: int | None = None
+        self.quota_text = ("tool_pre_invoke blocked by plugin ToolQuotaPlugin: TOOL_QUOTA_EXCEEDED - Tool call "
+                           "quota exceeded (Daily tool-call quota for this user is exhausted. It resets at 00:00 "
+                           "UTC, in about 3h 0m; do not retry before then.)")
 
     async def call_tool(self, name, args):
         if self.quota_after is not None and len(self.calls) >= self.quota_after:
             self.calls.append((name, args))
-            return SimpleNamespace(is_error=True, structured_content=None, content=[SimpleNamespace(
-                text="tool_pre_invoke blocked by plugin ToolQuotaPlugin: TOOL_QUOTA_EXCEEDED - Tool call quota "
-                     "exceeded (Daily tool-call quota for this user is exhausted. It resets at 00:00 UTC, in "
-                     "about 3h 0m; do not retry before then.)")])
+            return SimpleNamespace(is_error=True, structured_content=None,
+                                   content=[SimpleNamespace(text=self.quota_text)])
         if name != "mcp-tv-get-symbol-data-batch":
             return await super().call_tool(name, args)
         self.calls.append((name, args))
