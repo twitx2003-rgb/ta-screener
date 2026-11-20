@@ -192,6 +192,18 @@ class Store:
     def write_status(self, status: dict[str, dict[str, Any]]) -> None:
         _write_json(self.bars_dir / "status.json", status)
 
+    def read_holes(self) -> dict[str, list[str]]:
+        """symbol -> the sessions the batch skipped over (tascreen/bars.py), not yet filled."""
+        path = self.bars_dir / "holes.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except ValueError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def write_holes(self, holes: dict[str, list[str]]) -> None:
+        _write_json(self.bars_dir / "holes.json", holes)
+
     # ---------------------------------------------------------------- scans
     def write_scan(self, day: date, indicators: pd.DataFrame, patterns: pd.DataFrame,
                    summary: dict[str, Any]) -> Path:

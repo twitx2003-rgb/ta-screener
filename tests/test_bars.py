@@ -285,3 +285,63 @@ def test_a_cooldown_on_the_batch_defers_instead_of_a_call_per_symbol(tmp_path):
     report = update_all(FakeClient(source), _job(tmp_path), symbols, progress=lambda l: None)
     assert report["counts"] == {"deferred": 60} and not report["failed"]
     assert len(source.calls) == 1                       # the batch call (no retries in _job), nothing per symbol
+
+
+FRIDAY_CLOSE = datetime(2026, 9, 18, 22, 0, tzinfo=timezone.utc)
+
+
+def test_with_few_calls_the_batch_brings_symbols_days_behind_and_leaves_a_hole(tmp_path):
+    """2026-11-20 (50 calls a day): a symbol several sessions behind gets its newest bar from
+    the batch too; the sessions between are a recorded hole, filled later, priority first."""
+    from fakes import FakeBatch
+
+    symbols = [f"NASDAQ:S{n}" for n in range(60)]
+    update_all(FakeClient(FakeBatch(date(2026, 9, 18))), _job(tmp_path, now=FRIDAY_CLOSE), symbols,
+               progress=lambda l: None)
+    source = FakeBatch(DAY)
+    job = _job(tmp_path, batch_gaps=True, batch_checks=1)
+    report = update_all(FakeClient(source), job, symbols, progress=lambda l: None)
+    assert report["counts"] == {"updated": 60} and report["batch"]["new_holes"] == 60
+    tools = [name for name, _ in source.calls]
+    assert tools.count("mcp-tv-get-symbol-data-batch") == 2 and tools.count("mcp-tv-get-ohlcv") == 1
+    days = set(job.store.read_bars("NASDAQ:S9")["timestamp"].dt.date)
+    assert DAY in days and date(2026, 9, 21) not in days
+    assert job.store.read_holes()["NASDAQ:S9"] == ["2026-09-21", "2026-09-22"]
+
+    source.calls.clear()
+    job = _job(tmp_path, batch_gaps=True, batch_checks=1, repair_calls=2)
+    report = update_all(FakeClient(source), job, symbols, progress=lambda l: None, priority=["NASDAQ:S9"])
+    assert report["counts"] == {"up_to_date": 60}
+    assert report["holes_filled"] == {"NASDAQ:S9": "filled", "NASDAQ:S0": "filled"} and report["holes_left"] == 58
+    assert [name for name, _ in source.calls] == ["mcp-tv-get-ohlcv"] * 2
+    days = set(job.store.read_bars("NASDAQ:S9")["timestamp"].dt.date)
+    assert {date(2026, 9, 21), date(2026, 9, 22), DAY} <= days
+
+
+def test_the_call_cap_holds_the_rest_without_leaving_the_update_incomplete(tmp_path):
+    source = FakeOhlcv(DAY)
+    report, _ = _run(_job(tmp_path, max_calls=3), source, [f"NASDAQ:S{n}" for n in range(6)])
+    assert report["counts"] == {"new": 3, "held": 3} and report["deferred"] == 0
+    assert len(source.calls) == 3
+
+
+def test_on_a_day_without_a_session_the_free_calls_fill_holes(tmp_path, monkeypatch):
+    import dataclasses
+
+    import run
+    from fakes import FakeBatch
+    from tascreen.config import Settings
+
+    settings = Settings(root=tmp_path)
+    settings = dataclasses.replace(settings, bars=dataclasses.replace(settings.bars, idle_repair_calls=3))
+    store = Store(settings.data_dir)
+    for n in range(5):
+        store.write_holes({**store.read_holes(), f"NASDAQ:S{n}": ["2026-09-21"]})
+    source = FakeBatch(DAY)
+    update_all(FakeClient(source), BarsJob(store, BarsSettings(history=300), MarketSettings(), delays=(),
+                                           now=AFTER_CLOSE), [f"NASDAQ:S{n}" for n in range(5)],
+               progress=lambda l: None)
+    monkeypatch.setattr(run, "make_tradingview", lambda s: FakeClient(source))
+    saturday = datetime(2026, 9, 26, 9, 0, tzinfo=timezone.utc)
+    assert run._idle_repair(settings, store, saturday) == 3 and len(store.read_holes()) == 2
+    assert run._idle_repair(settings, store, AFTER_CLOSE) == "a session day"

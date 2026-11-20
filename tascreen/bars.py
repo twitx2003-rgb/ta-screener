@@ -25,8 +25,14 @@ gets its new bar from `get-symbol-data-batch`, `BATCH_SIZE` symbols a call (`bar
 between the close and the next open: close, high, low and volume as they are, the open as
 close minus `change_from_open_abs`, and the previous close (close minus `change_abs`) must
 match the stored last close within `overlap_tolerance_pct`, or the symbol goes the
-`get-ohlcv` way (a split shows there). Every night `CROSS_CHECKS` of them are also fetched
-with `get-ohlcv`; if the two disagree, the batch rows are not used that night.
+`get-ohlcv` way (a split shows there). Every night `bars.batch_checks` of them are also
+fetched with `get-ohlcv`; if the two disagree, the batch rows are not used that night.
+
+Since 2026-11-18 the account has 50 calls a day (tv/data.py), and the owner chose to stay
+on them (2026-11-20). With `bars.batch_gaps` the batch also brings the newest bar to a
+symbol several sessions behind: the sessions between stay a hole (data/bars/holes.json)
+until a `get-ohlcv` call fills it, `bars.repair_calls` a run, the stocks the bot follows
+closely first. `bars.max_calls` caps the other `get-ohlcv` calls of a run.
 """
 from __future__ import annotations
 
@@ -94,7 +100,9 @@ class SymbolResult:
 BATCH_TOOL = "mcp-tv-get-symbol-data-batch"
 BATCH_COLUMNS = ["close", "high", "low", "volume", "change_abs", "change_from_open_abs"]
 BATCH_SIZE = 50
-CROSS_CHECKS = 3
+# A symbol further behind than this is not brought by the batch: a stale or halted listing,
+# whose row may be an old session's (bars.batch_gaps)
+MAX_GAP_SESSIONS = 15
 VOLUME_TOLERANCE_PCT = 3.0      # late prints revise the volume after the close
 MAX_BROKEN_SESSIONS = 3        # in a row; then the rest of the run is deferred to the next one
 # Before the 2nd and 3rd try of a batch whose session broke (2026-10-08: TradingView answered
@@ -234,12 +242,16 @@ def batch_update(client: Any, job: BarsJob, symbols: list[str]) -> tuple[dict[st
     stored, behind = {}, []
     for symbol in symbols:
         frame = job.store.read_bars(symbol)
-        if frame is not None and len(frame) and sessions_between(frame["timestamp"].iloc[-1].date(), target) == 1:
+        if frame is None or not len(frame):
+            continue
+        gap = sessions_between(frame["timestamp"].iloc[-1].date(), target)
+        if gap == 1 or (1 < gap <= MAX_GAP_SESSIONS and job.bars.batch_gaps):
             stored[symbol] = frame
             behind.append(symbol)
     if not behind:
         return {}, {"used": False, "why": "no symbol one session behind"}
-    checks = behind[:: max(1, len(behind) // CROSS_CHECKS)][:CROSS_CHECKS]
+    n_checks = job.bars.batch_checks
+    checks = behind[:: max(1, len(behind) // n_checks)][:n_checks]
 
     async def work(session):
         rows = await batch_rows(session, behind, job.delays, job.bars.min_interval_s)
@@ -271,13 +283,15 @@ def batch_update(client: Any, job: BarsJob, symbols: list[str]) -> tuple[dict[st
             return {}, {"used": False, "why": "cross-check failed", "calls": len(direct)}
     out: dict[str, SymbolResult] = {}
     mismatched = 0
+    holes = job.store.read_holes()
     for symbol in behind:
         if symbol not in rows:
             continue
         try:
             frame, previous = batch_bar(rows[symbol], symbol, target, tz)
+            skipped = sessions_skipped(stored[symbol]["timestamp"].iloc[-1].date(), target)
             last = float(stored[symbol]["close"].iloc[-1])
-            if abs(previous - last) > job.bars.overlap_tolerance_pct / 100 * abs(last):
+            if not skipped and abs(previous - last) > job.bars.overlap_tolerance_pct / 100 * abs(last):
                 mismatched += 1                  # a split or a revised close: get-ohlcv decides
                 continue
             merged = BARS.validate(pd.concat([stored[symbol], frame], ignore_index=True))
@@ -285,17 +299,88 @@ def batch_update(client: Any, job: BarsJob, symbols: list[str]) -> tuple[dict[st
             log.info("%s: batch row not used (%s)", symbol, type(exc).__name__)
             continue
         job.store.write_bars(symbol, merged)
+        note = "batch"
+        if skipped:
+            holes[symbol] = sorted(set(holes.get(symbol, [])) | {d.isoformat() for d in skipped})
+            note = f"batch, {len(skipped)} sessions left a hole"
         out[symbol] = SymbolResult(symbol, "updated", merged["timestamp"].iloc[-1].date().isoformat(),
-                                   len(merged), note="batch")
+                                   len(merged), note=note)
+    job.store.write_holes(holes)
     calls = -(-len(behind) // BATCH_SIZE) + len(checks)
-    return out, {"used": True, "symbols": len(out), "previous_close_mismatch": mismatched, "calls": calls}
+    gaps = sum(1 for r in out.values() if "hole" in r.note)
+    return out, {"used": True, "symbols": len(out), "previous_close_mismatch": mismatched, "calls": calls,
+                 "new_holes": gaps}
+
+
+def sessions_skipped(last: date, target: date) -> list[date]:
+    """The trading sessions after `last` and before `target`."""
+    out, day = [], last + timedelta(days=1)
+    while day < target:
+        if is_trading_day(day):
+            out.append(day)
+        day += timedelta(days=1)
+    return out
+
+
+def repair_holes(client: Any, job: BarsJob, order: list[str]) -> dict[str, str]:
+    """Fill the holes the batch left (data/bars/holes.json), `bars.repair_calls` get-ohlcv
+    calls at most, in `order`. A hole is tried once: one TradingView does not have stays.
+    Returns symbol -> what happened."""
+    holes = job.store.read_holes()
+    if not holes or not job.bars.repair_calls:
+        return {}
+    rank: dict[str, int] = {}
+    for i, s in enumerate(order):
+        rank.setdefault(s, i)                 # a priority symbol keeps its first place
+    todo = sorted(holes, key=lambda s: (rank.get(s, len(rank)), s))
+    done: dict[str, str] = {}
+    calls = 0
+
+    async def work(session):
+        nonlocal calls
+        for symbol in todo:
+            if calls >= job.bars.repair_calls or quota_back() is not None:
+                break
+            stored = job.store.read_bars(symbol)
+            if stored is None or not holes.get(symbol):
+                holes.pop(symbol, None)
+                continue
+            first = min(date.fromisoformat(d) for d in holes[symbol])
+            count = sessions_between(first, job.target) + 1 + job.bars.overlap
+            try:
+                fresh = await job._fetch(session, symbol, count)
+                calls += 1
+                merged, reason = merge_bars(stored, fresh, job.bars.overlap_tolerance_pct)
+                if merged is None:
+                    log.info("%s: %s; fetching the full history again", symbol, reason)
+                    merged = await job._fetch(session, symbol, job.bars.history)
+                    calls += 1
+                job.store.write_bars(symbol, merged)
+                done[symbol] = "filled"
+            except (QuotaExhausted, RateLimited):
+                break
+            except (ProviderError, ContractError) as exc:
+                done[symbol] = f"not filled: {str(exc)[:120]}"
+            holes.pop(symbol, None)
+            if job.bars.min_interval_s:
+                await asyncio.sleep(job.bars.min_interval_s)
+
+    try:
+        client.with_session(work)
+    except (ProviderError, OSError, TimeoutError, ExceptionGroup) as exc:
+        log.warning("holes not filled: %s", type(exc).__name__)
+    job.store.write_holes(holes)
+    return done
 
 
 def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
                progress: Callable[[str], None] = print,
-               wait: Callable[[float], None] = time.sleep) -> dict[str, Any]:
-    """Update every symbol, one MCP session per batch. Saves status after each batch."""
+               wait: Callable[[float], None] = time.sleep,
+               priority: Iterable[str] = ()) -> dict[str, Any]:
+    """Update every symbol, one MCP session per batch. Saves status after each batch.
+    `priority`: the symbols whose holes are filled first."""
     symbols = list(symbols)
+    singles = 0                  # get-ohlcv calls for symbols the batch did not bring
     status = job.store.read_status()
     results: list[SymbolResult] = []
     started = time.monotonic()
@@ -328,12 +413,21 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
             elif need and broken >= MAX_BROKEN_SESSIONS:
                 done += [SymbolResult(s, "deferred", note="TradingView sessions kept failing")
                          for s in need]
+            elif need and job.bars.max_calls and singles >= job.bars.max_calls:
+                done += [SymbolResult(s, "held", note="kept for a later run (bars.max_calls)") for s in need]
             elif need:
+                if job.bars.max_calls:
+                    room = job.bars.max_calls - singles
+                    done += [SymbolResult(s, "held", note="kept for a later run (bars.max_calls)")
+                             for s in need[room:]]
+                    need = need[:room]
                 # A session that cannot open, or dies mid-batch (seen from GitHub's runners),
                 # is tried again after a pause; past the tries it costs this batch only, and
                 # the symbols are fetched by the next run.
                 try:
-                    done += client.with_session(lambda session, need=need: job.run_batch(session, need))
+                    got = client.with_session(lambda session, need=need: job.run_batch(session, need))
+                    done += got
+                    singles += sum(r.calls for r in got)
                     broken = 0
                 except (ProviderError, OSError, TimeoutError, ExceptionGroup) as exc:
                     broken += 1
@@ -360,6 +454,10 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
                  f"{per_call:.2f} s/call, about {remaining * per_call / 60:.0f} min left "
                  "if the rest need one call each")
 
+    repaired: dict[str, str] = {}
+    if job.bars.repair_calls and quota_back() is None and not late():
+        repaired = repair_holes(client, job, [*priority, *symbols])
+        calls += sum(1 for v in repaired.values() if v == "filled")
     counts: dict[str, int] = {}
     for r in results:
         counts[r.status] = counts.get(r.status, 0) + 1
@@ -377,6 +475,8 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
         "refetched": {r.symbol: r.note for r in results if r.status == "refetched"},
         "deferred": sum(r.status == "deferred" for r in results),
         "batch": batch_note,
+        "holes_filled": repaired,
+        "holes_left": len(job.store.read_holes()),
         "quota_spent": quota_back() is not None,
     }
 

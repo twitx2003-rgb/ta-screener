@@ -135,9 +135,25 @@ class BarsSettings:
     # The new session's bar from batch rows, 50 symbols a call (tascreen/bars.py): the
     # account's daily tool-call quota (2026-10-19, about 1000) cannot pay a call a symbol.
     batch: bool = True
+    # TradingView's calls a day (50 since 2026-11-18, tv/data.py; owner, 2026-11-20: stay on
+    # 50 and do less). batch_gaps: the batch also brings the newest bar to a symbol more than
+    # one session behind; the sessions between stay a hole until a repair call fills it.
+    # max_calls: get-ohlcv calls a run for the symbols the batch cannot bring (new ones, a
+    # split), at most (0: no cap); the rest are "held" for a later run, which does not leave
+    # the update incomplete. repair_calls: get-ohlcv calls a run that fill the holes, the
+    # stocks the bot follows closely first. batch_checks: get-ohlcv calls that check the
+    # batch rows each night.
+    batch_gaps: bool = False
+    max_calls: int = 0
+    repair_calls: int = 0
+    batch_checks: int = 3
+    # On a day without a session (the weekend), when no update is due, the calls a day are
+    # free: this many fill holes instead (0: none).
+    idle_repair_calls: int = 0
 
     def __post_init__(self):
-        for name in ("history", "overlap", "session_batch", "concurrency"):
+        for name in ("history", "overlap", "session_batch", "concurrency", "max_calls", "repair_calls",
+                     "batch_checks", "idle_repair_calls"):
             object.__setattr__(self, name, int(getattr(self, name)))
         for name in ("overlap_tolerance_pct", "min_interval_s"):
             object.__setattr__(self, name, float(getattr(self, name)))
@@ -147,6 +163,8 @@ class BarsSettings:
             raise ConfigError("bars.overlap must be at least 2")
         if self.session_batch < 1 or self.concurrency < 1:
             raise ConfigError("bars.session_batch and bars.concurrency must be >= 1")
+        if min(self.max_calls, self.repair_calls, self.idle_repair_calls) < 0 or self.batch_checks < 1:
+            raise ConfigError("bars.max_calls and bars.repair_calls must be >= 0, bars.batch_checks >= 1")
 
 
 

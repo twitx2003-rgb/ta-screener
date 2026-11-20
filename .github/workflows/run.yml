@@ -15,6 +15,7 @@ on:
     - cron: "40 21 * * 1-5"      # after the close (16:15 New York), summer and winter
     - cron: "10 1 * * 2-6"       # catch-ups: finish an update that was cut short
     - cron: "10 5 * * 2-6"
+    - cron: "10 5 * * 0"         # Sunday: the day's calls fill the holes in the charts (bars.py)
   workflow_dispatch:
     inputs:
       limit:

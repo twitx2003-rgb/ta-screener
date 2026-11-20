@@ -63,6 +63,14 @@ bars:
   # back; 2 s keeps the nightly batch at about 50 calls in two minutes)
   min_interval_s: 2.0
   batch: true                # the new bar from batch rows, 50 symbols a call (the daily quota)
+  # 50 calls a day since 2026-11-18 (owner, 2026-11-20: stay on 50 and do less): the batch
+  # brings every stock's newest bar, about 21 calls a night, and a stock days behind keeps a
+  # hole in its chart until a repair call fills it, a few a night, the followed stocks first
+  batch_gaps: true
+  batch_checks: 1
+  max_calls: 4
+  repair_calls: 4
+  idle_repair_calls: 40      # Saturday and Sunday: no session, the calls are free
 
 market:
   timezone: "America/New_York"
@@ -102,10 +110,11 @@ alerts:
   verge_pct: 2.0             # "on the verge": the close this far below the breakout line
   watch_pct: 5.0             # watched during the session: the line this far above the close
   top_analyses: 3            # full analyses for the strongest breakouts (of the 10 a day)
-  live_interval_minutes: 5   # a price pass during the session (owner: as close to real time
-                             # as TradingView allows; get-ohlcv, one call a stock)
+  # a price pass during the session; 2026-11-20: once an hour (was 5 minutes), on the calls the
+  # night's update leaves of the 50 a day
+  live_interval_minutes: 60
   far_every: 3               # stocks beyond verge_pct from their line: every 3rd pass only
-  live_max_symbols: 120      # stocks watched, at most, nearest to their line first
+  live_max_symbols: 50       # stocks watched, at most, nearest to their line first (one call)
   # Meaningful and varied breakouts (owner, 2026-09-28: "mostly wedges"). Only patterns
   # whose past bullish breakouts in our ledger reached the target at least this often
   # (failed and expired count against). 35 left five patterns and, with the $5B floor, no

@@ -334,7 +334,7 @@ def bars(settings, limit: int | None, stop_at=None) -> int:
                   settings.tradingview.rate_limit_delays, stop_at=stop_at)
     print(f"\nBars for {len(symbols)} symbols (universe of {day}); "
           f"last completed session: {job.target}\n")
-    report = update_all(make_tradingview(settings), job, symbols)
+    report = update_all(make_tradingview(settings), job, symbols, priority=_followed_closely(settings, job.store))
     (settings.log_dir / "bars_last_run.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nDone in {report['seconds']:.0f} s, {report['calls']} calls "
@@ -348,6 +348,47 @@ def bars(settings, limit: int | None, stop_at=None) -> int:
                 print(f"    {symbol}: {note[:150]}")
     print(f"  full report: {settings.log_dir / 'bars_last_run.json'}\n")
     return 1 if report["failed"] else 0
+
+
+def _idle_repair(settings, store, now) -> int | str:
+    """On a day without a session (owner, 2026-11-20: 50 calls a day), the free calls fill
+    the holes the nightly batch left (tascreen/bars.py), the followed stocks first."""
+    import dataclasses
+
+    from zoneinfo import ZoneInfo
+
+    from tascreen.bars import BarsJob, repair_holes
+    from tascreen.market_hours import is_trading_day
+
+    if is_trading_day(now.astimezone(ZoneInfo(settings.market.timezone)).date()):
+        return "a session day"
+    if not store.read_holes():
+        return 0
+    cfg = dataclasses.replace(settings.bars, repair_calls=settings.bars.idle_repair_calls)
+    job = BarsJob(store, cfg, settings.market, settings.tradingview.rate_limit_delays)
+    done = repair_holes(make_tradingview(settings), job, _followed_closely(settings, store))
+    log.info("holes filled on a day without a session: %d of %d tried", list(done.values()).count("filled"),
+             len(done))
+    return list(done.values()).count("filled")
+
+
+def _followed_closely(settings, store) -> list[str]:
+    """The stocks whose bars matter most when calls are few (bars.repair_calls): the setups
+    list, the owner's watchlist, then the newest scan's chart patterns that broke out or are
+    forming."""
+    from tascreen import setups_list, watchlist
+
+    out: list[str] = [e.get("symbol") for e in setups_list.read(store.root).get("entries") or []]
+    out += list(watchlist.read(settings.data_dir).get("symbols") or [])
+    try:
+        days = store.scan_days()
+        if days:
+            patterns = store.read_scan(days[-1])[1]
+            chart = patterns[(patterns["family"] == "chart") & patterns["status"].isin(["breakout", "forming"])]
+            out += chart.sort_values("status")["symbol"].tolist()
+    except (OSError, ValueError, KeyError) as exc:
+        log.info("the newest scan not read for the bars' priority: %s", type(exc).__name__)
+    return [s for s in dict.fromkeys(out) if isinstance(s, str)]
 
 
 def check_bars(settings) -> int:
@@ -542,6 +583,8 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
     due = state.get("daily_update_for") != target.isoformat() or not state.get("complete", True)
     summary: dict = {"session": target.isoformat(), "due": due}
     code = 0
+    if not due and settings.bars.idle_repair_calls:
+        summary["holes_filled"] = _idle_repair(settings, store, started)
     if due:
         deadline = next_open(started, market_tz=settings.market.timezone) - timedelta(minutes=10)
         if max_minutes:
