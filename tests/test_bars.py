@@ -274,9 +274,7 @@ def test_the_spent_daily_quota_defers_the_rest_without_another_call(tmp_path):
     assert len(source.calls) == 3                          # the one refused call, then none
 
 
-def test_a_cooldown_on_the_batch_defers_instead_of_a_call_per_symbol(tmp_path, monkeypatch):
-    from tascreen.tv import data
-
+def test_a_cooldown_on_the_batch_defers_instead_of_a_call_per_symbol(tmp_path):
     symbols = [f"NASDAQ:S{n}" for n in range(60)]
     source = _stored_until_tuesday(tmp_path, symbols)
     source.calls.clear()
@@ -284,7 +282,6 @@ def test_a_cooldown_on_the_batch_defers_instead_of_a_call_per_symbol(tmp_path, m
     source.quota_text = ("tool_pre_invoke blocked by plugin ToolQuotaPlugin: TOOL_QUOTA_EXCEEDED - Tool call quota "
                          "exceeded (MCP cooldown is currently active. You can make another call in 7 mins, once "
                          "the cooldown is lifted.)")
-    monkeypatch.setattr(data, "_cooldown_wait", lambda tool: 0.0)           # no real seven-minute wait
     report = update_all(FakeClient(source), _job(tmp_path), symbols, progress=lambda l: None)
     assert report["counts"] == {"deferred": 60} and not report["failed"]
     assert len(source.calls) == 1                       # the batch call (no retries in _job), nothing per symbol

@@ -46,8 +46,7 @@ from .fields import pick
 from .market_hours import (drop_incomplete_session, is_trading_day, last_completed_session, live_session,
                            session_bounds, sessions_between)
 from .store import Store
-from .tv.data import (COOLDOWN_GIVE_UP, OHLCV_TOOL, QuotaExhausted, RateLimited, bars_frame,
-                      cooldown_strikes, fetch_in_session, quota_back)
+from .tv.data import OHLCV_TOOL, QuotaExhausted, RateLimited, bars_frame, fetch_in_session, quota_back
 
 log = logging.getLogger(__name__)
 
@@ -184,8 +183,6 @@ class BarsJob:
                     return SymbolResult(symbol, "deferred", note="stopped at the deadline")
                 if quota_back() is not None:
                     return SymbolResult(symbol, "deferred", note="TradingView's daily quota is spent")
-                if cooldown_strikes() >= COOLDOWN_GIVE_UP:
-                    return SymbolResult(symbol, "deferred", note="TradingView's cooldown kept coming back")
                 result = await self.update_symbol(session, symbol)
                 if result.calls and self.bars.min_interval_s:
                     await asyncio.sleep(self.bars.min_interval_s)
@@ -328,9 +325,6 @@ def update_all(client: Any, job: BarsJob, symbols: Iterable[str], *,
                 done += [SymbolResult(s, "deferred", note="stopped at the deadline") for s in need]
             elif need and quota_back() is not None:
                 done += [SymbolResult(s, "deferred", note="TradingView's daily quota is spent") for s in need]
-            elif need and cooldown_strikes() >= COOLDOWN_GIVE_UP:
-                done += [SymbolResult(s, "deferred", note="TradingView's cooldown kept coming back")
-                         for s in need]
             elif need and broken >= MAX_BROKEN_SESSIONS:
                 done += [SymbolResult(s, "deferred", note="TradingView sessions kept failing")
                          for s in need]

@@ -243,3 +243,25 @@ def test_a_stock_trading_too_few_shares_a_day_is_not_followed(tmp_path):
     assert len(run.usable_universe(none)[1]) == 5
     with pytest.raises(ConfigError):
         UniverseSettings(min_avg_volume=-1)
+
+
+def test_without_refresh_the_update_keeps_an_old_universe_and_calls_nothing(tmp_path, monkeypatch):
+    """2026-11-20: the screener no longer offers market caps, and the account has 50 calls a
+    day; the saved universe is kept whatever its age, without a call for it."""
+    import dataclasses
+    from datetime import timedelta
+
+    import run
+    from test_scan import _universe
+    from tascreen.config import Settings
+    from tascreen.store import Store
+
+    kept = UniverseSettings(min_market_cap=5e9, band_edges=(5e9, 1e10), refresh=False)
+    settings = dataclasses.replace(Settings(root=tmp_path), universe=kept)
+    Store(settings.data_dir).write_universe(run._market_today(settings) - timedelta(days=30),
+                                            _universe([f"NYSE:S{i}" for i in range(5)]), {})
+    monkeypatch.setattr(run, "universe", lambda s: pytest.fail("the screener was called"))
+    seen = []
+    monkeypatch.setattr(run, "bars", lambda s, limit, stop_at=None: seen.append("bars") or 0)
+    monkeypatch.setattr(run, "scan", lambda s: seen.append("scan") or 0)
+    assert run.update(settings, None) == 0 and seen == ["bars", "scan"]

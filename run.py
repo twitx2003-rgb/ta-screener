@@ -579,6 +579,10 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
                                 "exit_code": code,
                                 "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         summary["complete"] = complete
+        if not complete and code == 0 and quota_back() is not None:
+            # held back only by TradingView's calls a day (50 since 2026-11-18): the next
+            # run goes on, and this one is not a failure
+            summary["quota_spent"] = True
     if settings.flow.enabled:
         summary["flow"] = _flow_map(settings, store, target)
     if settings.alerts.enabled:
@@ -597,7 +601,7 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
     summary["seconds"] = round((datetime.now(timezone.utc) - started).total_seconds())
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     (settings.log_dir / "ci_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    return 0 if not due or summary.get("complete") else 1
+    return 0 if not due or summary.get("complete") or summary.get("quota_spent") else 1
 
 
 def _flow_allowed(settings, store, day) -> set[str] | None:
@@ -2172,14 +2176,18 @@ def html_escape(text: str) -> str:
 
 
 def update(settings, limit: int | None, stop_at=None) -> int:
-    from tascreen.tv.data import RateLimited
+    from tascreen.tv.data import QuotaExhausted, RateLimited
 
-    try:
-        universe(settings)
-    except RateLimited as exc:
-        log.warning("screener rate limited (%s); trying the newest saved universe", exc)
-        if usable_universe(settings, max_age_days=settings.universe.max_age_days) is None:
+    if not settings.universe.refresh:
+        if usable_universe(settings) is None:
             return 1
+    else:
+        try:
+            universe(settings)
+        except (RateLimited, QuotaExhausted) as exc:
+            log.warning("screener rate limited (%s); trying the newest saved universe", exc)
+            if usable_universe(settings, max_age_days=settings.universe.max_age_days) is None:
+                return 1
     bars_code = bars(settings, limit, stop_at)   # a few failed symbols do not stop the scan
     return max(bars_code, scan(settings))
 

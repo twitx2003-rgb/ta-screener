@@ -89,6 +89,11 @@ class UniverseSettings:
     # Foreign companies traded as depositary receipts (type "dr": TSM, ASML, ARM, ...), fetched
     # by a query of their own (owner, 2026-10-06); off keeps the "stock" query alone.
     depositary_receipts: bool = False
+    # Refresh the universe from TradingView's screener (one call per band). Since about
+    # 2026-11-18 the screener offers no fundamentals (market cap, sector, industry: "no usable
+    # filters left") and the account has 50 calls a day; off, `--update` keeps the newest
+    # saved universe whatever its age, and spends no call on it.
+    refresh: bool = True
 
     def __post_init__(self):
         # PyYAML (YAML 1.1) reads `1.0e9` without a sign as a *string*; sent as the

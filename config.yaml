@@ -49,6 +49,9 @@ universe:
   # receipts: TSM, ASML, ARM, BABA), which the "stock" query never returned; they come by a
   # query of their own, under the same floors. If it fails, the stocks go on alone that day.
   depositary_receipts: true
+  # 2026-11-20: TradingView's screener no longer offers market caps, sectors or industries,
+  # and the account has 50 calls a day: the universe of 2026-11-16 is kept as it is
+  refresh: false
 
 bars:
   history: 600               # daily bars on first fetch (~2.4 years)
