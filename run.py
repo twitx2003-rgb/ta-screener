@@ -626,24 +626,40 @@ def ci_tick(settings, limit: int | None, max_minutes: float | None) -> int:
             # held back only by TradingView's calls a day (50 since 2026-11-18): the next
             # run goes on, and this one is not a failure
             summary["quota_spent"] = True
+    failed: list[str] = []
+
+    def step(name: str, work) -> None:
+        # one step's failure does not cost the others (2026-11-20: a Telegram "message is too
+        # long" in the setups list ended the run, and the coach and the rest never ran)
+        try:
+            summary[name] = work()
+        except Exception as exc:  # noqa: BLE001 — logged privately, counted in the summary
+            log.exception("%s failed", name)
+            summary[name] = {"status": "failed", "error": type(exc).__name__}
+            failed.append(name)
+
     if settings.flow.enabled:
-        summary["flow"] = _flow_map(settings, store, target)
+        step("flow", lambda: _flow_map(settings, store, target))
     if settings.alerts.enabled:
-        summary["alerts"] = _evening_alerts(settings, store, target)
+        step("alerts", lambda: _evening_alerts(settings, store, target))
     if settings.flow.enabled and settings.flow.opportunities:
-        summary["opportunities"] = _opportunities(settings, store, target)
+        step("opportunities", lambda: _opportunities(settings, store, target))
     if settings.setups_list.enabled:
-        summary["setups_list"] = _setups_list(settings, store, target)
+        step("setups_list", lambda: _setups_list(settings, store, target))
         if settings.setups_list.coach:
-            summary["setups_coach"] = _setups_coach(settings, store, target)
+            step("setups_coach", lambda: _setups_coach(settings, store, target))
     if settings.research.enabled:
-        summary["research_weekly"] = _research_weekly(settings, store)
-    summary["market"] = _market_snapshot(settings, store, target)
+        step("research_weekly", lambda: _research_weekly(settings, store))
+    step("market", lambda: _market_snapshot(settings, store, target))
     if settings.flow.enabled:
-        summary["flow_weekly"] = _flow_weekly(settings, store, target)
+        step("flow_weekly", lambda: _flow_weekly(settings, store, target))
+    if failed:
+        summary["failed_steps"] = failed
     summary["seconds"] = round((datetime.now(timezone.utc) - started).total_seconds())
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     (settings.log_dir / "ci_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    if failed:
+        return 1
     return 0 if not due or summary.get("complete") or summary.get("quota_spent") else 1
 
 
@@ -658,7 +674,14 @@ def _flow_allowed(settings, store, day) -> set[str] | None:
     if snap is None or snap.get("day") != day.isoformat():
         log.warning("no money-flow map for %s: nothing filtered", day)
         return None
-    return flow.passing(snap)
+    return flow.wide(snap) if settings.flow.gate == "wide" else flow.passing(snap)
+
+
+def _pickable(settings):
+    """Whether the bot may pick a symbol for the owner (universe.pick_exchanges; owner,
+    2026-11-24: Nasdaq only). The owner's own watchlist is not picked, so never filtered."""
+    exchanges = settings.universe.pick_exchanges
+    return lambda symbol: not exchanges or str(symbol).split(":")[0] in exchanges
 
 
 def _flow_map(settings, store, target) -> dict:
@@ -742,7 +765,10 @@ def _opportunities(settings, store, target, client=None) -> dict:
         if is_trading_day(day):
             back += 1
             skip |= set(alerts.read_sent(store, day).get("opportunities") or {})
-    found = opportunities.find(snap, store.read_bars, cfg, break_atr=float(analyst_rules()["support_break_atr"]))
+    ok = _pickable(settings)
+    among = flow.wide(snap) if cfg.gate == "wide" else None
+    found = [o for o in opportunities.find(snap, store.read_bars, cfg, among=among,
+                                           break_atr=float(analyst_rules()["support_break_atr"])) if ok(o["symbol"])]
     chosen = opportunities.choose(found, skip=skip, per_night=cfg.opp_per_night, per_industry=cfg.opp_per_industry)
     record, listed = {o["symbol"]: opportunities.saved(o) for o in chosen}, 0
     if chosen:
@@ -841,7 +867,9 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
         above = pd.to_numeric(view.stocks.get("above_sma150"), errors="coerce") if "above_sma150" in view.stocks else None
         breadth = float(above.mean() * 100) if above is not None and above.notna().any() else None
         weak = breadth is not None and breadth < cfg.weak_market_pct
-        symbols, trending, passing, stretched, others = list(view.stocks["symbol"]) + extra, None, None, set(), {}
+        ok = _pickable(settings)
+        symbols, trending, passing, stretched, others = (
+            [s for s in list(view.stocks["symbol"]) + extra if ok(s)], None, None, set(), {})
         allowed = _flow_allowed(settings, store, view.day)
         if allowed is not None:                    # owner, 2026-10-28: only where the money flows
             from tascreen import flow, opportunities
@@ -856,10 +884,13 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
                 s for s in extra if (m := flow.stock_metrics(store.read_bars(s), settings.flow)) and m["template"]}
             list_counts = {**list_counts, "flow_passing": len(symbols)}
             if settings.flow.opportunities:
-                others = setups_list.opp_setups(view.day.isoformat(), opportunities.find(
-                    snap, store.read_bars, settings.flow, break_atr=float(analyst_rules()["support_break_atr"])))
+                among = flow.wide(snap) if settings.flow.gate == "wide" else None
+                others = setups_list.opp_setups(view.day.isoformat(), [o for o in opportunities.find(
+                    snap, store.read_bars, settings.flow, among=among,
+                    break_atr=float(analyst_rules()["support_break_atr"])) if ok(o["symbol"])])
         found, counts = setups_list.find_setups(store.root, symbols, cfg, weak_market=weak)
-        sent = _sent_recommendations(settings, store, target, passing, first=state.get("version", 0) < 4)
+        sent = {s: x for s, x in _sent_recommendations(settings, store, target, passing,
+                                                      first=state.get("version", 0) < 4).items() if ok(s)}
         # a setup of its own, if it shows one, comes first, unless it only fills a short list (that
         # would keep this stock off the list); an opportunity has an exit, a leader none
         ours = {**sent, **{s: o for s, o in others.items() if sent.get(s, {}).get("kind", "flow") == "flow"}}
@@ -869,7 +900,8 @@ def _setups_list(settings, store, target, client=None, owner=None) -> dict:
                  None if breadth is None else round(breadth, 1))
         state = setups_list.refresh(state, found, view, store.read_bars, cfg, extra=extra,
                                     break_atr=float(analyst_rules()["support_break_atr"]), trending=trending,
-                                    passing=passing, stretched=stretched)
+                                    passing=passing, stretched=stretched,
+                                    exchanges=settings.universe.pick_exchanges)
         setups_list.write(store.root, state)
         from tascreen import setups_coach
 
@@ -1046,6 +1078,8 @@ def _research_runner(settings, store, view):
     def run(breakouts, verge):
         from tascreen import alerts
 
+        ok = _pickable(settings)
+        breakouts, verge = [b for b in breakouts if ok(b["symbol"])], [v for v in verge if ok(v["symbol"])]
         llm = ClaudeCodeLLM(model=cfg.model, effort=cfg.effort, timeout_s=cfg.timeout_s)
         proven = alerts.proven_patterns(store.read_ledger(), settings.outcomes.min_cases,
                                         settings.alerts.min_success_pct)
@@ -1178,6 +1212,8 @@ def ci_live(settings, max_minutes: float) -> int:
     allowed = _flow_allowed(settings, store, view.day)
     if allowed is not None:                       # owner, 2026-10-28: only where the money flows
         near, far = [s for s in near if s in allowed], [s for s in far if s in allowed]
+    ok = _pickable(settings)                      # owner, 2026-11-24: Nasdaq only
+    near, far = [s for s in near if ok(s)], [s for s in far if ok(s)]
     client = make_tradingview(settings)
     holdings = _holdings(settings, store, client, day)      # priced every pass
     near = near + [s for s in holdings if s not in near]

@@ -46,20 +46,37 @@ def _headers(token: str) -> dict[str, str]:
             "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "ta-screener"}
 
 
+STUCK_AFTER_H = 7.0      # a run queued or running longer than any job may last is stuck
+
+
 def active_runs(workflow: str, *, token: str | None = None, repo: str = REPO,
-                get: Callable[[str, dict[str, str]], dict | None] = _get) -> int | None:
-    """How many runs of `workflow` are queued, waiting or in progress; None if unknown."""
+                get: Callable[[str, dict[str, str]], dict | None] = _get,
+                now: datetime | None = None) -> int | None:
+    """How many runs of `workflow` are queued, waiting or in progress; None if unknown. A run
+    created more than STUCK_AFTER_H hours ago is not counted: a live run queued on 2026-11-11
+    never started, and "running" kept the X news loop from starting the live watch for two
+    weeks (Monday 2026-11-23: no watch and no pre-market report)."""
     token = (token if token is not None else os.environ.get("GH_DISPATCH_TOKEN", "")).strip()
     if not token:
         return None
     headers = _headers(token)
+    cutoff = (now or datetime.now(timezone.utc)).timestamp() - STUCK_AFTER_H * 3600
     total = 0
     for status in ("queued", "waiting", "pending", "in_progress"):
-        answer = get(f"{API}/repos/{repo}/actions/workflows/{workflow}/runs?status={status}&per_page=5",
+        answer = get(f"{API}/repos/{repo}/actions/workflows/{workflow}/runs?status={status}&per_page=20",
                      headers)
         if not isinstance(answer, dict) or not isinstance(answer.get("total_count"), int):
             return None
-        total += answer["total_count"]
+        runs = answer.get("workflow_runs")
+        if not isinstance(runs, list):
+            total += answer["total_count"]
+            continue
+        for run in runs:
+            try:
+                created = datetime.fromisoformat(str(run.get("created_at")).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                created = cutoff                      # no time: counted, as before
+            total += created >= cutoff
     return total
 
 

@@ -57,6 +57,45 @@ def rtl(text: str) -> str:
                      for line in str(text).split("\n"))
 
 
+MESSAGE_LIMIT = 4000                    # Telegram's 4096, with room to spare
+
+
+def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
+    """`text` in parts of at most `limit` characters, cut at a blank line where one fits,
+    else at a line's end (an HTML tag never spans lines in these messages); a single line
+    longer than the limit is cut where it must."""
+    if len(text) <= limit:
+        return [text]
+    parts, current = [], ""
+    for block in text.split("\n\n"):
+        for piece in ([block] if len(block) <= limit else _lines_within(block, limit)):
+            joined = f"{current}\n\n{piece}" if current else piece
+            if len(joined) <= limit:
+                current = joined
+            else:
+                parts.append(current)
+                current = piece
+    if current:
+        parts.append(current)
+    return [p for p in parts if p.strip()]
+
+
+def _lines_within(block: str, limit: int) -> list[str]:
+    out, current = [], ""
+    for line in block.split("\n"):
+        while len(line) > limit:
+            out += [current] if current else []
+            current, out = "", out + [line[:limit]]
+            line = line[limit:]
+        joined = f"{current}\n{line}" if current else line
+        if len(joined) <= limit:
+            current = joined
+        else:
+            out.append(current)
+            current = line
+    return out + ([current] if current else [])
+
+
 def caption(text: str, limit: int = 1024) -> str:
     """rtl() when it still fits Telegram's caption limit (a cut could split an HTML tag)."""
     right = rtl(text)
@@ -146,10 +185,13 @@ class Telegram:
         return self.chat_id
 
     def send(self, text: str, *, html: bool = False) -> None:
-        params = {"chat_id": self._chat(), "text": rtl(text), "disable_web_page_preview": "true"}
-        if html:
-            params["parse_mode"] = "HTML"
-        self.call("sendMessage", **params)
+        """A message; one over Telegram's limit goes as several, cut between lines (2026-11-20:
+        the setups list's changes were "message is too long", and the nightly run died on it)."""
+        for part in split_message(rtl(text)):
+            params = {"chat_id": self._chat(), "text": part, "disable_web_page_preview": "true"}
+            if html:
+                params["parse_mode"] = "HTML"
+            self.call("sendMessage", **params)
 
     def send_photo(self, content: bytes, caption: str = "", filename: str = "chart.png", *,
                    html: bool = False) -> None:

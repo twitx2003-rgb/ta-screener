@@ -52,6 +52,9 @@ universe:
   # 2026-11-20: TradingView's screener no longer offers market caps, sectors or industries,
   # and the account has 50 calls a day: the universe of 2026-11-16 is kept as it is
   refresh: false
+  # Owner, 2026-11-24: "only Nasdaq stocks": the research, the opportunities, the setups list
+  # and the live watch pick from Nasdaq only; the owner's own watchlist is not filtered
+  pick_exchanges: ["NASDAQ"]
 
 bars:
   history: 600               # daily bars on first fetch (~2.4 years)
@@ -234,7 +237,7 @@ research:
   # owner, 2026-09-30 ("I barely get stocks"; a weak week left one breakout a day): the
   # breakouts of the last recent_days sessions that still close above their line, and at
   # least min_picks a day when the shortlist has them (the chief's, then the best-scored rest)
-  min_picks: 3
+  min_picks: 5               # 2026-11-24: 5 (was 3), owner: "more setups"
   recent_days: 3
   model: "sonnet"
   effort: "high"
@@ -284,7 +287,7 @@ setups_list:
   # Owner, 2026-10-06: scan the stocks on his own TradingView lists too (all but this one):
   # the US-listed ones, under the same volume floor, even if the universe does not have them.
   owner_lists: true
-  list_exchanges: ["NASDAQ", "NYSE", "AMEX"]
+  list_exchanges: ["NASDAQ"]  # 2026-11-24: Nasdaq only (was NYSE and AMEX too)
   # Owner, 2026-10-06: an expert agent that studies the setups daily (tascreen/setups_coach.py):
   # the list's own record against the history study (rebuilt every study_days), why exits fell,
   # what to keep and improve (proposals only), notes for the chart analyst; private chat.
@@ -312,7 +315,7 @@ flow:
   # 50-day; every evening to the group with a chart each, and into the bot's TradingView list.
   opportunities: true
   opp_max_risk_pct: 8        # the exit at most 8% under the close
-  opp_per_night: 10          # new ones a night (2026-11-18: more; an album holds ten)
+  opp_per_night: 15          # new ones a night (2026-11-18: 10; 2026-11-24: more, two albums)
   # Owner, 2026-11-18 ("more stocks each time, and more popular ones"): a stock worth $50B or
   # more counts as passing for the opportunities and the list when it is in an uptrend (the
   # trend template), without the rating, steadiness, volume and group checks. The study is in
@@ -320,3 +323,6 @@ flow:
   popular_min_cap: 5.0e10
   opp_per_industry: 2
   opp_repeat_sessions: 10    # one sent is not sent again for two weeks
+  # Owner, 2026-11-24 ("send more setups"): the strict filter left one candidate a night in a weak
+  # market; "wide" also lets in a stock in an uptrend or rated at least rs_min (tascreen/flow.py)
+  gate: "wide"

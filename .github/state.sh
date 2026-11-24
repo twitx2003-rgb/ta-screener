@@ -61,7 +61,9 @@ bars)
     ;;
 save)
     cd state
-    ls -1t logs/tick-*.log 2> /dev/null | tail -n +15 | xargs -r rm --
+    # the newest 30 by name (the name holds the time): a fresh clone gives every file the same
+    # time, and `ls -t` dropped the newest logs instead (2026-11-24)
+    ls -1 logs/tick-*.log 2> /dev/null | sort -r | tail -n +31 | xargs -r rm --
     git checkout -q --orphan fresh
     git add -A
     git commit -qm "State as of $(date -u +%Y-%m-%dT%H:%MZ)"
@@ -82,7 +84,9 @@ save)
 save-token)
     # a test run: keep the token (it was replaced) and the run's logs, not its data
     cd state
-    ls -1t logs/tick-*.log 2> /dev/null | tail -n +15 | xargs -r rm --
+    # the newest 30 by name (the name holds the time): a fresh clone gives every file the same
+    # time, and `ls -t` dropped the newest logs instead (2026-11-24)
+    ls -1 logs/tick-*.log 2> /dev/null | sort -r | tail -n +31 | xargs -r rm --
     git add -- tv_tokens.json logs .gitignore
     git commit -qm "test run $(date -u +%Y-%m-%dT%H:%MZ): token and logs" || true
     git push -q origin HEAD:main

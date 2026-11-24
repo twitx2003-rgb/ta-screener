@@ -105,3 +105,18 @@ def test_a_failed_nightly_run_is_tried_again_only_after_a_gap(monkeypatch, capsy
         run.ensure_nightly(settings, now=monday_night)
         assert started == expected
     assert capsys.readouterr().out.splitlines()[0] == "ensure-nightly: waiting (1 failed, the last 20 min ago)"
+
+
+def test_a_run_stuck_in_the_queue_for_days_does_not_count_as_running():
+    """2026-11-23: a live run queued on 2026-11-11 never started; counted as running, it kept
+    the X news loop from starting the live watch."""
+    now = datetime(2026, 11, 23, 15, 0, tzinfo=timezone.utc)
+
+    def get(url, headers):
+        if "status=queued" in url:
+            return {"total_count": 1, "workflow_runs": [{"created_at": "2026-11-11T20:43:36Z"}]}
+        if "status=in_progress" in url:
+            return {"total_count": 1, "workflow_runs": [{"created_at": "2026-11-23T13:31:00Z"}]}
+        return {"total_count": 0, "workflow_runs": []}
+
+    assert github.active_runs("live.yml", token="t", get=get, now=now) == 1

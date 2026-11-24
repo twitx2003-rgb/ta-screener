@@ -85,7 +85,8 @@ REMOVE = "mcp-watchlist-remove-from-watchlist"
 LISTS = "mcp-watchlist-list-watchlists"   # {"watchlists": [{"id", "name", "symbols", ...}]} (live, 2026-10-06)
 # 1: the research team's picks; 2 (2026-10-05): the owner's setups; 3 (2026-10-06): his own lists
 # and foreign companies scanned too. A new version rebuilds the list at once (run.py).
-VERSION = 5                 # 4: the recommended stocks too (2026-10-31); 5: the whole filter, none stretched (2026-11-04)
+VERSION = 6                 # 4: the recommended stocks too (2026-10-31); 5: the whole filter, none stretched (2026-11-04)
+                            # 6: only the pick exchanges, Nasdaq (owner, 2026-11-24)
 # one entry a stock: the first of these it shows; the last four are the stocks the bot
 # recommended in Telegram (owner, 2026-10-31: "every stock you send me goes into TradingView")
 KINDS = ("retest", "ma150", "breakout", "ma20", "alert", "pick", "opp", "flow")
@@ -108,6 +109,7 @@ REASONS = {
     "trend": "המגמה העולה נשברה (מתחת לממוצעים הארוכים או רחוק מהשיא)",
     "flow": "לא עוברת יותר את מסנן זרימת הכסף",
     "stretched": "מתוחה מדי: רחוקה מממוצע 50",
+    "exchange": "הרשימה עכשיו רק למניות נאסד״ק",
 }
 WEAK_MARKET_KINDS = ("ma150",)            # what may go in while the market is weak
 
@@ -382,7 +384,8 @@ def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr:
            keep_sessions: int, extra: list[str] | tuple = (),
            qualify: Callable[[dict], bool] = lambda e: True,
            trending: set[str] | None = None, passing: set[str] | None = None,
-           stretched: set[str] | frozenset = frozenset()) -> tuple[list[dict], list[dict]]:
+           stretched: set[str] | frozenset = frozenset(),
+           exchanges: tuple[str, ...] = ()) -> tuple[list[dict], list[dict]]:
     """(entries kept, events): each event is {"symbol", "kind", "what": "removed", "reason"}.
     `extra`: the owner's stocks followed beside the scan's. `trending`: the stocks still in
     the money-flow map's uptrend (tascreen/flow.py; None: not checked). `passing`: the stocks
@@ -395,6 +398,9 @@ def review(entries: list[dict], view: ScanView, bars_of: Callable, *, break_atr:
         def drop(reason: str) -> None:
             events.append({"symbol": e["symbol"], "kind": e.get("kind"), "what": "removed", "reason": reason})
 
+        if exchanges and e["symbol"].split(":")[0] not in exchanges:   # owner, 2026-11-24: Nasdaq only
+            drop("exchange")
+            continue
         if e["symbol"] not in followed:                    # left the universe (e.g. the volume floor)
             drop("unfollowed")
             continue
@@ -444,7 +450,8 @@ def cap(entries: list[dict], max_size: int) -> tuple[list[dict], list[dict]]:
 
 def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_of: Callable, cfg, *,
             break_atr: float, extra: list[str] | tuple = (), trending: set[str] | None = None,
-            passing: set[str] | None = None, stretched: set[str] | frozenset = frozenset()) -> dict[str, Any]:
+            passing: set[str] | None = None, stretched: set[str] | frozenset = frozenset(),
+            exchanges: tuple[str, ...] = ()) -> dict[str, Any]:
     """The new state after the session: review, tonight's setups in (or renewing an entry),
     then the cap. `events` lists what changed (added / renewed / removed). A list from before
     the owner's setups (version 1) is replaced: its entries leave unless they show one now."""
@@ -458,7 +465,7 @@ def refresh(state: dict[str, Any], found: dict[str, dict], view: ScanView, bars_
         entries = []
     kept, gone = review(entries, view, bars_of, break_atr=break_atr, keep_sessions=cfg.keep_sessions,
                         extra=extra, qualify=lambda e: qualifies(e, cfg), trending=trending,
-                        passing=passing, stretched=stretched)
+                        passing=passing, stretched=stretched, exchanges=exchanges)
     mine = set(extra)
     events += gone
     by = {e["symbol"]: e for e in kept}

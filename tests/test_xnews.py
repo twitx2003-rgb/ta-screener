@@ -862,3 +862,40 @@ def test_a_bold_headline_over_the_news_line(tmp_path):
     assert sent[0].startswith("‏🔴 <b>מנכ&quot;ל זנטריקה מתפטר</b>\n‏סיפור 411 <a href=")
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert state["sent_recent"][-1]["topic"] == ""                         # not a valid key: no topic
+
+
+def test_the_reader_spaces_its_calls_and_tries_a_429_again(monkeypatch):
+    """2026-11-22..23: the second search of a pass, right after the first, failed (the service's
+    limit for a small balance), and the whole pass was lost."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    answers = [urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None), b'{"tweets": []}', b'{"tweets": []}']
+    opened = []
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def urlopen(request, timeout):
+        opened.append(request.full_url)
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return Response(answer)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    now, waits = [100.0], []
+
+    def sleep(seconds):
+        waits.append(round(seconds, 1))
+        now[0] += seconds
+
+    source = xnews.XSource(KEY, sleep=sleep, clock=lambda: now[0])
+    assert source._http("/twitter/tweet/advanced_search", {"query": "q"}) == {"tweets": []}
+    assert source._http("/twitter/tweet/advanced_search", {"query": "q2"}) == {"tweets": []}
+    assert len(opened) == 3 and waits == [6.0, 0.0, 5.5]      # the retry, then the spacing before the next

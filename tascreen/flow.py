@@ -165,12 +165,26 @@ def snapshot(stocks: pd.DataFrame, bars_of: Callable[[str], pd.DataFrame | None]
 
 def extra_passes(snap: dict[str, Any], bars: pd.DataFrame | None, cfg) -> bool:
     """A stock outside the followed ones (the owner's own lists): the same checks against the
-    night's ratings, without the group (its industry is not known here)."""
+    night's ratings, without the group (its industry is not known here); with the wide gate,
+    the uptrend template or the rating alone."""
     m = stock_metrics(bars, cfg)
     if m is None or not snap.get("cuts"):
         return False
-    return bool(m["template"] and m["steady"] and rating(m["score"], snap["cuts"]) >= cfg.rs_min
-                and m["ud"] >= cfg.ud_min)
+    rated = rating(m["score"], snap["cuts"]) >= cfg.rs_min
+    if getattr(cfg, "gate", "strict") == "wide" and (m["template"] or rated):
+        return True
+    return bool(m["template"] and m["steady"] and rated and m["ud"] >= cfg.ud_min)
+
+
+def wide(snap: dict[str, Any] | None) -> set[str] | None:
+    """The wide gate (flow.gate, owner 2026-11-24): the passing stocks, the popular ones, and
+    every stock in the uptrend template or rated at least rs_min; None without a map."""
+    if snap is None:
+        return None
+    stocks = snap.get("stocks") or {}
+    loose = {s for s, x in stocks.items()
+             if "template" not in (x.get("missing") or []) or "rs" not in (x.get("missing") or [])}
+    return set(snap.get("passing") or []) | set(snap.get("popular") or []) | loose
 
 
 # ------------------------------------------------------------------ storage

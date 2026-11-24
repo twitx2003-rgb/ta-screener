@@ -81,3 +81,18 @@ def test_every_line_is_right_aligned():
     bot = Telegram(TOKEN, 7, post=lambda method, params: calls.append(params) or {"ok": True})
     bot.send("NVDA עלתה")
     assert calls[0]["text"] == RLM + "NVDA עלתה"
+
+
+def test_a_message_over_telegrams_limit_goes_as_several():
+    """2026-11-20: the setups list's changes were "message is too long" and the nightly run died."""
+    from tascreen.notify import split_message
+
+    paragraphs = [f"<b>Zentrica {n}</b>\nline one of {n}\nline two of {n}" for n in range(400)]
+    text = "\n\n".join(paragraphs)
+    parts = split_message(text, limit=1000)
+    assert len(parts) > 1 and all(len(p) <= 1000 for p in parts)
+    assert "\n\n".join(parts) == text                       # nothing lost, cut between paragraphs
+    assert all(p.count("<b>") == p.count("</b>") for p in parts)
+    assert split_message("short") == ["short"]
+    long_line = "x" * 2500
+    assert [len(p) for p in split_message(long_line, limit=1000)] == [1000, 1000, 500]

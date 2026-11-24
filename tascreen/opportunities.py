@@ -101,7 +101,7 @@ def of(bars: pd.DataFrame | None, cfg) -> dict[str, Any] | None:
 
 
 def find(snap: dict[str, Any], bars_of: Callable[[str], pd.DataFrame | None], cfg, *,
-         break_atr: float) -> list[dict[str, Any]]:
+         break_atr: float, among: set[str] | None = None) -> list[dict[str, Any]]:
     """Every opportunity among tonight's passing stocks and the big ones in an uptrend
     (`popular`), the big ones first, then the highest rating (then the nearest exit). Each also
     carries the map's ticker, groups, rating and distance from the high, whether it is big and
@@ -110,7 +110,7 @@ def find(snap: dict[str, Any], bars_of: Callable[[str], pd.DataFrame | None], cf
     stocks = snap.get("stocks") or {}
     popular = set(snap.get("popular") or [])
     out = []
-    for symbol in sorted(set(snap.get("passing") or []) | popular):
+    for symbol in sorted(among if among is not None else set(snap.get("passing") or []) | popular):
         o = of(bars_of(symbol), cfg)
         if o is None:
             continue

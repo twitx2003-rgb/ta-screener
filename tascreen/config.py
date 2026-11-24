@@ -94,6 +94,10 @@ class UniverseSettings:
     # filters left") and the account has 50 calls a day; off, `--update` keeps the newest
     # saved universe whatever its age, and spends no call on it.
     refresh: bool = True
+    # The exchanges the bot picks stocks from for the owner (owner, 2026-11-24: "only Nasdaq"):
+    # the evening research, the opportunities, the setups list and the live watch; empty: all.
+    # The universe keeps every exchange for the market's breadth and the industries.
+    pick_exchanges: tuple[str, ...] = ()
 
     def __post_init__(self):
         # PyYAML (YAML 1.1) reads `1.0e9` without a sign as a *string*; sent as the
@@ -106,6 +110,7 @@ class UniverseSettings:
         object.__setattr__(self, "band_edges", tuple(float(e) for e in self.band_edges))
         object.__setattr__(self, "drop_exchanges", tuple(self.drop_exchanges))
         object.__setattr__(self, "drop_subtypes", tuple(self.drop_subtypes))
+        object.__setattr__(self, "pick_exchanges", tuple(str(e).strip().upper() for e in self.pick_exchanges))
         edges = self.band_edges
         if not edges or edges[0] != float(self.min_market_cap):
             raise ConfigError("universe.band_edges must start at universe.min_market_cap")
@@ -561,9 +566,16 @@ class FlowSettings:
     popular_min_cap: float = 5.0e10
     opp_per_industry: int = 2
     opp_repeat_sessions: int = 10        # one sent is not sent again for this many sessions
+    # Which stocks the filter lets through. "strict": the whole filter (and, for the
+    # opportunities and the list, the popular ones). "wide" (owner, 2026-11-24: "send more
+    # setups"; the strict filter left one candidate a night in a weak market): also a stock in
+    # the uptrend template, or rated at least rs_min, without the other checks.
+    gate: str = "strict"
 
     def __post_init__(self):
         object.__setattr__(self, "benchmark", str(self.benchmark).strip())
+        if self.gate not in ("strict", "wide"):
+            raise ConfigError('flow.gate must be "strict" or "wide"')
         for name in ("rs_min", "steady_r2", "ud_min", "near_high_pct", "above_low_pct", "group_top_share",
                      "opp_max_over_50_atr", "opp_max_over_20_atr", "opp_touch_atr", "opp_max_risk_pct",
                      "popular_min_cap"):
@@ -578,9 +590,9 @@ class FlowSettings:
             raise ConfigError("flow: 0 < opp_max_over_20_atr <= opp_max_over_50_atr <= 10, opp_touch_atr 0..2, "
                               "opp_max_risk_pct 0..50")
         if not (1 <= self.opp_touch_sessions <= 10 and 1 <= self.opp_rise_sessions <= 20
-                and 1 <= self.opp_per_night <= 10 and 1 <= self.opp_per_industry <= 10
+                and 1 <= self.opp_per_night <= 20 and 1 <= self.opp_per_industry <= 10
                 and 0 <= self.opp_repeat_sessions <= 60):
-            raise ConfigError("flow: opp_touch_sessions 1..10, opp_rise_sessions 1..20, opp_per_night 1..10, "
+            raise ConfigError("flow: opp_touch_sessions 1..10, opp_rise_sessions 1..20, opp_per_night 1..20, "
                               "opp_per_industry 1..10, opp_repeat_sessions 0..60")
         if not (1 <= self.rs_min <= 99 and 0 <= self.steady_r2 < 1 and 0 < self.ud_min <= 5):
             raise ConfigError("flow: rs_min 1..99, steady_r2 0..1, ud_min 0..5")

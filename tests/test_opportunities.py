@@ -259,7 +259,10 @@ def test_a_new_list_version_holds_the_whole_list_to_the_rules(tmp_path, monkeypa
     from tascreen.store import Store
     from tascreen.web import data as web_data
 
+    import dataclasses
+
     settings, store = run.load_settings(), Store(tmp_path)
+    settings = dataclasses.replace(settings, flow=dataclasses.replace(settings.flow, gate="strict"))
     if not settings.setups_list.id:
         import pytest
         pytest.skip("no list id in config.yaml")
@@ -319,3 +322,36 @@ def test_a_telegram_failure_is_tried_again(tmp_path, monkeypatch):
     assert "opportunities" not in alerts.read_sent(store, DAY)
     bot.fail = False
     assert run._opportunities(settings, store, DAY, client)["sent"] == 4
+
+
+def test_the_wide_gate_lets_in_an_uptrend_or_a_strong_rating():
+    """Owner, 2026-11-24: "send more setups"; the strict filter left one candidate a night."""
+    from tascreen import flow
+
+    snap = {"passing": ["NASDAQ:ALL"], "popular": ["NASDAQ:BIG"], "stocks": {
+        "NASDAQ:ALL": {"missing": []}, "NASDAQ:BIG": {"missing": ["rs"]},
+        "NASDAQ:UP": {"missing": ["steady", "ud"]}, "NASDAQ:RATED": {"missing": ["template", "group"]},
+        "NASDAQ:WEAK": {"missing": ["template", "rs"]}}}
+    assert flow.wide(snap) == {"NASDAQ:ALL", "NASDAQ:BIG", "NASDAQ:UP", "NASDAQ:RATED"}
+    assert flow.wide(None) is None
+
+
+def test_only_the_pick_exchanges_are_picked_and_others_leave_the_list(tmp_path):
+    """Owner, 2026-11-24: "only Nasdaq stocks"."""
+    import dataclasses
+
+    import run
+    from tascreen import setups_list
+    from tascreen.config import Settings, UniverseSettings
+
+    settings = dataclasses.replace(Settings(root=tmp_path), universe=UniverseSettings(pick_exchanges=("nasdaq",)))
+    ok = run._pickable(settings)
+    assert ok("NASDAQ:ZQX") and not ok("NYSE:ZQX") and not ok("AMEX:ZQX")
+    assert run._pickable(Settings(root=tmp_path))("NYSE:ZQX")            # empty: every exchange
+    view = SimpleNamespace(day=DAY, stocks=pd.DataFrame({"symbol": ["NASDAQ:ZQX", "NYSE:ZEN"]}))
+    entries = [{"symbol": s, "kind": "pick", "level": "none", "since": DAY.isoformat(), "text": "x"}
+               for s in ("NASDAQ:ZQX", "NYSE:ZEN")]
+    kept, events = setups_list.review(entries, view, lambda s: None, break_atr=1.0, keep_sessions=10,
+                                      qualify=lambda e: True, exchanges=("NASDAQ",))
+    assert [e["symbol"] for e in kept] == ["NASDAQ:ZQX"]
+    assert events == [{"symbol": "NYSE:ZEN", "kind": "pick", "what": "removed", "reason": "exchange"}]

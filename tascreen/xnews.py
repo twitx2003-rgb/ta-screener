@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -88,11 +89,20 @@ class Post:
     photo: str = ""              # the first attached photo's address, if any
 
 
+# twitterapi.io limits how often an account with a small balance may call (2026-11-22..23: the
+# second search of a pass, right after the first, failed in most passes, and the whole pass was
+# lost): calls start this far apart, and a 429 is tried again after RETRY_429_S
+CALL_SPACING_S = 5.5
+RETRY_429_S = (6.0, 12.0)
+
+
 class XSource:
-    def __init__(self, key: str, *, get: Callable[[str, dict], dict] | None = None):
+    def __init__(self, key: str, *, get: Callable[[str, dict], dict] | None = None,
+                 sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic):
         self.key = key.strip()
         self._get = get or self._http
         self.calls = 0
+        self._sleep, self._clock, self._last = sleep, clock, None
 
     def _redact(self, text: str) -> str:
         return str(text).replace(self.key, "<key>") if self.key else str(text)
@@ -100,13 +110,22 @@ class XSource:
     def _http(self, path: str, params: dict) -> dict:
         request = urllib.request.Request(f"{API}{path}?{urllib.parse.urlencode(params)}",
                                          headers={"X-API-Key": self.key})
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            raise ProviderError(self._redact(f"X reader {path}: HTTP {exc.code}")) from None
-        except (OSError, ValueError) as exc:
-            raise ProviderError(self._redact(f"X reader {path}: {type(exc).__name__}: {exc}")) from None
+        for wait in (*RETRY_429_S, None):
+            if self._last is not None:
+                self._sleep(max(0.0, self._last + CALL_SPACING_S - self._clock()))
+            self._last = self._clock()
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429 and wait is not None:
+                    log.info("X reader %s: HTTP 429, again in %.0f s", path, wait)
+                    self._sleep(wait)
+                    continue
+                raise ProviderError(self._redact(f"X reader {path}: HTTP {exc.code}")) from None
+            except (OSError, ValueError) as exc:
+                raise ProviderError(self._redact(f"X reader {path}: {type(exc).__name__}: {exc}")) from None
+        raise AssertionError("unreachable")
 
     def balance_usd(self) -> float:
         """The account's credits (paid and bonus) in USD."""
